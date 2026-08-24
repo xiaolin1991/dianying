@@ -1,0 +1,13 @@
+# 依赖与本地缓存(可用 npm install 还原)
+node_modules/
+.wrangler/
+
+# 构建产物(用 npm run build:pages 重新生成)
+dist/
+
+# 日志
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
