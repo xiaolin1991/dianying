@@ -1,0 +1,4 @@
+// 根构建脚本: 声明 Android 插件版本(GitHub Actions 使用系统 Gradle 8.x 构建)
+plugins {
+    id 'com.android.application' version '8.2.2' apply false
+}
