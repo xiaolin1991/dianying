@@ -42,9 +42,9 @@ public class MainActivity extends Activity {
         s.setLoadWithOverviewMode(true);
         s.setSupportZoom(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
-
         // 卡片是 target=_blank: 关闭多窗口后, 新窗口导航会落到当前 WebView, 不弹出外部浏览器
-        web.setSupportMultipleWindows(false);
+        s.setSupportMultipleWindows(false);
+
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
