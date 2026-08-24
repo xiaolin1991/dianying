@@ -42,8 +42,10 @@ gradle -p android assembleDebug -PstartUrl=https://你的域名/
 |---|---|
 | App 名称 | `android/app/src/main/AndroidManifest.xml` 的 `android:label` |
 | 版本号 | `android/app/build.gradle` 的 `versionName` / `versionCode` |
-| 应用图标 | 自备 PNG 放入 `app/src/main/res/mipmap-*` 并替换 `android:icon` |
+| 应用图标 | 覆盖 `app/src/main/res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ic_launcher.png`（尺寸 48/72/96/144/192，或只放一张 512px 到 xxxhdpi），PNG 格式 |
 | 正式签名包 | 在工作流中追加签名步骤（需 keystore），当前输出为 debug 签名可直接安装 |
+
+> 图标已内置一套蓝紫渐变播放键占位图（`res/mipmap-*`），想换自己的 logo 直接用同名 PNG 覆盖即可，无需改任何配置。
 
 ## 五、其他可选方案（未采用，供参考）
 
