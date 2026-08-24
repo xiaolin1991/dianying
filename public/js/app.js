@@ -835,48 +835,82 @@
     const progKey = `prog:${key}:${vod.vod_id}`;
     const allProg = store.get(progKey, {});
 
+    const isFav = store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id));
     v.innerHTML = `
-      <div class="container page-wrap">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <div class="play-stage">
+        <div class="video-wrap"><video id="videoEl" controls playsinline autoplay></video>
+          <div class="video-tip hidden" id="videoTip"></div>
+          <div class="gest-zones" id="gestZones"><div></div><div></div></div>
+          <div class="gest-hud" id="gestHud"></div>
+        </div>
+      </div>
+      <div class="container page-wrap play-below">
+        <div class="play-bar">
           <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
-          <h2 style="font-size:17px">${esc(vod.vod_name)} <span style="color:var(--acc);font-size:13px">${esc(groups[gi].eps[ei].name)}</span></h2>
-          <button class="btn ghost small play-fav ${store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id)) ? 'on' : ''}" id="playFav">${store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id)) ? '★ 已收藏' : '☆ 收藏'}</button>
+          <div class="pb-title">${esc(vod.vod_name)}<span id="curEpName">${esc(groups[gi].eps[ei].name)}</span></div>
+          <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
+          <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
         </div>
-        <div class="play-page-grid">
-          <div class="video-wrap"><video id="videoEl" controls playsinline autoplay></video>
-            <div class="video-tip hidden" id="videoTip"></div></div>
-          <aside>
-            <div class="side-card">
-              <h4>⚡ 快速换源</h4>
-              <div class="swap-stat" id="swapStat"><span class="spin"></span> 正在探测其他播放源…</div>
-              <div class="src-switch swap-grid" id="srcSwitch">
-                <span class="src-item cur">${srcIconHtml(src)} 当前 · ${esc(src.name)}</span>
-              </div>
-              <button class="swap-miss-toggle hidden" id="swapMissToggle" type="button"></button>
-              <div class="src-switch miss-list hidden" id="swapMiss"></div>
-            </div>
-            <div class="side-card" style="margin-top:14px">
-              <h4>选集<button class="chip" style="padding:4px 12px;font-size:12px" id="autoNext">自动连播: ${store.get('autoNext', true) ? '开' : '关'}</button></h4>
-              <div class="side-eps" id="sideEps"></div>
-            </div>
-          </aside>
+        <div class="side-card swap-card">
+          <h4>⚡ 快速换源</h4>
+          <div class="swap-stat" id="swapStat"><span class="spin"></span> 正在探测其他播放源…</div>
+          <div class="src-switch swap-flow" id="srcSwitch">
+            <span class="src-item cur">${srcIconHtml(src)} 当前 · ${esc(src.name)}</span>
+          </div>
+          <button class="swap-miss-toggle hidden" id="swapMissToggle" type="button"></button>
+          <div class="src-switch miss-list hidden" id="swapMiss"></div>
         </div>
-        <section class="row" id="relSec" style="margin-top:34px"></section>
+        <div class="side-card eps-card" style="margin-top:14px">
+          <h4>📺 选集 · 共 ${groups.reduce((n, g) => n + g.eps.length, 0)} 集<button class="chip" id="epsFold">收起 ▴</button></h4>
+          <div id="epsBody">
+            <div class="eps-nav" id="epsNavTop"></div>
+            <div class="eps-flow" id="sideEps"></div>
+            <div class="eps-nav" id="epsNavBot"></div>
+          </div>
+        </div>
+        <section class="row" id="relSec" style="margin-top:30px"></section>
       </div>`;
 
     const video = $('#videoEl');
     const tip = $('#videoTip');
 
+    // ---- 选集: 翻页(60集/页) + 折叠, 长剧不再无限拉长页面 ----
+    const EPP = 60;
+    let epsPg = Math.floor(ei / EPP);
+    function renderEpsNav() {
+      const pages = Math.ceil(groups[gi].eps.length / EPP);
+      const html = pages <= 1 ? '' : `
+        <button class="chip" data-d="-1" ${epsPg <= 0 ? 'disabled' : ''}>‹ 前 ${EPP} 集</button>
+        <span style="color:var(--dim);font-size:12px">第 ${epsPg + 1} / ${pages} 页</span>
+        <button class="chip" data-d="1" ${epsPg >= pages - 1 ? 'disabled' : ''}>后 ${EPP} 集 ›</button>`;
+      $('#epsNavTop').innerHTML = html;
+      $('#epsNavBot').innerHTML = html;
+      $$('#epsBody .eps-nav .chip').forEach((b) => b.addEventListener('click', () => {
+        if (b.disabled) return;
+        epsPg += Number(b.dataset.d);
+        renderSideEps();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }));
+    }
     function renderSideEps() {
-      $('#sideEps').innerHTML = groups[gi].eps.map((e, i) => {
-        const watchedArr = store.get('watched:' + key + ':' + vod.vod_id, []);
-        return `<button class="ep-btn ${i === ei ? 'current' : ''} ${watchedArr.includes(i) ? 'watched' : ''}"
+      const g = groups[gi];
+      const wa = store.get('watched:' + key + ':' + vod.vod_id, []);
+      const seg = g.eps.slice(epsPg * EPP, (epsPg + 1) * EPP);
+      $('#sideEps').innerHTML = seg.map((e, j) => {
+        const i = epsPg * EPP + j;
+        return `<button class="ep-btn ${i === ei ? 'current' : ''} ${wa.includes(i) ? 'watched' : ''}"
           data-i="${i}" title="${esc(e.name)}">${esc(e.name)}</button>`;
       }).join('');
       $$('#sideEps .ep-btn').forEach((b) => b.addEventListener('click', () => gotoEp(Number(b.dataset.i))));
+      renderEpsNav();
       const curBtn = $('#sideEps .ep-btn.current');
-      curBtn && curBtn.scrollIntoView({ block: 'nearest' });
+      curBtn && curBtn.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
+    $('#epsFold').addEventListener('click', (e) => {
+      const body = $('#epsBody');
+      body.classList.toggle('hidden');
+      e.target.textContent = body.classList.contains('hidden') ? '展开选集 ▾' : '收起 ▴';
+    });
 
     let saveTimer = null; // 进度保存定时器(换集/离开页面时必须停掉, 否则污染旧集进度)
     function stopSaveTimer() { if (saveTimer) { clearInterval(saveTimer); saveTimer = null; } }
@@ -928,10 +962,11 @@
     function gotoEp(nextEi, nextGi) {
       if (nextGi != null) gi = nextGi;
       ei = nextEi;
+      epsPg = Math.floor(ei / EPP);
       history.replaceState(null, '', `#/play/${key}/${encodeURIComponent(id)}?ep=${ei}&group=${gi}`);
       renderSideEps();
       playCurrent(true);
-      const t = $('#view h2 span');
+      const t = $('#curEpName');
       if (t) t.textContent = groups[gi].eps[ei].name;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -939,7 +974,8 @@
     $('#autoNext').addEventListener('click', (e) => {
       const nv = !store.get('autoNext', true);
       store.set('autoNext', nv);
-      e.target.textContent = '自动连播: ' + (nv ? '开' : '关');
+      e.target.textContent = '连播: ' + (nv ? '开' : '关');
+      e.target.classList.toggle('on', nv);
     });
 
     // 收藏(与详情页同一份本地收藏夹)
@@ -956,6 +992,40 @@
       btn.textContent = idx >= 0 ? '☆ 收藏' : '★ 已收藏';
       btn.classList.toggle('on', idx < 0);
     });
+
+    // ---- 触屏手势: 播放器左半屏上下滑=亮度, 右半屏=音量(底部20%留出原生控制条) ----
+    if (('ontouchstart' in window) || (navigator.maxTouchPoints > 0)) {
+      const zones = $('#gestZones'), hud = $('#gestHud');
+      let bright = Number(store.get('vidBright', 1)) || 1;
+      try { video.style.filter = `brightness(${bright})`; } catch (e) {}
+      let startY = 0, startVal = 0, mode = '', hudTimer = null;
+      const showHud = (t) => {
+        hud.textContent = t;
+        hud.classList.add('show');
+        clearTimeout(hudTimer);
+        hudTimer = setTimeout(() => hud.classList.remove('show'), 500);
+      };
+      zones.addEventListener('touchstart', (e) => {
+        const t = e.touches[0];
+        startY = t.clientY;
+        mode = t.clientX < window.innerWidth / 2 ? 'b' : 'v';
+        startVal = mode === 'b' ? bright : video.volume;
+      }, { passive: true });
+      zones.addEventListener('touchmove', (e) => {
+        const t = e.touches[0];
+        const delta = (startY - t.clientY) / 180; // 上滑增大
+        if (mode === 'b') {
+          bright = Math.min(2.2, Math.max(0.25, startVal + delta));
+          try { video.style.filter = `brightness(${bright})`; } catch (err) {}
+          store.set('vidBright', Number(bright.toFixed(2)));
+          showHud('☀️ 亮度 ' + Math.round(bright * 100) + '%');
+        } else {
+          const nv = Math.min(1, Math.max(0, startVal + delta));
+          try { video.volume = nv; video.muted = false; } catch (err) { /* iOS 系统限制 */ }
+          showHud(nv === 0 ? '🔇 静音' : '🔊 音量 ' + Math.round(nv * 100) + '%');
+        }
+      }, { passive: true });
+    }
 
     // ⚡ 快速换源: 并发探测全部其他源, 谁响应快谁先出现(带实测延迟), 本页切换并同步集数
     // 有本片的源显示为可点药丸; 无此片/超时的源默认折叠, 不占版面
