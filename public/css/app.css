@@ -282,16 +282,13 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
 .eps-nav button:disabled { opacity: .35; cursor: not-allowed; }
 #epsNavBot:not(:empty) { margin-top: 12px; }
 
-/* 触屏手势层: 左右分区上下滑动调亮度/音量 */
-.gest-zones { position: absolute; left: 0; right: 0; top: 0; bottom: 20%; display: flex; z-index: 5; }
-.gest-zones > div { flex: 1; }
+/* 触屏手势 HUD(手势直接绑在 video 上, 无遮挡层, 原生按钮全部可点) */
 .gest-hud {
   position: absolute; top: 12%; left: 50%; transform: translateX(-50%);
   background: rgba(0, 0, 0, .62); color: #fff; padding: 9px 16px; border-radius: 13px;
   font-size: 13.5px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 6;
 }
 .gest-hud.show { opacity: 1; }
-@media (hover: hover) and (pointer: fine) { .gest-zones { display: none; } }
 
 /* ---------------- 直播 ---------------- */
 .live-layout { display: grid; grid-template-columns: 250px 1fr; gap: 18px; margin-top: 14px; align-items: start; }

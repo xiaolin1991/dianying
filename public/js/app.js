@@ -840,7 +840,6 @@
       <div class="play-stage">
         <div class="video-wrap"><video id="videoEl" controls playsinline autoplay></video>
           <div class="video-tip hidden" id="videoTip"></div>
-          <div class="gest-zones" id="gestZones"><div></div><div></div></div>
           <div class="gest-hud" id="gestHud"></div>
         </div>
       </div>
@@ -858,6 +857,8 @@
           <div class="src-switch swap-flow" id="srcSwitch">
             <span class="src-item cur">${srcIconHtml(src)} 当前 · ${esc(src.name)}</span>
           </div>
+          <button class="swap-miss-toggle hidden" id="swapMissToggle" type="button"></button>
+          <div class="src-switch swap-flow hidden" id="swapMiss"></div>
         </div>
         <div class="side-card eps-card" style="margin-top:14px">
           <h4>📺 选集 · 共 ${groups.reduce((n, g) => n + g.eps.length, 0)} 集<button class="chip" id="epsFold">收起 ▴</button></h4>
@@ -1004,9 +1005,10 @@
       btn.classList.toggle('on', idx < 0);
     });
 
-    // ---- 触屏手势: 播放器左半屏上下滑=亮度, 右半屏=音量(底部20%留出原生控制条) ----
+    // ---- 触屏手势: 直接绑在视频画面上, 不加任何遮挡层(原生按钮全部可点) ----
+    // 播放器左半边上下滑=亮度, 右半边上下滑=音量; 轻点仍是原生播放/暂停
     if (('ontouchstart' in window) || (navigator.maxTouchPoints > 0)) {
-      const zones = $('#gestZones'), hud = $('#gestHud');
+      const hud = $('#gestHud');
       let bright = Number(store.get('vidBright', 1)) || 1;
       try { video.style.filter = `brightness(${bright})`; } catch (e) {}
       let startY = 0, startVal = 0, mode = '', hudTimer = null;
@@ -1016,13 +1018,14 @@
         clearTimeout(hudTimer);
         hudTimer = setTimeout(() => hud.classList.remove('show'), 500);
       };
-      zones.addEventListener('touchstart', (e) => {
+      video.addEventListener('touchstart', (e) => {
         const t = e.touches[0];
+        const r = video.getBoundingClientRect();
         startY = t.clientY;
-        mode = t.clientX < window.innerWidth / 2 ? 'b' : 'v';
+        mode = t.clientX < r.left + r.width / 2 ? 'b' : 'v';
         startVal = mode === 'b' ? bright : video.volume;
       }, { passive: true });
-      zones.addEventListener('touchmove', (e) => {
+      video.addEventListener('touchmove', (e) => {
         const t = e.touches[0];
         const delta = (startY - t.clientY) / 180; // 上滑增大
         if (mode === 'b') {
@@ -1039,12 +1042,26 @@
     }
 
     // ⚡ 快速换源: 并发探测全部其他源, 谁响应快谁先出现(带实测延迟), 本页切换并同步集数
-    // 有效源=可点亮色药丸; 无此片/超时=同区域灰显药丸排在后面
+    // 有效源=亮色可点药丸; 无此片/超时=默认收缩, 展开后与有效源完全同款排列(灰显)
     (function startSwapSearch() {
       const others = visibleSources().filter((s) => s.key !== key);
       const swapOk = $('#srcSwitch');
+      const swapMiss = $('#swapMiss');
+      const missToggle = $('#swapMissToggle');
       const statEl = $('#swapStat');
       let pending = others.length, okCount = 0, missCount = 0;
+      const updMissToggle = () => {
+        if (!missToggle) return;
+        const collapsed = swapMiss.classList.contains('hidden');
+        missToggle.textContent = `${collapsed ? '▶' : '▼'} 无此片/已失效的源 ${missCount} 个（点击${collapsed ? '展开' : '收起'}）`;
+        missToggle.classList.toggle('hidden', missCount === 0);
+      };
+      if (missToggle) {
+        missToggle.addEventListener('click', () => {
+          swapMiss.classList.toggle('hidden');
+          updMissToggle();
+        });
+      }
       const updStat = () => {
         if (!alive() || !statEl) return;
         statEl.innerHTML = pending > 0
@@ -1073,17 +1090,19 @@
                    ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span></a>`);
             } else {
               missCount++;
-              swapOk.insertAdjacentHTML('beforeend',
+              swapMiss.insertAdjacentHTML('beforeend',
                 `<span class="src-item miss" title="${esc(s.name)} · 响应${ms}ms但无本片">
                    ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span><small>无此片</small></span>`);
+              updMissToggle();
             }
           } catch (e) {
             if (!alive()) return;
             pending--;
             missCount++;
-            swapOk.insertAdjacentHTML('beforeend',
+            swapMiss.insertAdjacentHTML('beforeend',
               `<span class="src-item miss" title="${esc(s.name)} · 请求超时或源已失效">
                  ${srcIconHtml(s)}<span>${esc(s.name)}</span><small class="fail">超时/失效</small></span>`);
+            updMissToggle();
           }
           updStat();
         })();
