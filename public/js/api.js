@@ -61,5 +61,61 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ customSources, disabledSources }),
       }, 15000),
+
+    /* ---- 用户体系 ---- */
+    userRegister: (username, password) =>
+      jfetch('/api/user/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      }, 10000),
+    userLogin: (username, password) =>
+      jfetch('/api/user/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      }, 10000),
+    userLogout: () => jfetch('/api/user/logout', { method: 'POST' }, 8000),
+    userMe: () => jfetch('/api/user/me', {}, 8000),
+    userHistory: () => jfetch('/api/user/history', {}, 12000),
+    userClearHistory: (kind) =>
+      jfetch('/api/user/history/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: kind || 'all' }),
+      }, 10000),
+    userDeleteHistory: (ids) =>
+      jfetch('/api/user/history/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      }, 10000),
+    userLogSearch: (q) =>
+      jfetch('/api/user/log-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q }),
+      }, 8000).catch(() => {}),
+    userProgress: (payload) =>
+      jfetch('/api/user/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, 8000).catch(() => {}),
+
+    adminUsers: () => jfetch('/api/admin/users', {}, 15000),
+    adminUserLog: (u) => jfetch('/api/admin/user-log?u=' + encodeURIComponent(u), {}, 15000),
+    adminDeleteUser: (u) =>
+      jfetch('/api/admin/user-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ u }),
+      }, 10000),
+    adminDeleteUserLog: (u, ids, all) =>
+      jfetch('/api/admin/user-log-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ u, ids, all: Boolean(all) }),
+      }, 10000),
   };
 })();

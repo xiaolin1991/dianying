@@ -13,6 +13,20 @@
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const stripTags = (s) => String(s || '').replace(/<[^>]*>/g, '').trim();
 
+  function fmtDateTime(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function fmtWatchSec(sec) {
+    sec = Math.floor(sec || 0);
+    if (sec < 60) return sec + ' 秒';
+    const m = Math.floor(sec / 60);
+    if (m < 60) return m + ' 分钟';
+    return Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分';
+  }
+
   function toast(msg, type = '') {
     const el = document.createElement('div');
     el.className = 'toast ' + type;
@@ -39,9 +53,10 @@
 
   /* ------------------------------ 状态 ------------------------------ */
   const State = {
-    settings: null,   // 公开设置 { siteName, defaultTheme, announcement }
+    settings: null,   // 公开设置 { siteName, defaultTheme, announcement, requireLogin, allowRegister }
     config: null,     // { adultEnabled, total, count, sources }
     liveCache: null,
+    me: null,         // 当前登录用户名(null=未登录)
   };
 
   const FEATURED_ORDER = ['dbzy.tv', 'mtzy.me', 'iqiyizyapi.com', 'ruyizy.cn', 'tyyszy.com', 'bfzy.tv', 'wolongzyw.com'];
@@ -57,6 +72,21 @@
   function visibleSources() {
     if (!State.config) return [];
     return State.config.sources;
+  }
+
+  /* ---- 登录态 ---- */
+  function loginRequired() {
+    return Boolean(State.settings && State.settings.requireLogin !== false && !State.me);
+  }
+  function updateUserBox() {
+    const box = $('#userBox');
+    if (!box) return;
+    box.innerHTML = State.me
+      ? `<a class="user-chip" href="#/user" title="个人中心"><span class="u-ava">${esc(State.me.slice(0, 1).toUpperCase())}</span>${esc(State.me)}</a>`
+      : `<a class="btn ghost small" href="#/login">登录 / 注册</a>`;
+  }
+  function logSearch(q) {
+    if (State.me && q) API.userLogSearch(q);
   }
   function featuredSources(max = 6) {
     const vis = visibleSources();
@@ -182,6 +212,11 @@
     window.scrollTo({ top: 0 });
     const alive = makeAlive(); // 页面切换后旧异步任务自动失效
     const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
+    // 强制登录: 未登录只允许登录页与后台
+    if (loginRequired() && !['login', 'admin'].includes(parts[0])) {
+      markNav('');
+      return viewLogin(alive, true);
+    }
     try {
       if (parts[0] === 'browse') await viewBrowse(dec(parts[1]) || '电影', query, alive);
       else if (parts[0] === 'search') await viewSearch(query.q ? dec(query.q) : '', alive);
@@ -189,6 +224,8 @@
       else if (parts[0] === 'play') await viewPlay(parts[1], dec(parts[2]), query, alive);
       else if (parts[0] === 'sources') await viewSources(dec(parts[1]) || '', query, alive);
       else if (parts[0] === 'source') await viewSources(dec(parts[1]), query, alive); // 兼容旧链接
+      else if (parts[0] === 'login') await viewLogin(alive, false);
+      else if (parts[0] === 'user') await viewUser(alive);
       else if (parts[0] === 'live') await viewLive(query);
       else if (parts[0] === 'admin') await viewAdmin(query);
       else await viewHome(alive);
@@ -448,6 +485,7 @@
         <div class="empty hidden" id="srEmpty"><div class="big">🙈</div><p>没有找到相关内容</p></div>
       </div>`;
     if (!alive()) return;
+    logSearch(q); // 搜索记录上报(登录用户)
 
     const sources = visibleSources();
     const merged = new Map(); // normTitle|year -> item
@@ -728,11 +766,21 @@
         const onceSeek = () => { try { video.currentTime = allProg[gi + ':' + ei].t; } catch (e) {} };
         video.addEventListener('loadedmetadata', onceSeek, { once: true });
       }
-      // 进度保存
+      // 进度保存 + 观看心跳(每30秒向服务器累计观看时长)
+      let beat = 0;
       const saveTick = setInterval(() => {
         if (video.currentTime > 5) {
           allProg[gi + ':' + ei] = { t: Math.floor(video.currentTime), d: Math.floor(video.duration || 0) };
           store.set(progKey, allProg);
+          beat++;
+          if (beat % 6 === 0 && State.me && alive()) {
+            API.userProgress({
+              srcKey: key, vidId: String(vod.vod_id), title: vod.vod_name,
+              srcName: src.name, pic: vod.vod_pic,
+              ep: groups[gi].eps[ei] ? groups[gi].eps[ei].name : '',
+              t: Math.floor(video.currentTime), deltaSec: 30,
+            });
+          }
         }
       }, 5000);
       window.addEventListener('hashchange', () => clearInterval(saveTick), { once: true });
@@ -797,7 +845,7 @@
     playCurrent(true);
   }
 
-  /* ---- 播放页相关推荐: 多关键词跨源搜索, 边搜边显示, 不足28部用同类补足 ---- */
+  /* ---- 播放页相关推荐: 优先当前播放源, 多关键词搜索, 边搜边显示, 不足28部逐级补足 ---- */
   const REL_COUNT = 28;
   function buildRelKeywords(vod) {
     const raw = String(vod.vod_name || '').trim();
@@ -813,7 +861,7 @@
     sec.innerHTML = `
       <div class="row-head"><div class="row-title">相关推荐</div>
         <div class="rel-status" style="color:var(--dim);font-size:12.5px">⏳ 正在寻找相关影片…</div></div>
-      <div class="grid" id="relGrid">${skeletons(7)}</div>`;
+      <div class="grid rel-grid" id="relGrid">${skeletons(14)}</div>`;
 
     const setStatus = (text) => {
       if (alive()) { const el = $('.rel-status', sec); el && (el.textContent = text); }
@@ -821,13 +869,12 @@
     const gridEl = () => document.getElementById('relGrid');
 
     const kws = buildRelKeywords(vod);
-    const sources = visibleSources().filter((s) => s.key !== curKey);
-    // 打乱源顺序避免每次都同一批源先返回
-    for (let i = sources.length - 1; i > 0; i--) {
+    const curSrc = State.config.sources.find((s) => s.key === curKey) || null;
+    const others = visibleSources().filter((s) => s.key !== curKey);
+    for (let i = others.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [sources[i], sources[j]] = [sources[j], sources[i]];
+      [others[i], others[j]] = [others[j], others[i]];
     }
-    const batch = sources.slice(0, 10);
 
     const seenR = new Set([String(vod.vod_name || '').replace(/\s/g, '')]);
     let relItems = [];
@@ -858,60 +905,230 @@
     };
 
     try {
-      let doneCount = 0;
-      for (const kw of kws.slice(0, 2)) {
-        if (relItems.length >= REL_COUNT || !alive()) break;
-        let idx = 0;
+      /* 阶段A: 当前播放源 · 多关键词并行搜索 */
+      if (curSrc) {
+        let doneKw = 0;
+        for (const kw of kws.slice(0, 3)) {
+          if (relItems.length >= REL_COUNT || !alive()) break;
+          doneKw++;
+          setStatus(`⏳ 正在「${cleanSrcName(curSrc)}」中搜索「${kw}」…`);
+          try { absorb(curSrc, await API.search(curSrc, kw)); } catch (e) { /* ignore */ }
+          setStatus(`⏳ 当前源已找到 ${relItems.length} 部（关键词 ${doneKw}/${Math.min(kws.length, 3)}）`);
+        }
+
+        /* 阶段B: 当前源同类影片补足(列表前3页按类型过滤) */
+        if (relItems.length < REL_COUNT && alive()) {
+          const bucket = Object.keys(CAT_REGEX).find((c) => CAT_REGEX[c].test(String(vod.type_name || '')));
+          const re = bucket ? CAT_REGEX[bucket] : null;
+          for (let pg = 1; pg <= 3 && relItems.length < REL_COUNT; pg++) {
+            setStatus(`⏳ 当前源同类补充中… 已找到 ${relItems.length} 部`);
+            try { absorb(curSrc, await API.list(curSrc, pg)); } catch (e) { break; }
+            // absorb 不区分类别, 手动剔除非同类
+            relItems = relItems.filter((it) => !re || re.test(String(it.typeName || '')));
+            scheduleRender();
+          }
+        }
+      }
+
+      /* 阶段C: 其他源关键词兜底(保证推荐位不空) */
+      if (relItems.length < REL_COUNT && alive()) {
+        const kw = kws[0] || String(vod.vod_name || '');
+        const batch = others.slice(0, 8);
+        let doneCount = 0;
+        const idxBox = { i: 0 };
         const worker = async () => {
-          while (idx < batch.length) {
+          while (idxBox.i < batch.length) {
             if (!alive() || relItems.length >= REL_COUNT) return;
-            const i = idx++;
-            try { absorb(batch[i], await API.search(batch[i], kw)); } catch (e) { /* 该源失败 */ }
+            const s = batch[idxBox.i++];
+            try { absorb(s, await API.search(s, kw)); } catch (e) { /* 该源失败 */ }
             doneCount++;
-            setStatus(`⏳ 关键词「${kw}」· 已检索 ${doneCount}/${batch.length} 源 · 找到 ${relItems.length} 部`);
+            setStatus(`⏳ 其他源补充 ${doneCount}/${batch.length} · 共 ${relItems.length} 部`);
           }
         };
         await Promise.allSettled(Array.from({ length: Math.min(6, batch.length) }, worker));
       }
 
-      // 仍不足时用同类型影片补足(取前几个源的列表页)
-      if (relItems.length < REL_COUNT && alive()) {
-        setStatus(`⏳ 关键词结果 ${relItems.length} 部 · 正在补充同类影片…`);
-        const padSources = batch.slice(0, 3);
-        const curBucket = Object.keys(CAT_REGEX).find((c) => CAT_REGEX[c].test(String(vod.type_name || '')));
-        await Promise.allSettled(padSources.map(async (s) => {
-          try {
-            const r = await API.list(s, 1);
-            for (const v2 of (r.list || [])) {
-              if (relItems.length >= REL_COUNT) break;
-              const tn = String(v2.type_name || '');
-              if (curBucket && !CAT_REGEX[curBucket].test(tn)) continue;
-              const t = String(v2.vod_name || '').trim();
-              if (!t || !v2.vod_pic) continue;
-              const kk = t.replace(/\s/g, '') + '|' + (v2.vod_year || '');
-              if (seenR.has(kk)) continue;
-              seenR.add(kk);
-              relItems.push({
-                sourceKey: s.key, sourceName: s.name, id: v2.vod_id, title: t,
-                pic: v2.vod_pic, remarks: v2.vod_remarks, year: v2.vod_year, typeName: tn,
-              });
-            }
-          } catch (e) { /* ignore */ }
-        }));
-      }
-
       if (!alive()) return;
       if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
       relItems = relItems.slice(0, REL_COUNT);
-      if (!relItems.length) {
-        sec.innerHTML = '';
-        return;
-      }
+      if (!relItems.length) { sec.innerHTML = ''; return; }
       sec.innerHTML = `
         <div class="row-head"><div class="row-title">相关推荐</div>
           <div style="color:var(--dim);font-size:12.5px">${relItems.length} 部相关影片</div></div>
-        <div class="grid">${relItems.map(cardHtml).join('')}</div>`;
+        <div class="grid rel-grid">${relItems.map(cardHtml).join('')}</div>`;
     } catch (e) { /* 相关推荐失败不影响播放 */ }
+  }
+
+  /* ============================================================
+     视图：登录 / 注册
+     ============================================================ */
+  async function viewLogin(alive, forced) {
+    const v = $('#view');
+    const allowReg = !State.settings || State.settings.allowRegister !== false;
+    let mode = 'login';
+    const render = () => {
+      v.innerHTML = `
+        <div class="container auth-wrap">
+          <div class="login-box admin-card">
+            <div class="login-logo">
+              <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="none" stroke="var(--acc)" stroke-width="3"/><path d="M19 15.5v17l14-8.5z" fill="var(--acc)"/></svg>
+            </div>
+            <h3 style="text-align:center;margin-bottom:6px">${forced ? '登录后继续观看' : '欢迎回来'}</h3>
+            ${forced ? '<p class="hint" style="text-align:center;margin-bottom:10px">本站已开启登录观看，请先登录或注册账号</p>' : ''}
+            <div class="chips" style="justify-content:center;margin-bottom:14px">
+              <button class="chip ${mode === 'login' ? 'on' : ''}" data-m="login">登 录</button>
+              ${allowReg ? `<button class="chip ${mode === 'reg' ? 'on' : ''}" data-m="reg">注 册</button>` : ''}
+            </div>
+            <input class="field-input" id="authUser" placeholder="用户名（2-20位中文/字母/数字）" autocomplete="username">
+            <input class="field-input" id="authPwd" type="password" placeholder="密码（至少6位）" style="margin-top:10px" autocomplete="current-password">
+            ${mode === 'reg' ? '<input class="field-input" id="authPwd2" type="password" placeholder="确认密码" style="margin-top:10px">' : ''}
+            <button class="btn primary" id="authBtn" style="width:100%;justify-content:center;margin-top:16px">${mode === 'login' ? '登 录' : '注册并登录'}</button>
+          </div>
+        </div>`;
+      $$('.chips .chip', v).forEach((c) => c.addEventListener('click', () => { mode = c.dataset.m; render(); }));
+      $('#authBtn').addEventListener('click', doAuth);
+      $('#authPwd').addEventListener('keydown', (e) => e.key === 'Enter' && doAuth());
+    };
+    async function doAuth() {
+      const username = $('#authUser').value.trim();
+      const pwd = $('#authPwd').value;
+      if (!USERNAME_OK(username)) return toast('用户名需 2-20 位中文/字母/数字/下划线', 'err');
+      if (pwd.length < 6) return toast('密码至少 6 位', 'err');
+      try {
+        if (mode === 'login') await API.userLogin(username, pwd);
+        else {
+          if (pwd !== $('#authPwd2').value) return toast('两次输入的密码不一致', 'err');
+          await API.userRegister(username, pwd);
+        }
+        State.me = username;
+        updateUserBox();
+        toast((mode === 'login' ? '欢迎回来，' : '注册成功，') + username, 'ok');
+        location.hash = '#/home';
+      } catch (e) {
+        toast(e.message || '操作失败', 'err');
+      }
+    }
+    render();
+    if (!alive()) return;
+  }
+  function USERNAME_OK(u) { return /^[\w\u4e00-\u9fa5]{2,20}$/.test(u); }
+
+  /* ============================================================
+     视图：个人中心(观看记录 / 我的收藏)
+     ============================================================ */
+  async function viewUser(alive) {
+    const v = $('#view');
+    if (!State.me) { location.hash = '#/login'; return; }
+
+    let data = null;
+    try { data = await API.userHistory(); } catch (e) { /* 未登录/KV异常 */ }
+    if (!alive()) return;
+
+    const favs = store.get('favs', []);
+    const watchItems = data ? data.items.filter((it) => it.kind === 'watch') : [];
+    const searchItems = data ? data.items.filter((it) => it.kind === 'search') : [];
+    let tab = 'watch';
+
+    v.innerHTML = `
+      <div class="container page-wrap">
+        <div class="page-head">
+          <div class="page-title">👤 ${esc(State.me)}</div>
+          <button class="btn ghost small" id="uLogout">退出登录</button>
+        </div>
+        <div class="user-stats">
+          <span>⏱ 累计观看 <b>${fmtWatchSec(data ? data.watchSec : 0)}</b></span>
+          <span>🎬 观看记录 <b>${watchItems.length}</b> 条</span>
+          <span>🔍 搜索记录 <b>${searchItems.length}</b> 条</span>
+          <span>★ 收藏 <b>${favs.length}</b> 部</span>
+        </div>
+        <p class="hint" style="color:var(--dim);font-size:12px;margin:-8px 0 14px">删除记录仅对自己隐藏，管理员仍可在后台查看；彻底删除请联系管理员。</p>
+        <div class="chips" id="uTabs">
+          <button class="chip on" data-t="watch">🎬 观看记录</button>
+          <button class="chip" data-t="fav">★ 我的收藏</button>
+          <button class="chip" data-t="search">🔍 搜索记录</button>
+        </div>
+        <div id="uBody"></div>
+      </div>`;
+
+    const body = $('#uBody');
+    function renderBody() {
+      $$('#uTabs .chip').forEach((c) => c.classList.toggle('on', c.dataset.t === tab));
+      if (tab === 'fav') {
+        body.innerHTML = favs.length
+          ? `<div class="grid">${favs.map((f, i) => `
+              <div class="hist-card">
+                ${cardHtml({ sourceKey: f.key, sourceName: '', id: f.id, title: f.title, pic: f.pic, remarks: f.remarks || '' })}
+                <button class="hist-del" data-fi="${i}" title="取消收藏">×</button>
+              </div>`).join('')}</div>`
+          : '<div class="empty"><div class="big">☆</div>还没有收藏，去首页逛逛吧</div>';
+        $$('#uBody .hist-del').forEach((b) => b.addEventListener('click', () => {
+          favs.splice(Number(b.dataset.fi), 1);
+          store.set('favs', favs);
+          renderBody();
+          toast('已取消收藏');
+        }));
+      } else if (tab === 'watch') {
+        body.innerHTML = watchItems.length
+          ? `<div class="u-clear-row"><span></span><button class="btn ghost small" id="clearWatch">🗑 清空我的观看记录</button></div>
+             <div class="grid">${watchItems.map((it) => `
+              <div class="hist-card">
+                ${cardHtml({ sourceKey: it.srcKey, sourceName: it.srcName, id: it.vidId, title: it.title, pic: it.pic, remarks: it.ep ? '看到 ' + it.ep : '', year: '' , typeName: ''})}
+                <button class="hist-del" data-id="${esc(it.id)}" title="删除该条">×</button>
+              </div>`).join('')}</div>`
+          : '<div class="empty"><div class="big">🎬</div>暂无观看记录</div>';
+        bindHistDel();
+        $('#clearWatch') && $('#clearWatch').addEventListener('click', async () => {
+          if (!confirm('确定清空自己的观看记录？（管理员后台仍保留）')) return;
+          await API.userClearHistory('watch');
+          watchItems.length = 0;
+          renderBody();
+          toast('已清空观看记录');
+        });
+      } else {
+        body.innerHTML = searchItems.length
+          ? `<div class="u-clear-row"><span></span><button class="btn ghost small" id="clearSearch">🗑 清空我的搜索记录</button></div>
+             <div class="search-hist-list">${searchItems.map((it) => `
+              <div class="search-hist-row">
+                <span class="sh-q">🔍 ${esc(it.title)}</span>
+                <time>${fmtDateTime(it.ts)}</time>
+                <a class="btn ghost small" href="#/search?q=${encodeURIComponent(it.title)}">再搜一次</a>
+                <button class="hist-del row-del" data-id="${esc(it.id)}">×</button>
+              </div>`).join('')}</div>`
+          : '<div class="empty"><div class="big">🔍</div>暂无搜索记录</div>';
+        bindHistDel();
+        $('#clearSearch') && $('#clearSearch').addEventListener('click', async () => {
+          if (!confirm('确定清空自己的搜索记录？（管理员后台仍保留）')) return;
+          await API.userClearHistory('search');
+          searchItems.splice(0);
+          renderBody();
+          toast('已清空搜索记录');
+        });
+      }
+    }
+    function bindHistDel() {
+      $$('#uBody .hist-del[data-id]').forEach((b) => b.addEventListener('click', async () => {
+        await API.userDeleteHistory([b.dataset.id]);
+        const all = watchItems.concat(searchItems);
+        const idx = all.findIndex((x) => x.id === b.dataset.id);
+        if (idx >= 0) all[idx].delUser = true;
+        const wI = watchItems.findIndex((x) => x.id === b.dataset.id);
+        if (wI >= 0) watchItems.splice(wI, 1);
+        else { const sI = searchItems.findIndex((x) => x.id === b.dataset.id); if (sI >= 0) searchItems.splice(sI, 1); }
+        renderBody();
+        toast('已删除');
+      }));
+    }
+
+    $$('#uTabs .chip').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.t; renderBody(); }));
+    $('#uLogout').addEventListener('click', async () => {
+      try { await API.userLogout(); } catch (e) {}
+      State.me = null;
+      updateUserBox();
+      toast('已退出登录');
+      location.hash = '#/home';
+    });
+
+    renderBody();
   }
 
   /* ============================================================
@@ -1338,6 +1555,25 @@
           </div>
 
           <div class="admin-card">
+            <h3>👥 用户管理</h3>
+            <p class="hint">查看每个用户的注册时间、最近登录 IP、搜索与观看记录（<b>包含用户已删除的记录</b>，灰色标记）。用户只能对自己隐藏记录；彻底删除只有这里可以。</p>
+            <div class="admin-row">
+              <div class="admin-label">强制登录观看<small>开启后未登录用户无法获取影片数据（接口层拦截）</small></div>
+              <label class="switch"><input type="checkbox" id="requireLoginSwitch" ${s.requireLogin !== false ? 'checked' : ''}><span class="track"></span></label>
+            </div>
+            <div class="admin-row">
+              <div class="admin-label">开放前台注册<small>关闭后新用户无法自行注册</small></div>
+              <label class="switch"><input type="checkbox" id="allowRegisterSwitch" ${s.allowRegister !== false ? 'checked' : ''}><span class="track"></span></label>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <button class="btn primary small" id="loadUsersBtn">🔄 刷新用户列表</button>
+              <span style="color:var(--dim);font-size:12px" id="usersStat"></span>
+            </div>
+            <div id="usersTable" style="margin-top:10px;overflow-x:auto"></div>
+            <div id="userLogDetail" style="margin-top:14px"></div>
+          </div>
+
+          <div class="admin-card">
             <h3>🔑 修改管理密码</h3>
             <p class="hint">修改后立即生效，旧会话全部失效，需用新密码重新登录。无需进 Cloudflare 改环境变量。</p>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">
@@ -1515,6 +1751,104 @@
         } catch (err) { toast('修改失败：' + err.message, 'err'); }
       });
 
+      /* ---- 用户管理 ---- */
+      $('#requireLoginSwitch').addEventListener('change', async (e) => {
+        const on = e.target.checked;
+        try {
+          await API.adminSaveSettings({ requireLogin: on });
+          State.settings = { ...State.settings, requireLogin: on };
+          toast(on ? '已开启：未登录用户无法观看' : '已关闭：游客可直接观看', on ? 'ok' : 'err');
+        } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
+      });
+      $('#allowRegisterSwitch').addEventListener('change', async (e) => {
+        const on = e.target.checked;
+        try {
+          await API.adminSaveSettings({ allowRegister: on });
+          State.settings = { ...State.settings, allowRegister: on };
+          toast(on ? '已开放注册' : '已关闭注册', 'ok');
+        } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
+      });
+
+      async function showUserLog(u) {
+        const box = $('#userLogDetail');
+        box.innerHTML = '<p class="hint">加载中…</p>';
+        try {
+          const d = await API.adminUserLog(u);
+          const rows = d.items.map((it) => `
+            <div class="ulog-row ${it.delUser ? 'del' : ''}">
+              <span class="ulog-kind">${it.kind === 'search' ? '🔍' : '▶️'}</span>
+              <span class="ulog-title" title="${esc(it.title)}">${esc(it.title)}${it.kind === 'watch' && it.ep ? ' <small>· ' + esc(it.ep) + '</small>' : ''}</span>
+              ${it.kind === 'watch' ? `<span class="ulog-meta">${fmtWatchSec(it.t)}</span>` : ''}
+              <span class="ulog-meta">${fmtDateTime(it.ts)}</span>
+              <span class="ulog-meta">${esc(it.ip || '—')}</span>
+              ${it.delUser ? '<span class="ulog-tag">用户已删</span>' : ''}
+              <button class="hist-del row-del" data-id="${esc(it.id)}" title="彻底删除">×</button>
+            </div>`).join('');
+          box.innerHTML = `
+            <div class="userlog-box">
+              <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                <h4 style="font-size:14.5px">📋 「${esc(d.username)}」的完整记录（${d.items.length} 条 · 累计观看 ${fmtWatchSec(d.watchSec)}）</h4>
+                <div style="display:flex;gap:8px">
+                  <button class="btn danger small" id="hardClearAll">🗑 彻底清空全部记录</button>
+                  <button class="btn ghost small" id="closeUserLog">收起</button>
+                </div>
+              </div>
+              <p class="hint">注册 ${fmtDateTime(d.createdAt)} · 最近登录 ${fmtDateTime(d.lastLoginAt)} · IP ${esc(d.lastLoginIp || '—')} · 灰色行 = 用户已自行删除</p>
+              <div style="margin-top:8px">${rows || '<p class="hint">暂无记录</p>'}</div>
+            </div>`;
+          $('#closeUserLog').addEventListener('click', () => { box.innerHTML = ''; });
+          $('#hardClearAll').addEventListener('click', async () => {
+            if (!confirm(`彻底删除「${u}」的全部记录？不可恢复！`)) return;
+            await API.adminDeleteUserLog(u, null, true);
+            toast('已彻底清空', 'ok');
+            showUserLog(u);
+          });
+          $$('#userLogDetail .row-del').forEach((b) => b.addEventListener('click', async () => {
+            if (!confirm('彻底删除该条记录？')) return;
+            await API.adminDeleteUserLog(u, [b.dataset.id], false);
+            toast('已删除', 'ok');
+            showUserLog(u);
+          }));
+        } catch (e) { box.innerHTML = `<p class="hint">加载失败：${esc(e.message)}</p>`; }
+      }
+
+      async function loadUsers() {
+        const table = $('#usersTable'), stat = $('#usersStat');
+        try {
+          const r = await API.adminUsers();
+          stat.textContent = `共 ${r.users.length} 个注册用户`;
+          table.innerHTML = r.users.length ? `
+            <table class="adm-table">
+              <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>累计观看</th><th>有效/总记录</th><th></th></tr></thead>
+              <tbody>${r.users.map((u) => `
+                <tr>
+                  <td>${esc(u.username)}</td>
+                  <td>${fmtDateTime(u.createdAt)}</td>
+                  <td>${fmtDateTime(u.lastLoginAt)}</td>
+                  <td>${esc(u.lastLoginIp || '—')}</td>
+                  <td>${fmtWatchSec(u.watchSec)}</td>
+                  <td>${u.activeItems}/${u.totalItems}</td>
+                  <td style="white-space:nowrap;display:flex;gap:6px">
+                    <button class="btn ghost small u-log" data-u="${esc(u.username)}">记录</button>
+                    <button class="btn danger small u-del" data-u="${esc(u.username)}">删户</button>
+                  </td>
+                </tr>`).join('')}</tbody>
+            </table>` : '<p class="hint">暂无注册用户（开放注册后，前台 #/login 可注册）</p>';
+          $$('#usersTable .u-log').forEach((b) => b.addEventListener('click', () => showUserLog(b.dataset.u)));
+          $$('#usersTable .u-del').forEach((b) => b.addEventListener('click', async () => {
+            if (!confirm(`确定删除用户「${b.dataset.u}」及其全部数据？不可恢复！`)) return;
+            await API.adminDeleteUser(b.dataset.u);
+            toast('用户已删除', 'ok');
+            loadUsers();
+          }));
+        } catch (e) {
+          stat.textContent = '';
+          table.innerHTML = `<p class="hint">用户列表加载失败：${esc(e.message)}（本地需绑定 KV 才能使用用户系统）</p>`;
+        }
+      }
+      $('#loadUsersBtn').addEventListener('click', loadUsers);
+      loadUsers();
+
       /* ---- 采集源配置 ---- */
       $('#saveCfgBtn').addEventListener('click', async () => {
         const val = $('#cfgUrlInput').value.trim();
@@ -1600,6 +1934,14 @@
         <p style="margin-top:14px"><button class="btn primary" onclick="location.reload()">重试</button></p></div>`;
       return;
     }
+
+    // 登录态(用户优先; 管理员会话也可浏览前台)
+    try { const m = await API.userMe(); State.me = m.me ? m.me.username : null; }
+    catch (e) { State.me = null; }
+    if (!State.me) {
+      try { await API.adminSession(); State.me = '管理员'; } catch (e2) { /* 未登录管理员 */ }
+    }
+    updateUserBox();
 
     // 应用服务端默认主题（用户本地无偏好时）
     if (!store.get('theme', null) && State.settings.defaultTheme) applyTheme(State.settings.defaultTheme);

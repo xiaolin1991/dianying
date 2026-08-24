@@ -44,6 +44,8 @@ const DEFAULT_SETTINGS = {
   salt: '',
   configUrl: '',        // 后台自定义采集源配置地址(http), 空则用 CONFIG_URL/默认 LunaTV-config
   configJson: '',       // 后台直接粘贴的 JSON 配置内容(优先于 configUrl)
+  requireLogin: true,   // 强制登录观看: 未注册/未登录用户不能观看
+  allowRegister: true,  // 开放前台注册
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -130,6 +132,8 @@ async function saveSettings(env, patch) {
   }
   if (typeof patch.passwordHash === 'string' && /^[0-9a-f]{64}$/.test(patch.passwordHash)) next.passwordHash = patch.passwordHash;
   if (typeof patch.salt === 'string' && /^[0-9a-f]{32}$/.test(patch.salt)) next.salt = patch.salt;
+  if (typeof patch.requireLogin === 'boolean') next.requireLogin = patch.requireLogin;
+  if (typeof patch.allowRegister === 'boolean') next.allowRegister = patch.allowRegister;
   if (typeof patch.configUrl === 'string') {
     const cu = patch.configUrl.trim();
     if (!cu) { next.configUrl = ''; next.configJson = ''; }
@@ -272,6 +276,107 @@ function rateLimited(ip) {
   arr.push(now); MEM.loginHits.set(ip, arr); return false;
 }
 
+/* ========================= 用户体系(KV) =========================
+   user:<name>      -> { u, hash, salt, createdAt, lastLoginAt, lastLoginIp }
+   users:index      -> [username,...]
+   uhist:<name>     -> { watchSec, items:[{id,kind,title,srcKey,srcName,vidId,pic,ep,t,ts,ip,delUser}] }
+   用户删除 = delUser 标记(前台不可见, 管理端可见可硬删)
+================================================================== */
+const USER_COOKIE = 'ntv_usr';
+const USER_SESSION_TTL = 60 * 60 * 24 * 7; // 7 天
+
+const USERNAME_RE = /^[\w\u4e00-\u9fa5]{2,20}$/;
+
+async function userSecret(env) {
+  return (await adminSecret(env)) + ':user';
+}
+async function makeUserToken(env, username) {
+  const exp = Math.floor(Date.now() / 1000) + USER_SESSION_TTL;
+  const payload = exp + '|' + Buffer_safeEncode(username);
+  const sig = await hmacHex(await userSecret(env), payload);
+  return `${payload}.${sig}`;
+}
+function Buffer_safeEncode(s) { return encodeURIComponent(s); }
+function Buffer_safeDecode(s) { try { return decodeURIComponent(s); } catch (e) { return ''; } }
+async function verifyUserToken(env, token) {
+  if (!token || !token.includes('.')) return false;
+  const dot = token.lastIndexOf('.');
+  const payload = token.slice(0, dot), sig = token.slice(dot + 1);
+  const bar = payload.indexOf('|');
+  if (bar < 0) return false;
+  const exp = payload.slice(0, bar);
+  if (!/^\d+$/.test(exp) || Number(exp) < Math.floor(Date.now() / 1000)) return false;
+  const expect = await hmacHex(await userSecret(env), payload);
+  return safeEqual(sig, expect) ? Buffer_safeDecode(payload.slice(bar + 1)) : null;
+}
+function readSession(req, cookieName) {
+  const authz = req.headers.get('Authorization') || '';
+  if (authz.startsWith('Bearer ')) return authz.slice(7).trim();
+  const cookie = req.headers.get('Cookie') || '';
+  const m = cookie.match(new RegExp('(?:^|;\\s*)' + cookieName + '=([^;]+)'));
+  return m ? decodeURIComponent(m[1]) : '';
+}
+/** 当前登录用户名(未登录 null) */
+async function currentUser(req, env, url) {
+  return verifyUserToken(env, readSession(req, USER_COOKIE));
+}
+/** 任意有效会话(管理员或用户) */
+async function anyValidSession(req, env, url) {
+  if (await verifyToken(env, readSession(req, COOKIE_NAME))) return true;
+  return Boolean(await currentUser(req, env, url));
+}
+function clientIp(req) {
+  return req.headers.get('CF-Connecting-IP') || req.headers.get('X-Forwarded-For') || 'local';
+}
+
+async function getUserRecord(env, username) {
+  if (!kv(env)) return null;
+  try {
+    const raw = await env.CONFIG_KV.get('user:' + username);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+async function putUserRecord(env, rec) {
+  if (!kv(env)) return;
+  await env.CONFIG_KV.put('user:' + rec.u, JSON.stringify(rec));
+  const indexRaw = (await env.CONFIG_KV.get('users:index')) || '[]';
+  let list;
+  try { list = JSON.parse(indexRaw); } catch (e) { list = []; }
+  if (!Array.isArray(list)) list = [];
+  if (!list.includes(rec.u)) { list.push(rec.u); await env.CONFIG_KV.put('users:index', JSON.stringify(list.slice(-500))); }
+}
+async function loadUhist(env, username) {
+  if (!kv(env)) return { watchSec: 0, items: [] };
+  try {
+    const raw = await env.CONFIG_KV.get('uhist:' + username);
+    if (raw) { const p = JSON.parse(raw); return { watchSec: p.watchSec || 0, items: Array.isArray(p.items) ? p.items : [] }; }
+  } catch (e) { /* ignore */ }
+  return { watchSec: 0, items: [] };
+}
+async function saveUhist(env, username, hist) {
+  if (!kv(env)) return;
+  hist.items = hist.items.slice(0, 800);
+  await env.CONFIG_KV.put('uhist:' + username, JSON.stringify(hist));
+}
+let entrySeq = 0;
+function newEntryId() { return Date.now().toString(36) + '-' + (++entrySeq % 1296).toString(36); }
+/** 用户侧历史条目脱敏输出 */
+function publicHistItem(it) {
+  return {
+    id: it.id, kind: it.kind, title: it.title,
+    srcKey: it.srcKey || '', srcName: it.srcName || '', vidId: it.vidId || '',
+    pic: it.pic || '', ep: it.ep || '', t: it.t || 0, ts: it.ts,
+  };
+}
+async function appendUhist(env, username, entry) {
+  const hist = await loadUhist(env, username);
+  entry.id = newEntryId();
+  entry.ts = Date.now();
+  hist.items.unshift(entry);
+  await saveUhist(env, username, hist);
+  return entry.id;
+}
+
 /* --------------------------- 直播 m3u 解析 ------------------------------- */
 function parseM3U(text, tag) {
   const lines = text.split(/\r?\n/);
@@ -355,7 +460,13 @@ export default {
       /* ---- 公开设置 ---- */
       if (path === '/api/settings' && request.method === 'GET') {
         const s = await getSettings(env);
-        return json({ siteName: s.siteName, defaultTheme: s.defaultTheme, announcement: s.announcement });
+        return json({
+          siteName: s.siteName,
+          defaultTheme: s.defaultTheme,
+          announcement: s.announcement,
+          requireLogin: s.requireLogin !== false,
+          allowRegister: s.allowRegister !== false,
+        });
       }
 
       /* ---- 源列表(远程源 + 后台自定义源, 按停用/成人开关过滤) ---- */
@@ -379,6 +490,9 @@ export default {
         if (!/^https?:$/.test(tu.protocol)) return json({ error: 'bad protocol' }, 400);
 
         const settings2 = await getSettings(env);
+        if (settings2.requireLogin !== false && !(await anyValidSession(request, env, url))) {
+          return json({ error: '请先登录后观看', code: 'login_required' }, 401);
+        }
         const { sources: remote } = await loadSources(env, ctx, settings2);
         const { all } = mergeSources(remote, settings2);
         const allow = new Set();
@@ -405,7 +519,146 @@ export default {
 
       /* ---- 电视直播频道 ---- */
       if (path === '/api/live' && request.method === 'GET') {
+        const s0 = await getSettings(env);
+        if (s0.requireLogin !== false && !(await anyValidSession(request, env, url))) {
+          return json({ error: '请先登录后观看', code: 'login_required' }, 401);
+        }
         return json(await loadLive(env, ctx));
+      }
+
+      /* ========================= 用户接口 ========================= */
+      if (path === '/api/user/register' && request.method === 'POST') {
+        const settings = await getSettings(env);
+        if (settings.allowRegister === false) return json({ error: '当前未开放注册，请联系管理员' }, 403);
+        if (!kv(env)) return json({ error: '未绑定 KV 存储，无法注册用户（见 README 绑定 CONFIG_KV）' }, 500);
+        if (rateLimited('reg:' + clientIp(request))) return json({ error: '尝试过于频繁，请稍后再试' }, 429);
+        let body = {};
+        try { body = await request.json(); } catch (e) { /* ignore */ }
+        const username = String(body.username || '').trim();
+        const password = String(body.password || '');
+        if (!USERNAME_RE.test(username)) return json({ error: '用户名需 2-20 位中文/字母/数字/下划线' }, 400);
+        if (password.length < 6) return json({ error: '密码至少 6 位' }, 400);
+        if (await getUserRecord(env, username)) return json({ error: '该用户名已被注册' }, 409);
+        const salt = randomSalt();
+        await putUserRecord(env, {
+          u: username,
+          hash: await sha256Hex(salt + password),
+          salt,
+          createdAt: Date.now(),
+          lastLoginAt: Date.now(),
+          lastLoginIp: clientIp(request),
+        });
+        const token = await makeUserToken(env, username);
+        return json({ ok: true, username }, 200, {
+          'Set-Cookie': `${USER_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${USER_SESSION_TTL}`,
+        });
+      }
+      if (path === '/api/user/login' && request.method === 'POST') {
+        if (!kv(env)) return json({ error: '未绑定 KV 存储，无法登录（见 README）' }, 500);
+        if (rateLimited('usr:' + clientIp(request))) return json({ error: '尝试过于频繁，请稍后再试' }, 429);
+        let body = {};
+        try { body = await request.json(); } catch (e) { /* ignore */ }
+        const username = String(body.username || '').trim();
+        const password = String(body.password || '');
+        const rec = await getUserRecord(env, username);
+        if (!rec || !safeEqual(await sha256Hex((rec.salt || '') + password), rec.hash)) {
+          return json({ error: '用户名或密码错误' }, 401);
+        }
+        rec.lastLoginAt = Date.now();
+        rec.lastLoginIp = clientIp(request);
+        await putUserRecord(env, rec);
+        const token = await makeUserToken(env, username);
+        return json({ ok: true, username }, 200, {
+          'Set-Cookie': `${USER_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${USER_SESSION_TTL}`,
+        });
+      }
+      if (path === '/api/user/logout' && request.method === 'POST') {
+        return json({ ok: true }, 200, { 'Set-Cookie': `${USER_COOKIE}=; Path=/; HttpOnly; Max-Age=0` });
+      }
+      if (path === '/api/user/me' && request.method === 'GET') {
+        const username = await currentUser(request, env, url);
+        if (!username) return json({ me: null });
+        const rec = await getUserRecord(env, username);
+        return json({
+          me: {
+            username,
+            createdAt: rec ? rec.createdAt : null,
+            lastLoginAt: rec ? rec.lastLoginAt : null,
+            lastLoginIp: rec ? rec.lastLoginIp : '',
+          },
+        });
+      }
+      if (path.startsWith('/api/user/')) {
+        const username = await currentUser(request, env, url);
+        if (!username) return json({ error: 'unauthorized' }, 401);
+        /* 自己的历史(不含已自删标记的条目) */
+        if (path === '/api/user/history' && request.method === 'GET') {
+          const hist = await loadUhist(env, username);
+          const rec = await getUserRecord(env, username);
+          return json({
+            watchSec: hist.watchSec,
+            items: hist.items.filter((it) => !it.delUser).slice(0, 300).map(publicHistItem),
+            profile: rec ? { createdAt: rec.createdAt, lastLoginAt: rec.lastLoginAt } : null,
+          });
+        }
+        /* 清空自己的记录(软删, 管理端仍可查) */
+        if (path === '/api/user/history/clear' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const kind = body.kind === 'watch' || body.kind === 'search' ? body.kind : 'all';
+          const hist = await loadUhist(env, username);
+          for (const it of hist.items) {
+            if (kind === 'all' || it.kind === kind) it.delUser = true;
+          }
+          await saveUhist(env, username, hist);
+          return json({ ok: true });
+        }
+        /* 删除单条/多条(软删) */
+        if (path === '/api/user/history/delete' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const ids = new Set(Array.isArray(body.ids) ? body.ids : []);
+          if (!ids.size) return json({ error: 'no ids' }, 400);
+          const hist = await loadUhist(env, username);
+          for (const it of hist.items) { if (ids.has(it.id)) it.delUser = true; }
+          await saveUhist(env, username, hist);
+          return json({ ok: true });
+        }
+        /* 搜索记录上报 */
+        if (path === '/api/user/log-search' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const q = String(body.q || '').trim().slice(0, 60);
+          if (q) await appendUhist(env, username, { kind: 'search', title: q, ip: clientIp(request) });
+          return json({ ok: true });
+        }
+        /* 观看心跳上报(累计观看时长 + 更新观看记录) */
+        if (path === '/api/user/progress' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const deltaSec = Math.max(0, Math.min(Number(body.deltaSec) || 30, 120));
+          const srcKey = String(body.srcKey || '').slice(0, 60);
+          const vidId = String(body.vidId || '').slice(0, 60);
+          const title = String(body.title || '').trim().slice(0, 80);
+          if (!srcKey || !vidId || !title) return json({ error: 'bad payload' }, 400);
+          const hist = await loadUhist(env, username);
+          hist.watchSec += deltaSec;
+          const ep = String(body.ep == null ? '' : body.ep).slice(0, 20);
+          const pos = Math.max(0, Number(body.t) || 0);
+          const exist = hist.items.find((it) => it.kind === 'watch' && it.srcKey === srcKey && it.vidId === vidId && !it.delUser);
+          if (exist) { exist.t = pos; exist.ep = ep || exist.ep; exist.ts = Date.now(); }
+          else {
+            hist.items.unshift({
+              id: newEntryId(), kind: 'watch', title,
+              srcKey, srcName: String(body.srcName || '').slice(0, 40), vidId,
+              pic: /^https?:\/\//.test(String(body.pic || '')) ? String(body.pic) : '',
+              ep, t: pos, ts: Date.now(), ip: clientIp(request), delUser: false,
+            });
+          }
+          await saveUhist(env, username, hist);
+          return json({ ok: true, watchSec: hist.watchSec });
+        }
+        return json({ error: 'not found' }, 404);
       }
 
       /* ---- 管理员 ---- */
@@ -444,6 +697,8 @@ export default {
             hasCustomPassword: Boolean(s.passwordHash),
             effectiveConfigUrl: s.configUrl || env.CONFIG_URL || DEFAULT_CONFIG_URL,
             configFrom: s.configJson ? 'inline-json' : (s.configUrl ? 'custom-url' : 'default'),
+            requireLogin: s.requireLogin !== false,
+            allowRegister: s.allowRegister !== false,
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });
         }
@@ -483,6 +738,74 @@ export default {
             disabledSources: saved.disabledSources,
             storage: kv(env) ? 'kv' : 'memory',
           });
+        }
+        /* ---- 用户管理: 列表 ---- */
+        if (path === '/api/admin/users' && request.method === 'GET') {
+          let list = [];
+          try { list = JSON.parse((await env.CONFIG_KV.get('users:index')) || '[]'); } catch (e) { /* ignore */ }
+          if (!Array.isArray(list)) list = [];
+          const users = [];
+          for (const u of list) {
+            const rec = await getUserRecord(env, u);
+            const hist = await loadUhist(env, u);
+            users.push({
+              username: u,
+              createdAt: rec ? rec.createdAt : null,
+              lastLoginAt: rec ? rec.lastLoginAt : null,
+              lastLoginIp: rec ? rec.lastLoginIp : '',
+              watchSec: hist.watchSec || 0,
+              totalItems: hist.items.length,
+              activeItems: hist.items.filter((it) => !it.delUser).length,
+            });
+          }
+          users.sort((a, b) => (b.lastLoginAt || 0) - (a.lastLoginAt || 0));
+          return json({ users });
+        }
+        /* ---- 用户管理: 单用户完整记录(含用户已删) ---- */
+        if (path === '/api/admin/user-log' && request.method === 'GET') {
+          const u = url.searchParams.get('u') || '';
+          if (!u) return json({ error: 'no user' }, 400);
+          const rec = await getUserRecord(env, u);
+          if (!rec) return json({ error: 'user not found' }, 404);
+          const hist = await loadUhist(env, u);
+          return json({
+            username: u,
+            createdAt: rec.createdAt,
+            lastLoginAt: rec.lastLoginAt,
+            lastLoginIp: rec.lastLoginIp,
+            watchSec: hist.watchSec || 0,
+            items: hist.items.slice(0, 800).map((it) => ({ ...publicHistItem(it), ip: it.ip || '', delUser: Boolean(it.delUser) })),
+          });
+        }
+        /* ---- 用户管理: 硬删记录(仅管理员) ---- */
+        if (path === '/api/admin/user-log-delete' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const u = String(body.u || '');
+          if (!u || !(await getUserRecord(env, u))) return json({ error: 'user not found' }, 404);
+          const hist = await loadUhist(env, u);
+          if (body.all) { hist.items = []; hist.watchSec = 0; }
+          else {
+            const ids = new Set(Array.isArray(body.ids) ? body.ids : []);
+            hist.items = hist.items.filter((it) => !ids.has(it.id));
+          }
+          await saveUhist(env, u, hist);
+          return json({ ok: true });
+        }
+        /* ---- 用户管理: 删除用户及其全部数据 ---- */
+        if (path === '/api/admin/user-delete' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const u = String(body.u || '');
+          if (!u) return json({ error: 'no user' }, 400);
+          if (!kv(env)) return json({ error: 'no kv' }, 500);
+          await env.CONFIG_KV.delete('user:' + u);
+          await env.CONFIG_KV.delete('uhist:' + u);
+          let list = [];
+          try { list = JSON.parse((await env.CONFIG_KV.get('users:index')) || '[]'); } catch (e) { /* ignore */ }
+          list = list.filter((x) => x !== u);
+          await env.CONFIG_KV.put('users:index', JSON.stringify(list));
+          return json({ ok: true });
         }
         return json({ error: 'not found' }, 404);
       }
