@@ -233,16 +233,24 @@ img { display: block; }
 .src-item { padding: 9px 12px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--card-br); font-size: 13px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
 .src-item:hover { border-color: var(--acc); }
 .src-item.cur { border-color: var(--acc); color: var(--acc); }
-/* 播放页快速换源 */
+/* 播放页快速换源: 药丸网格 + 无片源折叠区 */
 .swap-stat { font-size: 12px; color: var(--dim); margin-bottom: 10px; }
-.swap-miss-head { font-size: 11.5px; color: var(--dim); margin: 10px 0 6px; }
-.src-item.miss { opacity: .5; cursor: not-allowed; }
-.src-item.miss:hover { border-color: var(--card-br); }
-.src-item small { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); flex-shrink: 0; }
-.spd { font-style: normal; font-size: 10.5px; padding: 1.5px 7px; border-radius: 99px; color: #fff; }
+.src-switch.swap-grid { flex-direction: row; flex-wrap: wrap; gap: 7px; max-height: none; }
+.swap-grid .src-item { border-radius: 999px; padding: 6px 11px; font-size: 12.5px; align-items: center; gap: 6px; }
+.swap-grid .src-item .src-ico { width: 13px; height: 13px; vertical-align: -2px; color: var(--dim); }
+.swap-grid .src-item:hover .src-ico { color: var(--acc); }
+.src-switch.miss-list { max-height: 150px; margin-top: 8px; }
+.miss-list .src-item { font-size: 12px; padding: 6px 10px; opacity: .55; }
+.swap-miss-toggle {
+  background: none; border: none; color: var(--dim); font-size: 11.5px;
+  padding: 9px 0 0; cursor: pointer; text-align: left; width: 100%;
+}
+.swap-miss-toggle:hover { color: var(--acc); }
+.spd { font-style: normal; font-size: 10.5px; padding: 1.5px 7px; border-radius: 99px; color: #fff; flex-shrink: 0; }
 .spd.sp-good { background: var(--ok); }
 .spd.sp-mid { background: #d97706; }
 .spd.sp-bad { background: var(--danger); }
+.src-item small { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); flex-shrink: 0; }
 .src-item small.fail { color: var(--danger); font-size: 11.5px; }
 
 /* ---------------- 直播 ---------------- */
@@ -336,6 +344,17 @@ img { display: block; }
   border-left-color: var(--acc);
 }
 .src-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* 源小图标: 普通=胶片(随主题色), 成人=红圈18+ */
+.src-ico {
+  width: 15px; height: 15px; flex-shrink: 0; vertical-align: -2.5px;
+  color: var(--dim); opacity: .85; transition: color .15s;
+}
+.src-row.on .src-ico, .src-row:hover .src-ico { color: var(--acc); opacity: 1; }
+.src-ico.adult, .src-row:hover .src-ico.adult, .src-row.on .src-ico.adult { color: var(--danger); opacity: 1; }
+.adult-tag {
+  font-style: normal; font-size: 10.5px; padding: 2px 8px; border-radius: 99px;
+  background: var(--danger); color: #fff; font-weight: 700;
+}
 .src-mini-tag { font-style: normal; font-size: 10px; padding: 1px 5px; border-radius: 6px; background: var(--acc); color: #fff; vertical-align: 2px; }
 .src-speed { flex-shrink: 0; font-size: 11px; }
 .sp { font-style: normal; padding: 1px 7px; border-radius: 99px; font-weight: 600; }
@@ -442,7 +461,10 @@ img { display: block; }
 }
 .search-btn:hover { transform: scale(1.08); box-shadow: var(--glow); }
 .search-btn:active { transform: scale(.94); }
-.search-btn svg { width: 15px; height: 15px; fill: currentColor; }
+.search-btn svg {
+  width: 16px; height: 16px; fill: none;
+  stroke: currentColor; stroke-width: 2.6; stroke-linecap: round;
+}
 .search-pop {
   position: absolute; z-index: 96;
   background: var(--glass); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
@@ -535,6 +557,8 @@ img { display: block; }
   .brand-logo { width: 30px; height: 30px; }
   .searchbox { order: 1; flex: 1 1 auto; width: auto; min-width: 0; margin-left: 4px; }
   .searchbox input { font-size: 16px; } /* ≥16px 防 iOS 聚焦自动放大导致页面横滑 */
+  /* 历史下拉在手机上通栏显示, 防止按输入框右缘锚定导致溢出屏幕 */
+  .search-pop { left: 12px !important; right: 12px !important; width: auto; }
   .user-box { order: 2; flex-shrink: 0; margin-left: 0; }
   .icon-btn#themeBtn { order: 3; width: 34px; height: 34px; flex-shrink: 0; }
   .nav { order: 4; flex-basis: 100%; overflow-x: auto; }

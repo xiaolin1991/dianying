@@ -848,10 +848,11 @@
             <div class="side-card">
               <h4>⚡ 快速换源</h4>
               <div class="swap-stat" id="swapStat"><span class="spin"></span> 正在探测其他播放源…</div>
-              <div class="src-switch" id="srcSwitch">
-                <div class="src-item cur"><span>${esc(src.name)}</span><small>当前</small></div>
+              <div class="src-switch swap-grid" id="srcSwitch">
+                <span class="src-item cur">${srcIconHtml(src)} 当前 · ${esc(src.name)}</span>
               </div>
-              <div id="swapMiss"></div>
+              <button class="swap-miss-toggle hidden" id="swapMissToggle" type="button"></button>
+              <div class="src-switch miss-list hidden" id="swapMiss"></div>
             </div>
             <div class="side-card" style="margin-top:14px">
               <h4>选集<button class="chip" style="padding:4px 12px;font-size:12px" id="autoNext">自动连播: ${store.get('autoNext', true) ? '开' : '关'}</button></h4>
@@ -941,18 +942,32 @@
     });
 
     // ⚡ 快速换源: 并发探测全部其他源, 谁响应快谁先出现(带实测延迟), 本页切换并同步集数
+    // 有本片的源显示为可点药丸; 无此片/超时的源默认折叠, 不占版面
     (function startSwapSearch() {
       const others = visibleSources().filter((s) => s.key !== key);
       const swapOk = $('#srcSwitch');
       const swapMiss = $('#swapMiss');
+      const missToggle = $('#swapMissToggle');
       const statEl = $('#swapStat');
-      let pending = others.length, okCount = 0;
+      let pending = others.length, okCount = 0, missCount = 0;
+      const updMissToggle = () => {
+        if (!missToggle) return;
+        const collapsed = !swapMiss || swapMiss.classList.contains('hidden');
+        missToggle.textContent = `${collapsed ? '▶' : '▼'} ${missCount} 个源无此片或已失效（点击展开/收起）`;
+        missToggle.classList.toggle('hidden', missCount === 0);
+      };
+      if (missToggle) {
+        missToggle.addEventListener('click', () => {
+          swapMiss.classList.toggle('hidden');
+          updMissToggle();
+        });
+      }
       const updStat = () => {
         if (!alive() || !statEl) return;
         statEl.innerHTML = pending > 0
-          ? `<span class="spin"></span> 探测中 ${others.length - pending}/${others.length} · 已找到 ${okCount} 个可换源`
+          ? `<span class="spin"></span> 探测中 ${others.length - pending}/${others.length} · 已找到 <b style="color:var(--acc)">${okCount}</b> 个可换源`
           : okCount > 0
-            ? `✅ 探测完成 · 可换源 <b style="color:var(--acc)">${okCount}</b> 个（点击即换，集数同步）`
+            ? `✅ 探测完成 · 点击药丸即换源，<b>集数自动同步</b>`
             : '❌ 其他源都没有本片或已失效';
       };
       updStat();
@@ -961,7 +976,7 @@
         (async () => {
           const t0 = performance.now();
           try {
-            // 9秒快速超时: 慢源不拖累整体, 超时直接归入"失败"
+            // 9秒快速超时: 慢源不拖累整体, 超时直接归入折叠区
             const r2 = await API.search(s, vod.vod_name, 1, 9000);
             if (!alive()) return;
             const ms = Math.round(performance.now() - t0);
@@ -971,17 +986,21 @@
             if (hit && hit.vod_id) {
               okCount++;
               swapOk.insertAdjacentHTML('beforeend',
-                `<a class="src-item" href="#/play/${esc(s.key)}/${encodeURIComponent(hit.vod_id)}?ep=${ei}&group=${gi}" title="${esc(s.name)} · 延迟${ms}ms">
-                   <span>${esc(s.name)}</span><small><i class="spd ${spdCls}">⚡${ms}ms</i>切源</small></a>`);
+                `<a class="src-item" href="#/play/${esc(s.key)}/${encodeURIComponent(hit.vod_id)}?ep=${ei}&group=${gi}" title="${esc(s.name)} · 延迟${ms}ms · 点击切换并同步到第${ei + 1}集">
+                   ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span></a>`);
             } else {
+              missCount++;
               swapMiss.insertAdjacentHTML('beforeend',
-                `<div class="src-item miss"><span>${esc(s.name)}</span><small><i class="spd ${spdCls}">⚡${ms}ms</i>无此片</small></div>`);
+                `<div class="src-item"><span>${esc(s.name)}</span><small><i class="spd ${spdCls}">⚡${ms}ms</i>无此片</small></div>`);
+              updMissToggle();
             }
           } catch (e) {
             if (!alive()) return;
             pending--;
+            missCount++;
             swapMiss.insertAdjacentHTML('beforeend',
-              `<div class="src-item miss"><span>${esc(s.name)}</span><small class="fail">超时/失效</small></div>`);
+              `<div class="src-item"><span>${esc(s.name)}</span><small class="fail">超时 / 已失效</small></div>`);
+            updMissToggle();
           }
           updStat();
         })();
@@ -1289,6 +1308,12 @@
      视图：影视源(左侧文字源列表常驻 · 右侧该源分类/搜索/影片)
      ============================================================ */
   const cleanSrcName = (s) => String(s.name || s.key).replace(/🔞/g, '').trim() || s.key;
+  // 源小图标: 普通源=胶片放映图标, 成人源=红色 18+ 圆环徽标
+  function srcIconHtml(s) {
+    return s && s.adult
+      ? `<svg class="src-ico adult" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.8" fill="none" stroke="currentColor" stroke-width="2"/><text x="12" y="15.4" text-anchor="middle" font-size="8.6" font-weight="800" fill="currentColor">18+</text></svg>`
+      : `<svg class="src-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.1" y="4.3" width="17.8" height="15.4" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M7.3 4.8v14.4M16.7 4.8v14.4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 9.1v5.8l4.8-2.9z" fill="currentColor"/></svg>`;
+  }
 
   /* ---- 源测速 ---- */
   const speedCache = new Map(); // key -> {ms, fail, ts}
@@ -1413,7 +1438,8 @@
         <div class="src-layout">
           <aside class="src-list" id="srcList">
             ${ordered.map((s) => `
-              <a class="src-row ${s.key === cur.key ? 'on' : ''}" href="#/sources/${encodeURIComponent(s.key)}">
+              <a class="src-row ${s.key === cur.key ? 'on' : ''} ${s.adult ? 'adult' : ''}" href="#/sources/${encodeURIComponent(s.key)}" title="${esc(cleanSrcName(s))}${s.adult ? ' · 成人源' : ''}">
+                ${srcIconHtml(s)}
                 <span class="src-name">${esc(cleanSrcName(s))}${s.custom ? ' <i class="src-mini-tag">自</i>' : ''}</span>
                 <span class="src-speed" data-sk="${esc(s.key)}">${speedBadge(s.key)}</span>
               </a>`).join('')}
@@ -1438,7 +1464,7 @@
     main.innerHTML = `
       <div class="src-panel-head">
         <div class="src-panel-title">
-          🎬 ${esc(cleanSrcName(src))}
+          ${srcIconHtml(src)} ${esc(cleanSrcName(src))}${src.adult ? ' <i class="adult-tag">成人源</i>' : ''}
           <span class="src-panel-sub">${q ? '搜索「' + esc(q) + '」' : cat ? '分类：' + esc(cat) : '最新影片'}</span>
         </div>
         <form class="src-page-search" id="srcPageSearch">
@@ -1889,10 +1915,10 @@
           rowHtml.push(`
             <div class="src-edit-row builtin" data-bk="${esc(b.key)}">
               <input type="checkbox" class="src-en" ${off ? '' : 'checked'} title="启用/停用">
-              <span class="ro" title="${esc(cleanSrcName(b))}">${esc(cleanSrcName(b))}</span>
+              <span class="ro" title="${esc(cleanSrcName(b))}${b.adult ? ' · 成人源' : ''}">${srcIconHtml(b)} ${esc(cleanSrcName(b))}</span>
               <span class="ro" title="${esc(b.api)}">${esc(b.api)}</span>
               <span class="ro src-edit-col-detail">—</span>
-              <span style="font-size:11px;color:var(--dim)">内置</span>
+              <span style="font-size:11px;color:var(--dim)">${b.adult ? '🔞内置' : '内置'}</span>
             </div>`);
         }
         customRows.forEach((row, ri) => {
