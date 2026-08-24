@@ -104,6 +104,8 @@
       }, 8000).catch(() => {}),
 
     adminUsers: () => jfetch('/api/admin/users', {}, 15000),
+    adminStats: () => jfetch('/api/admin/stats', {}, 15000),
+    adminClearStats: () => jfetch('/api/admin/stats/clear', { method: 'POST' }, 10000),
     adminUserLog: (u) => jfetch('/api/admin/user-log?u=' + encodeURIComponent(u), {}, 15000),
     adminDeleteUser: (u) =>
       jfetch('/api/admin/user-delete', {

@@ -86,18 +86,44 @@
       : `<a class="btn ghost small" href="#/login">登录 / 注册</a>`;
   }
   function logSearch(q) {
-    if (State.me && q) API.userLogSearch(q);
+    if (!q) return;
+    if (State.me) API.userLogSearch(q); // 用户维度记录
+    try { // 全站统计(含未登录)
+      const payload = JSON.stringify({ q });
+      if (navigator.sendBeacon) navigator.sendBeacon('/api/stats/search', new Blob([payload], { type: 'application/json' }));
+      else fetch('/api/stats/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(() => {});
+    } catch (e) {}
+  }
+  function trackVisit(path) {
+    try {
+      const payload = JSON.stringify({ path });
+      if (navigator.sendBeacon) navigator.sendBeacon('/api/stats/visit', new Blob([payload], { type: 'application/json' }));
+      else fetch('/api/stats/visit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(() => {});
+    } catch (e) {}
+  }
+  function pushSearchHist(q) {
+    q = String(q || '').trim();
+    if (!q) return;
+    const h = store.get('searchHist', []).filter((x) => x !== q);
+    h.unshift(q);
+    store.set('searchHist', h.slice(0, 12));
   }
   function featuredSources(max = 6) {
     const vis = visibleSources();
     const picked = [];
-    for (const key of FEATURED_ORDER) {
+    const used = new Set();
+    // 优先使用后台设置的首页源顺序
+    const order = (State.settings && Array.isArray(State.settings.homeSources) && State.settings.homeSources.length)
+      ? State.settings.homeSources
+      : FEATURED_ORDER;
+    for (const key of order) {
       const s = vis.find((x) => x.key === key);
-      if (s) picked.push(s);
+      if (s && !used.has(s.key)) { picked.push(s); used.add(s.key); }
+      if (picked.length >= max) break;
     }
     for (const s of vis) {
       if (picked.length >= max) break;
-      if (!picked.includes(s)) picked.push(s);
+      if (!used.has(s.key)) picked.push(s);
     }
     return picked.slice(0, max);
   }
@@ -212,6 +238,7 @@
     window.scrollTo({ top: 0 });
     const alive = makeAlive(); // 页面切换后旧异步任务自动失效
     const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
+    if (State.config) trackVisit('#/' + parts.join('/')); // 页面访问统计
     // 强制登录: 未登录只允许登录页与后台
     if (loginRequired() && !['login', 'admin'].includes(parts[0])) {
       markNav('');
@@ -415,7 +442,7 @@
         <div class="chips" id="yearChips">${YEARS.map((y) => `<button class="chip ${(query.year || '全部') === y ? 'on' : ''}" data-y="${y}">${y === '全部' ? '全部年份' : y}</button>`).join('')}</div>
         <div class="src-status" id="browseStat">⏳ 正在并行加载多个源…</div>
         <div class="grid" id="browseGrid">${skeletons(18)}</div>
-        <button class="load-more" id="loadMore">加载更多</button>
+        <div class="scroll-sentinel" id="browseSentinel"></div>
       </div>`;
 
     const cur = { pool: featuredSources(6), pageBy: new Map(), seen: new Set(), year: query.year || '全部' };
@@ -483,20 +510,44 @@
       return tasks;
     }
 
-    const ok = await runWave(nextTasks(2)) > 0; // 首波: 每源前2页并发
-    if (!alive()) return;
-    setStat(ok ? `✅ 已显示 ${$('#browseGrid') ? $$('.card', $('#browseGrid')).length : 0} 部` : '');
-    if (!ok) setHtml('#browseGrid', '<div class="empty" style="grid-column:1/-1"><div class="big">🎬</div>暂无内容，试试其他筛选</div>');
-    $('#loadMore').addEventListener('click', async (e) => {
-      e.target.textContent = '加载中…';
-      e.target.disabled = true;
-      await runWave(nextTasks(2));
-      if (alive()) {
-        e.target.textContent = '加载更多';
-        e.target.disabled = false;
-        setStat('');
+    // 首波 + 无限滚动(滚到底自动加载下一批, 瀑布流式)
+    let waving = false, exhausted = false, emptyStreak = 0;
+    const countCards = () => $$('#browseGrid .card').length;
+    async function loadNext() {
+      if (waving || exhausted || !alive()) return;
+      waving = true;
+      setStat('⏳ 正在加载更多…');
+      const added = await runWave(nextTasks(2));
+      if (!alive()) return;
+      waving = false;
+      if (added <= 0) {
+        emptyStreak++;
+        if (emptyStreak >= 2) { exhausted = true; setStat(countCards() ? '✅ 已经到底了' : ''); }
+      } else {
+        emptyStreak = 0;
+        setStat(`✅ 已显示 ${countCards()} 部 · 继续下滑加载更多`);
+        const sen = $('#browseSentinel');
+        if (sen && !exhausted) {
+          const r = sen.getBoundingClientRect();
+          if (r.top < window.innerHeight + 400) loadNext(); // 仍贴底则继续
+        }
       }
-    });
+    }
+    const okFirst = await runWave(nextTasks(2)) > 0; // 首波: 每源前2页并发
+    if (!alive()) return;
+    waving = false;
+    if (okFirst) setStat(`✅ 已显示 ${countCards()} 部`);
+    else {
+      setStat('');
+      setHtml('#browseGrid', '<div class="empty" style="grid-column:1/-1"><div class="big">🎬</div>暂无内容，试试其他筛选</div>');
+    }
+    const sentinel = $('#browseSentinel');
+    if (sentinel && 'IntersectionObserver' in window) {
+      const io = new IntersectionObserver((es) => {
+        es.forEach((en) => { if (en.isIntersecting && !exhausted) loadNext(); });
+      }, { rootMargin: '500px' });
+      io.observe(sentinel);
+    }
   }
 
   /* ============================================================
@@ -514,6 +565,7 @@
         <div class="page-head"><div class="page-title">搜索：${esc(q)}</div><div id="srcStat" style="color:var(--dim);font-size:13px"></div></div>
         <div class="search-progress"><i id="progBar"></i></div>
         <div class="grid" id="srGrid"></div>
+        <div class="scroll-sentinel hidden" id="srSentinel"><span class="spin"></span></div>
         <div class="empty hidden" id="srEmpty"><div class="big">🙈</div><p>没有找到相关内容</p></div>
       </div>`;
     if (!alive()) return;
@@ -521,7 +573,7 @@
 
     const sources = visibleSources();
     const merged = new Map(); // normTitle|year -> item
-    let done = 0, renderTimer = null;
+    let done = 0, renderTimer = null, reveal = 48;
 
     const applyProgress = () => {
       const finished = done >= sources.length;
@@ -543,8 +595,20 @@
       if (!grid) return;
       grid.innerHTML = [...merged.values()]
         .sort((a, b) => b.srcCount - a.srcCount)
-        .slice(0, 96).map(cardHtml).join('');
+        .slice(0, reveal).map(cardHtml).join('');
+      const sen = $('#srSentinel');
+      if (sen) sen.classList.toggle('hidden', merged.size <= reveal);
     };
+    // 滚动分批展示更多结果
+    const srSen = $('#srSentinel');
+    if (srSen && 'IntersectionObserver' in window) {
+      const io = new IntersectionObserver((es) => {
+        es.forEach((en) => {
+          if (en.isIntersecting && reveal < merged.size) { reveal += 48; renderGrid(); }
+        });
+      }, { rootMargin: '400px' });
+      io.observe(srSen);
+    }
     // 节流渲染: 任一源返回后 120ms 内合并刷新, 结果逐步出现
     const scheduleRender = () => {
       if (renderTimer) return;
@@ -1328,17 +1392,16 @@
       <div class="chips src-cats hidden" id="srcCats"></div>
       <div class="src-status" id="srcStatus"></div>
       <div class="grid" id="srcGrid">${skeletons(HOME_ROW_COUNT)}</div>
-      <button class="load-more hidden" id="srcMore">加载更多</button>`;
+      <div class="scroll-sentinel" id="srcSentinel"></div>`;
 
     let page = 1, busy = false, exhausted = false;
-    const grid = $('#srcGrid'), moreBtn = $('#srcMore'), statusEl = $('#srcStatus');
+    const grid = $('#srcGrid'), statusEl = $('#srcStatus');
 
     const setStatus = (t) => { if (alive() && statusEl) statusEl.textContent = t; };
 
     async function loadPage() {
       if (busy || exhausted || !alive()) return;
       busy = true;
-      moreBtn.textContent = '加载中…'; moreBtn.classList.remove('hidden');
       setStatus('⏳ 正在加载…');
       try {
         const r = q ? await API.search(src, q, page) : await API.list(src, page, cat);
@@ -1347,29 +1410,25 @@
         if (!items.length && page === 1) {
           setHtml(grid, '<div class="empty" style="grid-column:1/-1"><div class="big">🙈</div>没有找到内容，换个关键词或分类试试</div>');
           exhausted = true;
-          moreBtn.classList.add('hidden');
           setStatus('❌ 没有找到内容');
         } else if (!items.length) {
           exhausted = true;
-          moreBtn.textContent = '✅ 已加载全部';
-          setStatus('');
+          setStatus(`✅ 已加载全部（${$('#srcGrid') ? $$('#srcGrid .card').length : 0} 部）`);
         } else {
           grid.insertAdjacentHTML('beforeend', items.map((vod) => cardHtml({
             sourceKey: src.key, sourceName: src.name, id: vod.vod_id,
             title: String(vod.vod_name).trim(), pic: vod.vod_pic,
             remarks: vod.vod_remarks, year: vod.vod_year, typeName: vod.type_name,
           })).join(''));
-          setStatus(`已显示 ${page * 20 - 20 + items.length} 部`);
+          setStatus(page === 1 ? `已显示 ${items.length} 部 · 下滑自动加载` : `已显示 ${$$('#srcGrid .card').length} 部`);
           page++;
-          if (items.length < 20) { exhausted = true; moreBtn.textContent = '✅ 已加载全部'; }
-          else moreBtn.textContent = '加载更多';
+          if (items.length < 20) exhausted = true;
         }
       } catch (e) {
         if (alive()) {
           grid.insertAdjacentHTML('beforeend', `<div class="empty" style="grid-column:1/-1;font-size:13px;color:var(--dim)">该源请求失败：${esc(e.message)}</div>`);
           setStatus('❌ 该源请求失败');
           exhausted = true;
-          moreBtn.classList.add('hidden');
         }
       }
       busy = false;
@@ -1392,7 +1451,20 @@
 
     await loadPage();
     if (!alive()) return;
-    moreBtn.addEventListener('click', loadPage);
+    // 无限滚动: 滚到底自动加载下一页
+    const sen = $('#srcSentinel');
+    const chain = () => {
+      if (exhausted || !alive()) return;
+      const r = sen.getBoundingClientRect();
+      if (r.top < window.innerHeight + 500) loadPage().then(chain);
+    };
+    if (sen && 'IntersectionObserver' in window) {
+      const io = new IntersectionObserver((es) => {
+        es.forEach((en) => { if (en.isIntersecting && !exhausted) loadPage(); });
+      }, { rootMargin: '500px' });
+      io.observe(sen);
+    }
+    chain();
     $('#srcPageSearch').addEventListener('submit', (e) => {
       e.preventDefault();
       const nq = $('#srcPageQ').value.trim();
@@ -1537,6 +1609,22 @@
             </div>
           </div>
 
+          <div class="admin-card">
+            <h3>📊 流量统计</h3>
+            <div class="stat-chips">
+              <span class="stat-chip">今日访问 <b id="stPvToday">—</b></span>
+              <span class="stat-chip">总访问 <b id="stPvTotal">—</b></span>
+              <span class="stat-chip">独立IP <b id="stUniq">—</b></span>
+              <span class="stat-chip">搜索次数 <b id="stSearch">—</b></span>
+            </div>
+            <div class="stat-paths" id="statPaths"></div>
+            <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+              <button class="btn ghost small" id="refreshStatsBtn">🔄 刷新</button>
+              <button class="btn danger small" id="clearStatsBtn">🗑 清空统计数据</button>
+            </div>
+            <div id="statRecent" style="margin-top:14px;overflow-x:auto"></div>
+          </div>
+
           <div class="admin-card adult-toggle-card ${s.adultEnabled ? 'on' : ''}" id="adultCard">
             <div class="admin-row">
               <div class="admin-label">🔞 成人内容
@@ -1559,8 +1647,8 @@
             </div>
           </div>
 
-          <div class="admin-card">
-            <h3>🧩 影视源管理</h3>
+          <details class="admin-card adm-details">
+            <summary>🧩 影视源管理 <small style="color:var(--dim);font-weight:400;font-size:12px">（点击展开 · 内置 ${(s.allSources || []).filter((x) => !x.custom).length} 个 · 自定义 ${(s.customSources || []).length} 个）</small></summary>
             <p class="hint">内置源每日同步自 LunaTV-config，可临时<b>停用/启用</b>；自定义源可自由添加（填苹果CMS V10 的 <code>api.php/provide/vod</code> 接口地址），保存后立即全站生效。</p>
             <div style="display:flex;gap:10px;margin:12px 0">
               <button class="btn primary small" id="addSrcBtn">＋ 添加影视源</button>
@@ -1575,7 +1663,8 @@
               <span></span>
             </div>
             <div id="srcEditor"></div>
-          </div>
+            <div class="pager" id="srcPager" style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px"></div>
+          </details>
 
           <div class="admin-card">
             <h3>🎨 站点设置</h3>
@@ -1587,6 +1676,9 @@
             </select>
             <label class="field-label">全站公告（留空则不显示）</label>
             <textarea class="field-area" id="annInput" maxlength="300">${esc(s.announcement)}</textarea>
+            <label class="field-label" style="margin-top:14px">🏠 首页默认加载的影视源（每行一个 key，按顺序，最多12个；留空 = 默认精选）<br>
+              <small style="font-weight:400;color:var(--dim)">建议填测速最快的源。可用 key 如：${esc((State.config ? State.config.sources : []).slice(0, 8).map((x) => x.key).join('、'))} …</small></label>
+            <textarea class="field-area" id="homeSrcInput" style="min-height:96px;font-family:monospace;font-size:12px">${esc((s.homeSources || []).join('\n'))}</textarea>
             <button class="btn primary" id="saveSiteBtn" style="margin-top:14px">保存站点设置</button>
           </div>
 
@@ -1642,6 +1734,43 @@
 
       $('#logoutBtn').addEventListener('click', async () => { try { await API.adminLogout(); } catch (e) {} toast('已退出'); viewAdmin(); });
 
+      /* ---- 流量统计 ---- */
+      async function loadStats() {
+        try {
+          const d = await API.adminStats();
+          $('#stPvToday').textContent = d.pvToday;
+          $('#stPvTotal').textContent = d.pvTotal;
+          $('#stUniq').textContent = d.uniqIp;
+          $('#stSearch').textContent = d.searches;
+          const maxN = Math.max(1, ...(d.byPath || []).map((x) => x.n));
+          $('#statPaths').innerHTML = (d.byPath || []).map((p) => `
+            <div class="stat-path-row">
+              <span class="sp-k" title="${esc(p.k)}">${esc(p.k)}</span>
+              <div class="sp-bar"><i style="width:${Math.round((p.n / maxN) * 100)}%"></i></div>
+              <b>${p.n}</b>
+            </div>`).join('') || '<p class="hint" style="margin-top:8px">暂无页面访问数据</p>';
+          const rows = (d.recent || []).map((it) => `
+            <tr>
+              <td>${fmtDateTime(it.ts)}</td>
+              <td>${it.kind === 'search' ? '🔍' : '📄'}</td>
+              <td class="ulog-title" title="${esc(it.kind === 'search' ? it.q : it.path)}">${esc(it.kind === 'search' ? it.q : it.path)}</td>
+              <td>${esc(it.u || '—')}</td>
+              <td>${esc(it.ip)}${it.geo ? '<br><small style="color:var(--dim)">' + esc(it.geo) + '</small>' : ''}</td>
+            </tr>`).join('');
+          $('#statRecent').innerHTML = rows
+            ? `<table class="adm-table"><thead><tr><th>时间</th><th>类型</th><th>内容</th><th>用户</th><th>IP / 归属地</th></tr></thead><tbody>${rows}</tbody></table>`
+            : '<p class="hint" style="margin-top:8px">暂无明细（访客进入站点后开始累计）</p>';
+        } catch (e) { /* ignore */ }
+      }
+      $('#refreshStatsBtn').addEventListener('click', loadStats);
+      $('#clearStatsBtn').addEventListener('click', async () => {
+        if (!confirm('确定清空全部统计数据？不可恢复。')) return;
+        await API.adminClearStats();
+        toast('统计数据已清空', 'ok');
+        loadStats();
+      });
+      loadStats();
+
       $('#adultSwitch').addEventListener('change', async (e) => {
         const on = e.target.checked;
         try {
@@ -1656,16 +1785,18 @@
 
       $('#saveSiteBtn').addEventListener('click', async () => {
         try {
+          const homeLines = $('#homeSrcInput').value.split('\n').map((x) => x.trim()).filter(Boolean);
           const res = await API.adminSaveSettings({
             siteName: $('#siteNameInput').value,
             defaultTheme: $('#themeSelect').value,
             announcement: $('#annInput').value,
+            homeSources: homeLines,
           });
-          State.settings = { ...State.settings, siteName: res.settings.siteName, announcement: res.settings.announcement };
+          State.settings = { ...State.settings, siteName: res.settings.siteName, announcement: res.settings.announcement, homeSources: res.settings.homeSources || [] };
           $('#brandName').textContent = res.settings.siteName;
           document.title = res.settings.siteName;
           applyAnnouncement(res.settings.announcement);
-          toast('站点设置已保存', 'ok');
+          toast(`站点设置已保存（首页源 ${homeLines.length} 个）`, 'ok');
         } catch (err) { toast('保存失败：' + err.message, 'err'); }
       });
 
@@ -1689,9 +1820,13 @@
         if (info) info.textContent = `内置 ${builtins.length} 个（停用 ${[...disabledSet].filter((k) => !customRows.some((c) => c.key === k)).length}） · 自定义 ${customRows.length} 个`;
       }
 
+      let bpg = 1;
+      const BPER = 8; // 内置源每页条数
       function renderEditor() {
         const rowHtml = [];
-        for (const b of builtins) {
+        const bTotal = Math.max(1, Math.ceil(builtins.length / BPER));
+        if (bpg > bTotal) bpg = bTotal;
+        for (const b of builtins.slice((bpg - 1) * BPER, bpg * BPER)) {
           const off = disabledSet.has(b.key);
           rowHtml.push(`
             <div class="src-edit-row builtin" data-bk="${esc(b.key)}">
@@ -1713,6 +1848,18 @@
             </div>`);
         });
         editor.innerHTML = rowHtml.join('');
+
+        // 内置源翻页
+        const pager = $('#srcPager');
+        if (pager) {
+          pager.innerHTML = builtins.length > BPER ? `
+            <button class="btn ghost small" id="bPrev" ${bpg <= 1 ? 'disabled' : ''}>‹ 上一页</button>
+            <span style="color:var(--dim);font-size:12px">内置源第 ${bpg}/${bTotal} 页 · 共 ${builtins.length} 个</span>
+            <button class="btn ghost small" id="bNext" ${bpg >= bTotal ? 'disabled' : ''}>下一页 ›</button>` : '';
+          const pv = $('#bPrev'), nx = $('#bNext');
+          pv && pv.addEventListener('click', () => { bpg--; renderEditor(); });
+          nx && nx.addEventListener('click', () => { bpg++; renderEditor(); });
+        }
 
         $$('.src-edit-row', editor).forEach((tr) => {
           const en = $('.src-en', tr);
@@ -1934,17 +2081,51 @@
   async function boot() {
     // 静态事件
     $('#themeBtn').addEventListener('click', (e) => { e.stopPropagation(); $('#themePop').classList.toggle('hidden'); });
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('#themePop') && !e.target.closest('#themeBtn')) $('#themePop').classList.add('hidden');
-    });
     $('#announceClose').addEventListener('click', () => {
       store.set('annDismissed', $('#announceText').textContent);
       $('#announceBar').classList.add('hidden');
     });
     const doSearch = () => {
       const q = $('#searchInput').value.trim();
-      if (q) location.hash = '#/search?q=' + encodeURIComponent(q);
+      if (q) {
+        pushSearchHist(q);
+        $('#searchPop') && $('#searchPop').classList.add('hidden');
+        location.hash = '#/search?q=' + encodeURIComponent(q);
+      }
     };
+    // 搜索历史下拉
+    const searchInput = $('#searchInput');
+    const searchPop = $('#searchPop');
+    function renderSearchPop() {
+      if (!searchPop) return;
+      const h = store.get('searchHist', []);
+      const rect = searchInput.getBoundingClientRect();
+      searchPop.style.top = (rect.bottom + 8) + 'px';
+      searchPop.style.right = Math.max(10, window.innerWidth - rect.right) + 'px';
+      if (!h.length) { searchPop.classList.add('hidden'); return; }
+      searchPop.innerHTML = `
+        <div class="sp-head"><span>最近搜索</span><button id="clearSHist" type="button">清空</button></div>
+        ${h.map((k) => `<div class="sp-item" data-q="${esc(k)}">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M10 2a8 8 0 105.3 14l4.4 4.4 1.4-1.4-4.4-4.4A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>
+          <span>${esc(k)}</span></div>`).join('')}`;
+      $$('.sp-item', searchPop).forEach((el) => el.addEventListener('click', () => {
+        searchInput.value = el.dataset.q;
+        doSearch();
+      }));
+      $('#clearSHist').addEventListener('click', (e) => {
+        e.stopPropagation();
+        store.set('searchHist', []);
+        searchPop.classList.add('hidden');
+      });
+      searchPop.classList.remove('hidden');
+    }
+    searchInput.addEventListener('focus', renderSearchPop);
+    searchInput.addEventListener('click', renderSearchPop);
+    $('#searchBtn').addEventListener('click', (e) => { e.stopPropagation(); doSearch(); });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#themePop') && !e.target.closest('#themeBtn')) $('#themePop').classList.add('hidden');
+      if (!e.target.closest('#searchPop') && !e.target.closest('.searchbox')) searchPop && searchPop.classList.add('hidden');
+    });
     $('#searchInput').addEventListener('keydown', (e) => e.key === 'Enter' && doSearch());
     window.addEventListener('scroll', () => $('#backTop').classList.toggle('show', window.scrollY > 600));
     $('#backTop').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));

@@ -46,6 +46,7 @@ const DEFAULT_SETTINGS = {
   configJson: '',       // 后台直接粘贴的 JSON 配置内容(优先于 configUrl)
   requireLogin: true,   // 强制登录观看: 未注册/未登录用户不能观看
   allowRegister: true,  // 开放前台注册
+  homeSources: [],      // 首页默认加载的影视源 key 顺序列表(空=内置精选)
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -134,6 +135,9 @@ async function saveSettings(env, patch) {
   if (typeof patch.salt === 'string' && /^[0-9a-f]{32}$/.test(patch.salt)) next.salt = patch.salt;
   if (typeof patch.requireLogin === 'boolean') next.requireLogin = patch.requireLogin;
   if (typeof patch.allowRegister === 'boolean') next.allowRegister = patch.allowRegister;
+  if (Array.isArray(patch.homeSources)) {
+    next.homeSources = [...new Set(patch.homeSources.filter((k) => typeof k === 'string' && k.trim()).map((k) => k.trim()))].slice(0, 12);
+  }
   if (typeof patch.configUrl === 'string') {
     const cu = patch.configUrl.trim();
     if (!cu) { next.configUrl = ''; next.configJson = ''; }
@@ -392,6 +396,49 @@ async function appendUhist(env, username, entry) {
   return entry.id;
 }
 
+/* ========================= 访问统计(KV 轻量) =========================
+   stats:log -> 最近明细(≤600条) {kind:'page'|'search', path/q, ts, ip, geo, u}
+   stats:agg -> { pvTotal, days:{yyyy-mm-dd:n}, searches:n, paths:{k:n}, ips:{ip:{c,ts}} }
+====================================================================== */
+const STATS_LOG_KEY = 'stats:log';
+const STATS_AGG_KEY = 'stats:agg';
+async function statRecord(env, entry) {
+  if (!kv(env)) return;
+  entry.ts = Date.now();
+  entry.geo = entry.geo || '';
+  entry.u = entry.u || '';
+  try {
+    const raw = await env.CONFIG_KV.get(STATS_LOG_KEY);
+    let arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr)) arr = [];
+    arr.unshift(entry);
+    await env.CONFIG_KV.put(STATS_LOG_KEY, JSON.stringify(arr.slice(0, 600)));
+  } catch (e) { /* ignore */ }
+  try {
+    const raw = await env.CONFIG_KV.get(STATS_AGG_KEY);
+    const agg = raw ? JSON.parse(raw) : {};
+    agg.pvTotal = (agg.pvTotal || 0) + 1;
+    const day = new Date().toISOString().slice(0, 10);
+    agg.days = agg.days || {};
+    agg.days[day] = (agg.days[day] || 0) + 1;
+    const dks = Object.keys(agg.days).sort();
+    while (dks.length > 30) delete agg.days[dks.shift()];
+    if (entry.kind === 'search') agg.searches = (agg.searches || 0) + 1;
+    const pKey = entry.kind === 'search' ? '🔍 ' + String(entry.q || '').slice(0, 30) : String(entry.path || '/').slice(0, 40);
+    agg.paths = agg.paths || {};
+    agg.paths[pKey] = (agg.paths[pKey] || 0) + 1;
+    agg.ips = agg.ips || {};
+    const curIp = agg.ips[entry.ip] || { c: 0, ts: 0 };
+    agg.ips[entry.ip] = { c: curIp.c + 1, ts: Date.now() };
+    const ipKeys = Object.keys(agg.ips);
+    if (ipKeys.length > 800) {
+      ipKeys.sort((a, b) => agg.ips[a].ts - agg.ips[b].ts);
+      while (ipKeys.length > 400) delete agg.ips[ipKeys.shift()];
+    }
+    await env.CONFIG_KV.put(STATS_AGG_KEY, JSON.stringify(agg));
+  } catch (e) { /* ignore */ }
+}
+
 /* --------------------------- 直播 m3u 解析 ------------------------------- */
 function parseM3U(text, tag) {
   const lines = text.split(/\r?\n/);
@@ -481,6 +528,7 @@ export default {
           announcement: s.announcement,
           requireLogin: s.requireLogin !== false,
           allowRegister: s.allowRegister !== false,
+          homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
         });
       }
 
@@ -539,6 +587,31 @@ export default {
           return json({ error: '请先登录后观看', code: 'login_required' }, 401);
         }
         return json(await loadLive(env, ctx));
+      }
+
+      /* ---- 访问统计埋点(公开, 不需要登录) ---- */
+      if (path === '/api/stats/visit' && request.method === 'POST') {
+        let body = {};
+        try { body = await request.json(); } catch (e) { /* ignore */ }
+        const u = await currentUser(request, env, url);
+        await statRecord(env, {
+          kind: 'page',
+          path: String(body.path || '/').slice(0, 60),
+          ip: clientIp(request),
+          geo: geoOf(request),
+          u,
+        });
+        return json({ ok: true });
+      }
+      if (path === '/api/stats/search' && request.method === 'POST') {
+        let body = {};
+        try { body = await request.json(); } catch (e) { /* ignore */ }
+        const q = String(body.q || '').trim().slice(0, 60);
+        if (q) {
+          const u = await currentUser(request, env, url);
+          await statRecord(env, { kind: 'search', q, ip: clientIp(request), geo: geoOf(request), u });
+        }
+        return json({ ok: true });
       }
 
       /* ========================= 用户接口 ========================= */
@@ -716,6 +789,7 @@ export default {
             configFrom: s.configJson ? 'inline-json' : (s.configUrl ? 'custom-url' : 'default'),
             requireLogin: s.requireLogin !== false,
             allowRegister: s.allowRegister !== false,
+            homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });
         }
@@ -755,6 +829,38 @@ export default {
             disabledSources: saved.disabledSources,
             storage: kv(env) ? 'kv' : 'memory',
           });
+        }
+        /* ---- 流量统计 ---- */
+        if (path === '/api/admin/stats' && request.method === 'GET') {
+          let log = [];
+          let agg = {};
+          try { log = JSON.parse((await env.CONFIG_KV.get(STATS_LOG_KEY)) || '[]'); } catch (e) { /* ignore */ }
+          try { agg = JSON.parse((await env.CONFIG_KV.get(STATS_AGG_KEY)) || '{}'); } catch (e) { /* ignore */ }
+          if (!Array.isArray(log)) log = [];
+          const today = new Date().toISOString().slice(0, 10);
+          const byPath = Object.entries(agg.paths || {})
+            .map(([k, n]) => ({ k, n }))
+            .sort((a, b) => b.n - a.n)
+            .slice(0, 10);
+          return json({
+            pvToday: (agg.days || {})[today] || 0,
+            pvTotal: agg.pvTotal || 0,
+            uniqIp: Object.keys(agg.ips || {}).length,
+            searches: agg.searches || 0,
+            days: agg.days || {},
+            byPath,
+            recent: log.slice(0, 80).map((it) => ({
+              kind: it.kind, path: it.path || '', q: it.q || '',
+              ts: it.ts, ip: it.ip || '', geo: it.geo || '', u: it.u || '',
+            })),
+          });
+        }
+        if (path === '/api/admin/stats/clear' && request.method === 'POST') {
+          if (kv(env)) {
+            await env.CONFIG_KV.delete(STATS_LOG_KEY);
+            await env.CONFIG_KV.delete(STATS_AGG_KEY);
+          }
+          return json({ ok: true });
         }
         /* ---- 用户管理: 列表 ---- */
         if (path === '/api/admin/users' && request.method === 'GET') {
