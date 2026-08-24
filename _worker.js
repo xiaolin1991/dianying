@@ -38,6 +38,10 @@ const DEFAULT_SETTINGS = {
   defaultTheme: 'midnight',
   announcement: '',
   liveSources: DEFAULT_LIVE_SOURCES,
+  customSources: [],    // 后台手动添加的影视源 [{key,name,api,detail}]
+  disabledSources: [],  // 被后台停用的内置源 key 列表
+  passwordHash: '',     // 后台改密的 SHA-256(salt+password) 十六进制, 空则用环境变量/默认密码
+  salt: '',
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -64,6 +68,24 @@ async function hmacHex(secret, msg) {
   const key = await crypto.subtle.importKey('raw', enc(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const sig = await crypto.subtle.sign('HMAC', key, enc(msg));
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest('SHA-256', enc(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** 校验登录密码: 优先后台改密哈希, 否则环境变量/默认密码 */
+async function verifyAdminPassword(env, settings, pass) {
+  if (settings.passwordHash) return safeEqual(await sha256Hex((settings.salt || '') + pass), settings.passwordHash);
+  const expected = env.ADMIN_PASSWORD || 'admin123';
+  return typeof pass === 'string' && safeEqual(pass, expected);
+}
+
+function randomSalt() {
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  return [...arr].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 function safeEqual(a, b) {
   if (a.length !== b.length) return false;
@@ -100,6 +122,12 @@ async function saveSettings(env, patch) {
     const urls = patch.liveSources.filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u.trim())).map((u) => u.trim());
     if (urls.length || patch.liveSourcesAllowEmpty) next.liveSources = urls.slice(0, 10);
   }
+  if (Array.isArray(patch.customSources)) next.customSources = normalizeSourceList(patch.customSources);
+  if (Array.isArray(patch.disabledSources)) {
+    next.disabledSources = [...new Set(patch.disabledSources.filter((k) => typeof k === 'string' && k))].slice(0, 100);
+  }
+  if (typeof patch.passwordHash === 'string' && /^[0-9a-f]{64}$/.test(patch.passwordHash)) next.passwordHash = patch.passwordHash;
+  if (typeof patch.salt === 'string' && /^[0-9a-f]{32}$/.test(patch.salt)) next.salt = patch.salt;
   MEM.settings = next;
   if (kv(env)) await env.CONFIG_KV.put('settings', JSON.stringify(next));
   return next;
@@ -116,6 +144,43 @@ function parseConfig(raw) {
     adult: String(v.name || '').includes('🔞'),
   })).filter((s) => /^https?:\/\//i.test(s.api));
   return sources;
+}
+
+/** 校验/规范化后台提交的自定义源列表 */
+function normalizeSourceList(list) {
+  const out = [];
+  const usedKeys = new Set();
+  for (const s of list) {
+    if (!s || typeof s !== 'object') continue;
+    const api = String(s.api || '').trim();
+    if (!/^https?:\/\//i.test(api)) continue;
+    let host = '';
+    try { host = new URL(api).hostname.toLowerCase(); } catch (e) { continue; }
+    let key = String(s.key || '').trim() || host;
+    while (usedKeys.has(key)) key += '-x';
+    usedKeys.add(key);
+    out.push({
+      key,
+      name: (String(s.name || '').trim() || host).slice(0, 40),
+      api,
+      detail: /^https?:\/\//i.test(String(s.detail || '').trim()) ? String(s.detail).trim() : '',
+      custom: true,
+    });
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+
+/** 合并 远程源 + 后台自定义源, 应用停用/成人开关 */
+function mergeSources(remoteSources, settings) {
+  const custom = Array.isArray(settings.customSources) ? settings.customSources : [];
+  const disabled = new Set(Array.isArray(settings.disabledSources) ? settings.disabledSources : []);
+  const byKey = new Map();
+  for (const s of remoteSources) byKey.set(s.key, { ...s });
+  for (const s of custom) byKey.set(s.key, { ...s, adult: false });
+  const all = [...byKey.values()].map((s) => ({ ...s, disabled: disabled.has(s.key) }));
+  const enabled = settings.adultEnabled ? all.filter((s) => !s.disabled) : all.filter((s) => !s.disabled && !s.adult);
+  return { all, enabled };
 }
 
 async function loadSources(env, ctx) {
@@ -152,7 +217,7 @@ async function loadSources(env, ctx) {
 async function makeToken(env) {
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL;
   const payload = String(exp);
-  const sig = await hmacHex(adminSecret(env), payload);
+  const sig = await hmacHex(await adminSecret(env), payload);
   return `${payload}.${sig}`;
 }
 async function verifyToken(env, token) {
@@ -160,11 +225,14 @@ async function verifyToken(env, token) {
   const [payload, sig] = token.split('.');
   if (!/^\d+$/.test(payload)) return false;
   if (Number(payload) < Math.floor(Date.now() / 1000)) return false;
-  const expect = await hmacHex(adminSecret(env), payload);
+  const expect = await hmacHex(await adminSecret(env), payload);
   return safeEqual(sig, expect);
 }
-function adminSecret(env) {
-  return (env.ADMIN_PASSWORD || 'admin123') + '::nebulatv-hmac';
+/** 会话签名密钥: 后台改密后(存哈希)以哈希为基准, 旧会话自动失效 */
+async function adminSecret(env) {
+  const s = await getSettings(env);
+  const base = s.passwordHash || env.ADMIN_PASSWORD || 'admin123';
+  return base + '::nebulatv-hmac';
 }
 function readToken(req, url) {
   const authz = req.headers.get('Authorization') || '';
@@ -270,11 +338,16 @@ export default {
         return json({ siteName: s.siteName, defaultTheme: s.defaultTheme, announcement: s.announcement });
       }
 
-      /* ---- 源列表(按后台开关过滤成人源) ---- */
+      /* ---- 源列表(远程源 + 后台自定义源, 按停用/成人开关过滤) ---- */
       if (path === '/api/config' && request.method === 'GET') {
-        const [{ sources }, settings] = await Promise.all([loadSources(env, ctx), getSettings(env)]);
-        const visible = settings.adultEnabled ? sources : sources.filter((s) => !s.adult);
-        return json({ adultEnabled: settings.adultEnabled, total: sources.length, count: visible.length, sources: visible });
+        const [{ sources: remote }, settings] = await Promise.all([loadSources(env, ctx), getSettings(env)]);
+        const { all, enabled } = mergeSources(remote, settings);
+        return json({
+          adultEnabled: settings.adultEnabled,
+          total: all.length,
+          count: enabled.length,
+          sources: enabled.map(({ key, name, api, detail, adult }) => ({ key, name, api, detail, adult })),
+        });
       }
 
       /* ---- 苹果CMS API 代理(白名单) ---- */
@@ -284,9 +357,10 @@ export default {
         try { tu = new URL(target); } catch (e) { return json({ error: 'bad url' }, 400); }
         if (!/^https?:$/.test(tu.protocol)) return json({ error: 'bad protocol' }, 400);
 
-        const { sources } = await loadSources(env, ctx);
+        const [{ sources: remote }, settings] = await Promise.all([loadSources(env, ctx), getSettings(env)]);
+        const { all } = mergeSources(remote, settings);
         const allow = new Set();
-        for (const s of sources) {
+        for (const s of all) {
           for (const u of [s.api, s.detail]) {
             try { if (u) allow.add(new URL(u).hostname.toLowerCase()); } catch (e) { /* ignore */ }
           }
@@ -318,8 +392,8 @@ export default {
         if (rateLimited(ip)) return json({ error: '尝试过于频繁，请稍后再试' }, 429);
         let body = {};
         try { body = await request.json(); } catch (e) { /* ignore */ }
-        const pass = env.ADMIN_PASSWORD || 'admin123';
-        if (typeof body.password !== 'string' || body.password !== pass) return json({ error: '密码错误' }, 401);
+        const settings = await getSettings(env);
+        if (!(await verifyAdminPassword(env, settings, body.password))) return json({ error: '密码错误' }, 401);
         const token = await makeToken(env);
         return json({ token }, 200, {
           'Set-Cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL}`,
@@ -332,12 +406,21 @@ export default {
           return json({ ok: true }, 200, { 'Set-Cookie': `${COOKIE_NAME}=; Path=/; HttpOnly; Max-Age=0` });
         }
         if (path === '/api/admin/settings' && request.method === 'GET') {
-          const s = await getSettings(env);
+          const [s, { sources: remote }] = await Promise.all([getSettings(env), loadSources(env, ctx)]);
+          const { all } = mergeSources(remote, s);
           return json({
-            ...s,
+            siteName: s.siteName,
+            adultEnabled: s.adultEnabled,
+            defaultTheme: s.defaultTheme,
+            announcement: s.announcement,
+            liveSources: s.liveSources,
+            customSources: s.customSources || [],
+            disabledSources: s.disabledSources || [],
             storage: kv(env) ? 'kv' : 'memory',
             passwordFromEnv: Boolean(env.ADMIN_PASSWORD),
+            hasCustomPassword: Boolean(s.passwordHash),
             configUrl: env.CONFIG_URL || DEFAULT_CONFIG_URL,
+            allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });
         }
         if (path === '/api/admin/settings' && request.method === 'POST') {
@@ -345,6 +428,36 @@ export default {
           try { body = await request.json(); } catch (e) { /* ignore */ }
           const saved = await saveSettings(env, body);
           return json({ ok: true, settings: saved, storage: kv(env) ? 'kv' : 'memory' });
+        }
+        /* ---- 后台修改管理密码 ---- */
+        if (path === '/api/admin/password' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const oldPwd = String(body.oldPassword || '');
+          const newPwd = String(body.newPassword || '');
+          const cur = await getSettings(env);
+          if (!(await verifyAdminPassword(env, cur, oldPwd))) return json({ error: '旧密码不正确' }, 400);
+          if (newPwd.length < 6) return json({ error: '新密码至少 6 位' }, 400);
+          if (newPwd.length > 64) return json({ error: '新密码过长' }, 400);
+          const salt = randomSalt();
+          const passwordHash = await sha256Hex(salt + newPwd);
+          await saveSettings(env, { passwordHash, salt });
+          return json({ ok: true });
+        }
+        /* ---- 后台影视源批量保存(自定义源增删改 + 内置源停用) ---- */
+        if (path === '/api/admin/sources' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const saved = await saveSettings(env, {
+            customSources: Array.isArray(body.customSources) ? body.customSources : undefined,
+            disabledSources: Array.isArray(body.disabledSources) ? body.disabledSources : undefined,
+          });
+          return json({
+            ok: true,
+            customSources: saved.customSources,
+            disabledSources: saved.disabledSources,
+            storage: kv(env) ? 'kv' : 'memory',
+          });
         }
         return json({ error: 'not found' }, 404);
       }

@@ -48,5 +48,17 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       }),
+    adminChangePassword: (oldPassword, newPassword) =>
+      jfetch('/api/admin/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldPassword, newPassword }),
+      }, 10000),
+    adminSaveSources: (customSources, disabledSources) =>
+      jfetch('/api/admin/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customSources, disabledSources }),
+      }, 15000),
   };
 })();
