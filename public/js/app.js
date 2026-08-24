@@ -850,6 +850,7 @@
           <div class="pb-title">${esc(vod.vod_name)}<span id="curEpName">${esc(groups[gi].eps[ei].name)}</span></div>
           <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
           <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
+          <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
         </div>
         <div class="side-card swap-card">
           <h4>⚡ 快速换源</h4>
@@ -857,8 +858,6 @@
           <div class="src-switch swap-flow" id="srcSwitch">
             <span class="src-item cur">${srcIconHtml(src)} 当前 · ${esc(src.name)}</span>
           </div>
-          <button class="swap-miss-toggle hidden" id="swapMissToggle" type="button"></button>
-          <div class="src-switch miss-list hidden" id="swapMiss"></div>
         </div>
         <div class="side-card eps-card" style="margin-top:14px">
           <h4>📺 选集 · 共 ${groups.reduce((n, g) => n + g.eps.length, 0)} 集<button class="chip" id="epsFold">收起 ▴</button></h4>
@@ -978,6 +977,18 @@
       e.target.classList.toggle('on', nv);
     });
 
+    // ⛶ 真全屏: 标准 Fullscreen API 优先, iOS 走视频自带的系统播放器全屏
+    $('#fsBtn').addEventListener('click', () => {
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (fsEl) {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        return;
+      }
+      if (video.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; } // iPhone/iPad
+      if (video.requestFullscreen) video.requestFullscreen();
+      else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+    });
+
     // 收藏(与详情页同一份本地收藏夹)
     $('#playFav').addEventListener('click', () => {
       const list = store.get('favs', []);
@@ -1028,32 +1039,18 @@
     }
 
     // ⚡ 快速换源: 并发探测全部其他源, 谁响应快谁先出现(带实测延迟), 本页切换并同步集数
-    // 有本片的源显示为可点药丸; 无此片/超时的源默认折叠, 不占版面
+    // 有效源=可点亮色药丸; 无此片/超时=同区域灰显药丸排在后面
     (function startSwapSearch() {
       const others = visibleSources().filter((s) => s.key !== key);
       const swapOk = $('#srcSwitch');
-      const swapMiss = $('#swapMiss');
-      const missToggle = $('#swapMissToggle');
       const statEl = $('#swapStat');
       let pending = others.length, okCount = 0, missCount = 0;
-      const updMissToggle = () => {
-        if (!missToggle) return;
-        const collapsed = !swapMiss || swapMiss.classList.contains('hidden');
-        missToggle.textContent = `${collapsed ? '▶' : '▼'} ${missCount} 个源无此片或已失效（点击展开/收起）`;
-        missToggle.classList.toggle('hidden', missCount === 0);
-      };
-      if (missToggle) {
-        missToggle.addEventListener('click', () => {
-          swapMiss.classList.toggle('hidden');
-          updMissToggle();
-        });
-      }
       const updStat = () => {
         if (!alive() || !statEl) return;
         statEl.innerHTML = pending > 0
-          ? `<span class="spin"></span> 探测中 ${others.length - pending}/${others.length} · 已找到 <b style="color:var(--acc)">${okCount}</b> 个可换源`
+          ? `<span class="spin"></span> 探测中 ${others.length - pending}/${others.length} · 可换源 <b style="color:var(--acc)">${okCount}</b> 个 · 无此片/失效 ${missCount} 个`
           : okCount > 0
-            ? `✅ 探测完成 · 点击药丸即换源，<b>集数自动同步</b>`
+            ? `✅ 探测完成 · 点击亮色药丸即换源，<b>集数自动同步</b>`
             : '❌ 其他源都没有本片或已失效';
       };
       updStat();
@@ -1062,7 +1059,7 @@
         (async () => {
           const t0 = performance.now();
           try {
-            // 9秒快速超时: 慢源不拖累整体, 超时直接归入折叠区
+            // 9秒快速超时: 慢源不拖累整体
             const r2 = await API.search(s, vod.vod_name, 1, 9000);
             if (!alive()) return;
             const ms = Math.round(performance.now() - t0);
@@ -1076,17 +1073,17 @@
                    ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span></a>`);
             } else {
               missCount++;
-              swapMiss.insertAdjacentHTML('beforeend',
-                `<div class="src-item"><span>${esc(s.name)}</span><small><i class="spd ${spdCls}">⚡${ms}ms</i>无此片</small></div>`);
-              updMissToggle();
+              swapOk.insertAdjacentHTML('beforeend',
+                `<span class="src-item miss" title="${esc(s.name)} · 响应${ms}ms但无本片">
+                   ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span><small>无此片</small></span>`);
             }
           } catch (e) {
             if (!alive()) return;
             pending--;
             missCount++;
-            swapMiss.insertAdjacentHTML('beforeend',
-              `<div class="src-item"><span>${esc(s.name)}</span><small class="fail">超时 / 已失效</small></div>`);
-            updMissToggle();
+            swapOk.insertAdjacentHTML('beforeend',
+              `<span class="src-item miss" title="${esc(s.name)} · 请求超时或源已失效">
+                 ${srcIconHtml(s)}<span>${esc(s.name)}</span><small class="fail">超时/失效</small></span>`);
           }
           updStat();
         })();
