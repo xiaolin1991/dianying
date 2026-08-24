@@ -14,14 +14,14 @@
   }
 
   /** 通过后端代理请求苹果CMS接口。source={api}, params={ac,ids,wd,pg,...} */
-  async function proxyMacs(source, params) {
+  async function proxyMacs(source, params, timeout = 22000) {
     const qs = Object.entries(params)
       .filter(([, v]) => v !== undefined && v !== null && v !== '')
       .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
       .join('&');
     const sep = source.api.includes('?') ? '&' : '?';
     const target = source.api + sep + qs;
-    return jfetch('/api/proxy?url=' + encodeURIComponent(target), {}, 22000);
+    return jfetch('/api/proxy?url=' + encodeURIComponent(target), {}, timeout);
   }
 
   window.API = {
@@ -29,10 +29,10 @@
     getConfig: () => jfetch('/api/config'),
     getLive: () => jfetch('/api/live', {}, 30000),
 
-    search: (source, wd, pg = 1) => proxyMacs(source, { ac: 'videolist', wd, pg }),
+    search: (source, wd, pg = 1, timeout = 22000) => proxyMacs(source, { ac: 'videolist', wd, pg }, timeout),
     list: (source, pg = 1, t = '') => proxyMacs(source, { ac: 'videolist', pg, t: t || undefined }),
     categories: (source) => proxyMacs(source, { ac: 'list' }),
-    detail: (source, ids) => proxyMacs(source, { ac: 'videolist', ids }),
+    detail: (source, ids, timeout = 22000) => proxyMacs(source, { ac: 'videolist', ids }, timeout),
 
     adminLogin: (password) =>
       jfetch('/api/admin/login', {

@@ -797,12 +797,36 @@
       <div class="video-tip" id="videoTip">正在加载视频…</div></div>
       <div class="empty" style="padding:20px 0">正在获取剧集信息…</div></div>`;
 
-    const r = await API.detail(src, id);
-    if (!alive()) return;
+    let r;
+    try {
+      r = await API.detail(src, id);
+    } catch (e) {
+      if (!alive()) return;
+      v.innerHTML = `<div class="container page-wrap"><div class="empty"><div class="big">⚠️</div>
+        <p><b>${esc(src.name)}</b> 加载失败：${esc(e.message)}</p>
+        <p style="color:var(--dim);font-size:12.5px">该源可能已失效或网络超时，换个方式试试：</p>
+        <div style="display:flex;gap:10px;justify-content:center;margin-top:14px;flex-wrap:wrap">
+          <button class="btn primary small" onclick="location.reload()">🔄 重试本源</button>
+          <a class="btn ghost small" href="#/sources">🔎 去影视源页换源找片</a>
+          <a class="btn ghost small" href="#/home">回首页</a></div></div></div>`;
+      return;
+    }
     const vod = r.list && r.list[0];
-    if (!vod) throw new Error('影片不存在');
+    if (!vod || !String(vod.vod_name || '').trim()) {
+      if (!alive()) return;
+      v.innerHTML = `<div class="container page-wrap"><div class="empty"><div class="big">🙈</div>
+        <p>该源未返回此影片数据，可能已下架</p>
+        <a class="btn ghost small" style="margin-top:12px" href="#/home">回首页找别的片</a></div></div>`;
+      return;
+    }
     const groups = parsePlayGroups(vod);
-    if (!groups.length) throw new Error('没有可播放的剧集');
+    if (!groups.length) {
+      if (!alive()) return;
+      v.innerHTML = `<div class="container page-wrap"><div class="empty"><div class="big">😴</div>
+        <p>该源暂无可播放的剧集</p>
+        <a class="btn ghost small" style="margin-top:12px" href="#/detail/${key}/${encodeURIComponent(id)}">查看详情页</a></div></div>`;
+      return;
+    }
 
     let gi = Number(query.group || 0);
     if (!groups[gi]) gi = 0;
@@ -822,10 +846,12 @@
             <div class="video-tip hidden" id="videoTip"></div></div>
           <aside>
             <div class="side-card">
-              <h4>换播放源</h4>
+              <h4>⚡ 快速换源</h4>
+              <div class="swap-stat" id="swapStat"><span class="spin"></span> 正在探测其他播放源…</div>
               <div class="src-switch" id="srcSwitch">
                 <div class="src-item cur"><span>${esc(src.name)}</span><small>当前</small></div>
               </div>
+              <div id="swapMiss"></div>
             </div>
             <div class="side-card" style="margin-top:14px">
               <h4>选集<button class="chip" style="padding:4px 12px;font-size:12px" id="autoNext">自动连播: ${store.get('autoNext', true) ? '开' : '关'}</button></h4>
@@ -850,6 +876,9 @@
       curBtn && curBtn.scrollIntoView({ block: 'nearest' });
     }
 
+    let saveTimer = null; // 进度保存定时器(换集/离开页面时必须停掉, 否则污染旧集进度)
+    function stopSaveTimer() { if (saveTimer) { clearInterval(saveTimer); saveTimer = null; } }
+
     function playCurrent(resume) {
       const ep = groups[gi].eps[ei];
       Player.play(video, ep.url, tip);
@@ -857,15 +886,17 @@
       tip.textContent = '正在加载…';
       const clear = () => { tip.classList.add('hidden'); };
       video.addEventListener('playing', clear, { once: true });
-      video.addEventListener('error', () => { tip.classList.remove('hidden'); tip.textContent = '播放失败，请尝试换集或换源'; }, { once: true });
+      video.addEventListener('error', () => { tip.classList.remove('hidden'); tip.textContent = '播放失败，请尝试换集或在右上角「快速换源」换一个源'; }, { once: true });
 
       if (resume && allProg[gi + ':' + ei] && allProg[gi + ':' + ei].t > 20) {
         const onceSeek = () => { try { video.currentTime = allProg[gi + ':' + ei].t; } catch (e) {} };
         video.addEventListener('loadedmetadata', onceSeek, { once: true });
       }
       // 进度保存 + 观看心跳(每30秒向服务器累计观看时长)
+      stopSaveTimer();
       let beat = 0;
-      const saveTick = setInterval(() => {
+      saveTimer = setInterval(() => {
+        if (!alive() || !video.isConnected) return stopSaveTimer(); // 已切页: 自动停止
         if (video.currentTime > 5) {
           allProg[gi + ':' + ei] = { t: Math.floor(video.currentTime), d: Math.floor(video.duration || 0) };
           store.set(progKey, allProg);
@@ -880,7 +911,6 @@
           }
         }
       }, 5000);
-      window.addEventListener('hashchange', () => clearInterval(saveTick), { once: true });
       // 记录看过
       const wa = store.get('watched:' + key + ':' + vod.vod_id, []);
       if (!wa.includes(ei)) { wa.push(ei); store.set('watched:' + key + ':' + vod.vod_id, wa); }
@@ -910,29 +940,52 @@
       e.target.textContent = '自动连播: ' + (nv ? '开' : '关');
     });
 
-    // 换源候选(新标签页打开, 不打断当前播放)
-    (async () => {
-      try {
-        const others = visibleSources().filter((s) => s.key !== key).slice(0, 14);
-        const found = [];
-        await Promise.allSettled(others.map(async (s) => {
+    // ⚡ 快速换源: 并发探测全部其他源, 谁响应快谁先出现(带实测延迟), 本页切换并同步集数
+    (function startSwapSearch() {
+      const others = visibleSources().filter((s) => s.key !== key);
+      const swapOk = $('#srcSwitch');
+      const swapMiss = $('#swapMiss');
+      const statEl = $('#swapStat');
+      let pending = others.length, okCount = 0;
+      const updStat = () => {
+        if (!alive() || !statEl) return;
+        statEl.innerHTML = pending > 0
+          ? `<span class="spin"></span> 探测中 ${others.length - pending}/${others.length} · 已找到 ${okCount} 个可换源`
+          : okCount > 0
+            ? `✅ 探测完成 · 可换源 <b style="color:var(--acc)">${okCount}</b> 个（点击即换，集数同步）`
+            : '❌ 其他源都没有本片或已失效';
+      };
+      updStat();
+      const norm = (s2) => String(s2 || '').replace(/\s/g, '');
+      others.forEach((s) => {
+        (async () => {
+          const t0 = performance.now();
           try {
-            const r2 = await API.search(s, vod.vod_name);
-            for (const v2 of (r2.list || [])) {
-              if (String(v2.vod_name).replace(/\s/g, '') === String(vod.vod_name).replace(/\s/g, '')) {
-                found.push({ key: s.key, name: s.name, id: v2.vod_id });
-                return;
-              }
+            // 9秒快速超时: 慢源不拖累整体, 超时直接归入"失败"
+            const r2 = await API.search(s, vod.vod_name, 1, 9000);
+            if (!alive()) return;
+            const ms = Math.round(performance.now() - t0);
+            const spdCls = ms < 900 ? 'sp-good' : ms < 2600 ? 'sp-mid' : 'sp-bad';
+            const hit = (r2.list || []).find((v2) => norm(v2.vod_name) === norm(vod.vod_name));
+            pending--;
+            if (hit && hit.vod_id) {
+              okCount++;
+              swapOk.insertAdjacentHTML('beforeend',
+                `<a class="src-item" href="#/play/${esc(s.key)}/${encodeURIComponent(hit.vod_id)}?ep=${ei}&group=${gi}" title="${esc(s.name)} · 延迟${ms}ms">
+                   <span>${esc(s.name)}</span><small><i class="spd ${spdCls}">⚡${ms}ms</i>切源</small></a>`);
+            } else {
+              swapMiss.insertAdjacentHTML('beforeend',
+                `<div class="src-item miss"><span>${esc(s.name)}</span><small><i class="spd ${spdCls}">⚡${ms}ms</i>无此片</small></div>`);
             }
-          } catch (e) {}
-        }));
-        if (!alive()) return;
-        const sw = $('#srcSwitch');
-        if (sw && found.length) {
-          sw.insertAdjacentHTML('beforeend', found.map((f) =>
-            `<a class="src-item" target="_blank" rel="noopener" href="#/play/${esc(f.key)}/${encodeURIComponent(f.id)}?ep=${ei}"><span>${esc(f.name)}</span><small>切换</small></a>`).join(''));
-        }
-      } catch (e) {}
+          } catch (e) {
+            if (!alive()) return;
+            pending--;
+            swapMiss.insertAdjacentHTML('beforeend',
+              `<div class="src-item miss"><span>${esc(s.name)}</span><small class="fail">超时/失效</small></div>`);
+          }
+          updStat();
+        })();
+      });
     })();
 
     // 相关推荐(渐进式加载)
