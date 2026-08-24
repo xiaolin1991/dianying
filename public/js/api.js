@@ -30,8 +30,8 @@
     getLive: () => jfetch('/api/live', {}, 30000),
 
     search: (source, wd, pg = 1, timeout = 22000) => proxyMacs(source, { ac: 'videolist', wd, pg }, timeout),
-    list: (source, pg = 1, t = '') => proxyMacs(source, { ac: 'videolist', pg, t: t || undefined }),
-    categories: (source) => proxyMacs(source, { ac: 'list' }),
+    list: (source, pg = 1, t = '', timeout = 22000) => proxyMacs(source, { ac: 'videolist', pg, t: t || undefined }, timeout),
+    categories: (source, timeout = 22000) => proxyMacs(source, { ac: 'list' }, timeout),
     detail: (source, ids, timeout = 22000) => proxyMacs(source, { ac: 'videolist', ids }, timeout),
 
     adminLogin: (password) =>

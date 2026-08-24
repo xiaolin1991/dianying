@@ -1581,44 +1581,70 @@
       <div class="grid" id="srcGrid">${skeletons(HOME_ROW_COUNT)}</div>
       <div class="scroll-sentinel" id="srcSentinel"></div>`;
 
-    let page = 1, busy = false, exhausted = false;
+    let page = 1, busy = false, exhausted = false, consecFails = 0;
     const grid = $('#srcGrid'), statusEl = $('#srcStatus');
 
     const setStatus = (t) => { if (alive() && statusEl) statusEl.textContent = t; };
+    const fetchPage = (p, timeout) => (q ? API.search(src, q, p, timeout) : API.list(src, p, cat, timeout));
+
+    function showLoadError(msg) {
+      setHtml(grid, `<div class="empty" style="grid-column:1/-1"><div class="big">⚠️</div>
+        <p>${esc(msg)}</p>
+        <button class="btn primary small" id="srcRetry" style="margin-top:10px">🔄 重试</button></div>`);
+      setStatus('❌ ' + msg);
+      $('#srcRetry') && $('#srcRetry').addEventListener('click', () => {
+        exhausted = false; consecFails = 0; page = 1;
+        setHtml(grid, skeletons(HOME_ROW_COUNT));
+        loadPage();
+      });
+    }
 
     async function loadPage() {
       if (busy || exhausted || !alive()) return;
       busy = true;
       setStatus('⏳ 正在加载…');
-      try {
-        const r = q ? await API.search(src, q, page) : await API.list(src, page, cat);
-        if (!alive()) return;
-        const items = (r.list || []).filter((vod) => String(vod.vod_name || '').trim());
-        if (!items.length && page === 1) {
-          setHtml(grid, '<div class="empty" style="grid-column:1/-1"><div class="big">🙈</div>没有找到内容，换个关键词或分类试试</div>');
-          exhausted = true;
-          setStatus('❌ 没有找到内容');
-        } else if (!items.length) {
-          exhausted = true;
-          setStatus(`✅ 已加载全部（${$('#srcGrid') ? $$('#srcGrid .card').length : 0} 部）`);
-        } else {
-          grid.insertAdjacentHTML('beforeend', items.map((vod) => cardHtml({
-            sourceKey: src.key, sourceName: src.name, id: vod.vod_id,
-            title: String(vod.vod_name).trim(), pic: vod.vod_pic,
-            remarks: vod.vod_remarks, year: vod.vod_year, typeName: vod.type_name,
-          })).join(''));
-          setStatus(page === 1 ? `已显示 ${items.length} 部 · 下滑自动加载` : `已显示 ${$$('#srcGrid .card').length} 部`);
-          page++;
-          if (items.length < 20) exhausted = true;
-        }
-      } catch (e) {
-        if (alive()) {
-          grid.insertAdjacentHTML('beforeend', `<div class="empty" style="grid-column:1/-1;font-size:13px;color:var(--dim)">该源请求失败：${esc(e.message)}</div>`);
-          setStatus('❌ 该源请求失败');
-          exhausted = true;
-        }
+      // 每波并发抓2页: 谁先回来谁先显示; 失败的页自动跳过不挡路
+      const batch = [page, page + 1];
+      const results = await Promise.allSettled(batch.map((p) => fetchPage(p, 12000)));
+      if (!alive()) return;
+      let addedAny = false;
+      for (let i = 0; i < results.length; i++) {
+        const g = $('#srcGrid');
+        if (!g) return;
+        if (results[i].status !== 'fulfilled') { consecFails++; continue; }
+        const items = (results[i].value.list || [])
+          .filter((vod) => String(vod.vod_name || '').trim())
+          .filter((vod, idx, arr) => arr.findIndex((x) => x.vod_id === vod.vod_id) === idx); // 波内去重
+        if (!items.length) { consecFails++; continue; }
+        consecFails = 0;
+        addedAny = true;
+        // 首批到达立即清掉骨架屏(修复"前两行一直空白")
+        if (g.querySelector('.skl-card')) g.innerHTML = '';
+        g.insertAdjacentHTML('beforeend', items.map((vod) => cardHtml({
+          sourceKey: src.key, sourceName: src.name, id: vod.vod_id,
+          title: String(vod.vod_name).trim(), pic: vod.vod_pic,
+          remarks: vod.vod_remarks, year: vod.vod_year, typeName: vod.type_name,
+        })).join(''));
+      }
+      const prevPage = page;
+      page += batch.length;
+      const shown = $$('#srcGrid .card').length;
+      if (addedAny) {
+        setStatus(prevPage === 1 ? `已显示 ${shown} 部 · 下滑自动加载` : `已显示 ${shown} 部`);
+      } else if ((consecFails >= 4 && !addedAny) || (prevPage === 1 && !$('#srcGrid .card'))) {
+        // 整个源都失败/无数据
+        if (!$('#srcGrid .card')) {
+          showLoadError(q ? '没有找到相关内容，换个关键词或分类试试' : '该源暂时无法访问或没有内容');
+        } else { exhausted = true; setStatus(`✅ 已加载全部（${shown} 部）`); }
+      } else {
+        exhausted = true;
+        setStatus(shown ? `✅ 已加载全部（${shown} 部）` : '');
       }
       busy = false;
+      if (addedAny && shown < HOME_ROW_COUNT * 3 && !exhausted && alive()) {
+        // 第一屏还没填满就继续补(递归受 busy 守护)
+        loadPage().catch(() => {});
+      }
     }
 
     // 分类节点(异步加载, 不阻塞首屏)
@@ -1922,6 +1948,34 @@
       $('#logoutBtn').addEventListener('click', async () => { try { await API.adminLogout(); } catch (e) {} toast('已退出'); viewAdmin(); });
 
       /* ---- 流量统计 ---- */
+      let statRows = [], statPg = 0;
+      const STAT_PER = 10; // 明细每页条数, 避免后台被撑长
+      function renderStatPage() {
+        const box = $('#statRecent');
+        if (!box) return;
+        const pages = Math.max(1, Math.ceil(statRows.length / STAT_PER));
+        if (statPg > pages - 1) statPg = pages - 1;
+        const seg = statRows.slice(statPg * STAT_PER, (statPg + 1) * STAT_PER);
+        const rows = seg.map((it) => `
+          <tr>
+            <td>${fmtDateTime(it.ts)}</td>
+            <td>${it.kind === 'search' ? '🔍' : '📄'}</td>
+            <td class="ulog-title" title="${esc(it.kind === 'search' ? it.q : it.path)}">${esc(it.kind === 'search' ? it.q : it.path)}</td>
+            <td>${esc(it.u || '—')}</td>
+            <td>${esc(it.ip)}${it.geo ? '<br><small style="color:var(--dim)">' + esc(it.geo) + '</small>' : ''}</td>
+          </tr>`).join('');
+        box.innerHTML = rows
+          ? `<table class="adm-table"><thead><tr><th>时间</th><th>类型</th><th>内容</th><th>用户</th><th>IP / 归属地</th></tr></thead><tbody>${rows}</tbody></table>
+             ${statRows.length > STAT_PER ? `
+               <div class="pager" style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px">
+                 <button class="btn ghost small" id="stPrev" ${statPg <= 0 ? 'disabled' : ''}>‹ 上一页</button>
+                 <span style="color:var(--dim);font-size:12px">第 ${statPg + 1} / ${pages} 页 · 共 ${statRows.length} 条</span>
+                 <button class="btn ghost small" id="stNext" ${statPg >= pages - 1 ? 'disabled' : ''}>下一页 ›</button>
+               </div>` : ''}`
+          : '<p class="hint" style="margin-top:8px">暂无明细（访客进入站点后开始累计）</p>';
+        $('#stPrev') && $('#stPrev').addEventListener('click', () => { statPg--; renderStatPage(); });
+        $('#stNext') && $('#stNext').addEventListener('click', () => { statPg++; renderStatPage(); });
+      }
       async function loadStats() {
         try {
           const d = await API.adminStats();
@@ -1936,17 +1990,8 @@
               <div class="sp-bar"><i style="width:${Math.round((p.n / maxN) * 100)}%"></i></div>
               <b>${p.n}</b>
             </div>`).join('') || '<p class="hint" style="margin-top:8px">暂无页面访问数据</p>';
-          const rows = (d.recent || []).map((it) => `
-            <tr>
-              <td>${fmtDateTime(it.ts)}</td>
-              <td>${it.kind === 'search' ? '🔍' : '📄'}</td>
-              <td class="ulog-title" title="${esc(it.kind === 'search' ? it.q : it.path)}">${esc(it.kind === 'search' ? it.q : it.path)}</td>
-              <td>${esc(it.u || '—')}</td>
-              <td>${esc(it.ip)}${it.geo ? '<br><small style="color:var(--dim)">' + esc(it.geo) + '</small>' : ''}</td>
-            </tr>`).join('');
-          $('#statRecent').innerHTML = rows
-            ? `<table class="adm-table"><thead><tr><th>时间</th><th>类型</th><th>内容</th><th>用户</th><th>IP / 归属地</th></tr></thead><tbody>${rows}</tbody></table>`
-            : '<p class="hint" style="margin-top:8px">暂无明细（访客进入站点后开始累计）</p>';
+          statRows = d.recent || [];
+          renderStatPage();
         } catch (e) { /* ignore */ }
       }
       $('#refreshStatsBtn').addEventListener('click', loadStats);
