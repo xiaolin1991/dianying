@@ -1,0 +1,118 @@
+/* ============================================================
+   星河影视 NebulaTV — 6 套可选配色主题
+   通过 <html data-theme="..."> 切换
+   ============================================================ */
+
+/* 1. 暗夜蓝(默认 · 深色影院) */
+:root[data-theme="midnight"] {
+  --bg: #070b14;
+  --bg2: #0b1220;
+  --card: #101a30;
+  --card-hover: #16233f;
+  --card-br: rgba(120, 150, 220, .16);
+  --txt: #eaf0fb;
+  --dim: #8d99b5;
+  --acc: #5b8cff;
+  --acc2: #22d3ee;
+  --danger: #ff5d73;
+  --ok: #34d399;
+  --glass: rgba(13, 20, 38, .78);
+  --shadow: 0 10px 34px rgba(0, 0, 0, .45);
+  --glow: 0 0 22px rgba(91, 140, 255, .35);
+  --hero-overlay: linear-gradient(90deg, rgba(7,11,20,.96) 8%, rgba(7,11,20,.55) 55%, rgba(7,11,20,.18));
+}
+
+/* 2. 翡翠绿(深色) */
+:root[data-theme="emerald"] {
+  --bg: #06110d;
+  --bg2: #0a1813;
+  --card: #0f211a;
+  --card-hover: #153125;
+  --card-br: rgba(80, 200, 160, .16);
+  --txt: #e9fbf3;
+  --dim: #84a89a;
+  --acc: #34d399;
+  --acc2: #a3e635;
+  --danger: #ff5d73;
+  --ok: #34d399;
+  --glass: rgba(9, 24, 19, .78);
+  --shadow: 0 10px 34px rgba(0, 0, 0, .45);
+  --glow: 0 0 22px rgba(52, 211, 153, .32);
+  --hero-overlay: linear-gradient(90deg, rgba(6,17,13,.96) 8%, rgba(6,17,13,.55) 55%, rgba(6,17,13,.18));
+}
+
+/* 3. 落日橙(暖深色) */
+:root[data-theme="sunset"] {
+  --bg: #150e08;
+  --bg2: #1d130a;
+  --card: #251709;
+  --card-hover: #33200d;
+  --card-br: rgba(255, 170, 90, .18);
+  --txt: #fdf3e7;
+  --dim: #b39b82;
+  --acc: #ff8a3d;
+  --acc2: #ffc857;
+  --danger: #ff5d73;
+  --ok: #34d399;
+  --glass: rgba(29, 19, 10, .78);
+  --shadow: 0 10px 34px rgba(0, 0, 0, .45);
+  --glow: 0 0 22px rgba(255, 138, 61, .35);
+  --hero-overlay: linear-gradient(90deg, rgba(21,14,8,.96) 8%, rgba(21,14,8,.55) 55%, rgba(21,14,8,.18));
+}
+
+/* 4. 樱花粉(浅色) */
+:root[data-theme="sakura"] {
+  --bg: #fdf4f7;
+  --bg2: #fbeaf1;
+  --card: #ffffff;
+  --card-hover: #fff5f9;
+  --card-br: rgba(230, 120, 165, .22);
+  --txt: #40222e;
+  --dim: #a07a89;
+  --acc: #ff6b9d;
+  --acc2: #c084fc;
+  --danger: #e5484d;
+  --ok: #30a46c;
+  --glass: rgba(255, 250, 252, .82);
+  --shadow: 0 10px 30px rgba(214, 51, 108, .14);
+  --glow: 0 0 22px rgba(255, 107, 157, .28);
+  --hero-overlay: linear-gradient(90deg, rgba(253,244,247,.97) 8%, rgba(253,244,247,.6) 55%, rgba(253,244,247,.2));
+}
+
+/* 5. 海洋青(浅色) */
+:root[data-theme="ocean"] {
+  --bg: #f1f9fc;
+  --bg2: #e4f3f9;
+  --card: #ffffff;
+  --card-hover: #f2fbfe;
+  --card-br: rgba(14, 165, 183, .22);
+  --txt: #10333b;
+  --dim: #6d8f98;
+  --acc: #0ea5b7;
+  --acc2: #2563eb;
+  --danger: #e5484d;
+  --ok: #30a46c;
+  --glass: rgba(245, 252, 254, .84);
+  --shadow: 0 10px 30px rgba(9, 116, 138, .14);
+  --glow: 0 0 22px rgba(14, 165, 183, .26);
+  --hero-overlay: linear-gradient(90deg, rgba(241,249,252,.97) 8%, rgba(241,249,252,.6) 55%, rgba(241,249,252,.2));
+}
+
+/* 6. 鎏金紫(深色华贵) */
+:root[data-theme="royal"] {
+  --bg: #100c1c;
+  --bg2: #171126;
+  --card: #1e1730;
+  --card-hover: #291f42;
+  --card-br: rgba(167, 139, 250, .2);
+  --txt: #f3effc;
+  --dim: #a196bd;
+  --acc: #a78bfa;
+  --acc2: #e6c26e;
+  --danger: #ff5d73;
+  --ok: #34d399;
+  --glass: rgba(23, 17, 38, .8);
+  --shadow: 0 10px 34px rgba(0, 0, 0, .5);
+  --glow: 0 0 22px rgba(167, 139, 250, .35);
+  --hero-overlay: linear-gradient(90deg, rgba(16,12,28,.96) 8%, rgba(16,12,28,.55) 55%, rgba(16,12,28,.18));
+}

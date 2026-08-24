@@ -1,0 +1,29 @@
+# ============================================================
+# 星河影视 NebulaTV — Cloudflare Workers 部署配置
+# 用法:
+#   1. npm install          (安装 wrangler)
+#   2. 创建 KV: npx wrangler kv namespace create CONFIG_KV
+#      把输出的 id 填到下面 [[kv_namespaces]] 的 id 中
+#   3. npm run deploy
+# ============================================================
+name = "nebulatv"
+main = "_worker.js"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# /api/* 始终先进入 Worker, 其余路径直接走静态资源
+run_worker_first = ["/api/*"]
+
+[[kv_namespaces]]
+binding = "CONFIG_KV"
+id = "REPLACE_WITH_YOUR_KV_ID"        # ← 必填: 替换为你的 KV namespace id
+
+[vars]
+# 后台管理密码(强烈建议修改; 也可在 Dashboard → Worker → 设置 → 环境变量 里配置为加密变量)
+ADMIN_PASSWORD = "admin123"
+# 初始成人内容开关(后台可随时切换): "false" 关闭 / "true" 开启
+ADULT_ENABLED = "false"
+# 影视源配置地址(LunaTV-config 每日自动更新)
+CONFIG_URL = "https://raw.githubusercontent.com/hafrey1/LunaTV-config/main/LunaTV-config.json"

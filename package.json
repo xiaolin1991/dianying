@@ -1,0 +1,16 @@
+{
+  "name": "nebulatv",
+  "version": "1.0.0",
+  "private": true,
+  "description": "星河影视 NebulaTV — 影视聚合 + 电视直播, 部署于 Cloudflare Workers / Pages",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:pages": "node scripts/build-pages.mjs && wrangler pages dev dist",
+    "deploy": "wrangler deploy",
+    "build:pages": "node scripts/build-pages.mjs",
+    "deploy:pages": "npm run build:pages && wrangler pages deploy dist"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

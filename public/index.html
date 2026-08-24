@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="midnight">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>星河影视 · NebulaTV</title>
+<link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="./css/themes.css">
+<link rel="stylesheet" href="./css/app.css">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+</head>
+<body>
+<div id="app">
+  <!-- 顶栏 -->
+  <header class="topbar" id="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/home" id="brandLink">
+        <svg class="brand-logo" viewBox="0 0 48 48" aria-hidden="true">
+          <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="var(--acc)"/><stop offset="1" stop-color="var(--acc2)"/>
+          </linearGradient></defs>
+          <circle cx="24" cy="24" r="21" fill="none" stroke="url(#lg)" stroke-width="3"/>
+          <path d="M19 15.5v17l14-8.5z" fill="url(#lg)"/>
+        </svg>
+        <span class="brand-name" id="brandName">星河影视</span>
+      </a>
+      <nav class="nav" id="mainNav"></nav>
+      <div class="topbar-right">
+        <div class="searchbox">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M10 2a8 8 0 105.3 14l4.4 4.4 1.4-1.4-4.4-4.4A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>
+          <input id="searchInput" type="search" placeholder="搜索 电影 / 剧集 / 综艺…" autocomplete="off">
+        </div>
+        <button class="icon-btn" id="themeBtn" title="配色主题">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M12 3a9 9 0 100 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01a1.5 1.5 0 011.13-2.49H16a5 5 0 005-5c0-4.42-4.03-8-9-8zm-5.5 9a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm3-4a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm5 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm3.5 4a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="theme-pop hidden" id="themePop"></div>
+  </header>
+
+  <!-- 公告 -->
+  <div class="announce hidden" id="announceBar"><span id="announceText"></span><button id="announceClose">×</button></div>
+
+  <!-- 主内容 -->
+  <main id="view"></main>
+
+  <footer class="footer">
+    <p>本站为影视聚合导航，所有内容均来自互联网公开采集接口，与本站无关。</p>
+    <p>Powered by Cloudflare Workers / Pages · Sources: LunaTV-config · iptv-org</p>
+  </footer>
+</div>
+
+<div id="toastWrap"></div>
+<button id="backTop" title="回到顶部">↑</button>
+
+<script src="./js/api.js"></script>
+<script src="./js/player.js"></script>
+<script src="./js/app.js"></script>
+</body>
+</html>
