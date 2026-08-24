@@ -148,7 +148,8 @@
   /* ------------------------------ 卡片渲染 ------------------------------ */
   /** 卡片为真实链接, 新标签页打开详情, 不丢失当前搜索/浏览页 */
   function cardHtml(item) {
-    const href = `#/detail/${esc(item.sourceKey)}/${encodeURIComponent(item.id)}`;
+    // 海报卡片直接进播放器页面(跳过详情中间页); 详情仍可从播放页「← 详情」进入
+    const href = `#/play/${esc(item.sourceKey)}/${encodeURIComponent(item.id)}?ep=0&group=0`;
     return `
       <a class="card" href="${href}" target="_blank" rel="noopener">
         <div class="card-poster">
