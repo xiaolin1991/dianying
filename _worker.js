@@ -42,6 +42,8 @@ const DEFAULT_SETTINGS = {
   disabledSources: [],  // 被后台停用的内置源 key 列表
   passwordHash: '',     // 后台改密的 SHA-256(salt+password) 十六进制, 空则用环境变量/默认密码
   salt: '',
+  configUrl: '',        // 后台自定义采集源配置地址(http), 空则用 CONFIG_URL/默认 LunaTV-config
+  configJson: '',       // 后台直接粘贴的 JSON 配置内容(优先于 configUrl)
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -128,6 +130,15 @@ async function saveSettings(env, patch) {
   }
   if (typeof patch.passwordHash === 'string' && /^[0-9a-f]{64}$/.test(patch.passwordHash)) next.passwordHash = patch.passwordHash;
   if (typeof patch.salt === 'string' && /^[0-9a-f]{32}$/.test(patch.salt)) next.salt = patch.salt;
+  if (typeof patch.configUrl === 'string') {
+    const cu = patch.configUrl.trim();
+    if (!cu) { next.configUrl = ''; next.configJson = ''; }
+    else if (/^https?:\/\//i.test(cu)) { next.configUrl = cu.slice(0, 600); next.configJson = ''; }
+    else if (cu.startsWith('{')) {
+      try { JSON.parse(cu); next.configJson = cu.slice(0, 500000); next.configUrl = ''; }
+      catch (e) { /* 非法 JSON, 忽略 */ }
+    }
+  }
   MEM.settings = next;
   if (kv(env)) await env.CONFIG_KV.put('settings', JSON.stringify(next));
   return next;
@@ -183,9 +194,13 @@ function mergeSources(remoteSources, settings) {
   return { all, enabled };
 }
 
-async function loadSources(env, ctx) {
-  const url = env.CONFIG_URL || DEFAULT_CONFIG_URL;
-  const cacheKey = new Request('https://cache.internal/nebulatv/sources/v1');
+async function loadSources(env, ctx, settingsArg) {
+  const settings = settingsArg || (await getSettings(env));
+  const inline = typeof settings.configJson === 'string' ? settings.configJson.trim() : '';
+  const url = (!inline && settings.configUrl) || env.CONFIG_URL || DEFAULT_CONFIG_URL;
+  // 缓存键随配置来源变化, 换配置后立即生效
+  const tag = inline ? 'inline-' + inline.length + '-' + (inline.length % 97) : String(url);
+  const cacheKey = new Request('https://cache.internal/nebulatv/sources/v1?u=' + encodeURIComponent(tag));
   try {
     const hit = await caches.default.match(cacheKey);
     if (hit) return await hit.json();
@@ -194,12 +209,17 @@ async function loadSources(env, ctx) {
   let sources = [];
   let from = 'network';
   try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 NebulaTV/1.0' },
-      cf: { cacheTtl: 7200, cacheEverything: true },
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    sources = parseConfig(await res.json());
+    let rawText;
+    if (inline) { rawText = inline; from = 'inline-json'; }
+    else {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 NebulaTV/1.0' },
+        cf: { cacheTtl: 7200, cacheEverything: true },
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      rawText = await res.text();
+    }
+    sources = parseConfig(JSON.parse(rawText));
     if (!sources.length) throw new Error('empty config');
   } catch (e) {
     sources = FALLBACK_SOURCES.map((s) => ({ ...s, adult: s.name.includes('🔞') }));
@@ -340,7 +360,8 @@ export default {
 
       /* ---- 源列表(远程源 + 后台自定义源, 按停用/成人开关过滤) ---- */
       if (path === '/api/config' && request.method === 'GET') {
-        const [{ sources: remote }, settings] = await Promise.all([loadSources(env, ctx), getSettings(env)]);
+        const settings = await getSettings(env);
+        const { sources: remote } = await loadSources(env, ctx, settings);
         const { all, enabled } = mergeSources(remote, settings);
         return json({
           adultEnabled: settings.adultEnabled,
@@ -357,8 +378,9 @@ export default {
         try { tu = new URL(target); } catch (e) { return json({ error: 'bad url' }, 400); }
         if (!/^https?:$/.test(tu.protocol)) return json({ error: 'bad protocol' }, 400);
 
-        const [{ sources: remote }, settings] = await Promise.all([loadSources(env, ctx), getSettings(env)]);
-        const { all } = mergeSources(remote, settings);
+        const settings2 = await getSettings(env);
+        const { sources: remote } = await loadSources(env, ctx, settings2);
+        const { all } = mergeSources(remote, settings2);
         const allow = new Set();
         for (const s of all) {
           for (const u of [s.api, s.detail]) {
@@ -406,7 +428,8 @@ export default {
           return json({ ok: true }, 200, { 'Set-Cookie': `${COOKIE_NAME}=; Path=/; HttpOnly; Max-Age=0` });
         }
         if (path === '/api/admin/settings' && request.method === 'GET') {
-          const [s, { sources: remote }] = await Promise.all([getSettings(env), loadSources(env, ctx)]);
+          const s = await getSettings(env);
+          const { sources: remote } = await loadSources(env, ctx, s);
           const { all } = mergeSources(remote, s);
           return json({
             siteName: s.siteName,
@@ -419,7 +442,8 @@ export default {
             storage: kv(env) ? 'kv' : 'memory',
             passwordFromEnv: Boolean(env.ADMIN_PASSWORD),
             hasCustomPassword: Boolean(s.passwordHash),
-            configUrl: env.CONFIG_URL || DEFAULT_CONFIG_URL,
+            effectiveConfigUrl: s.configUrl || env.CONFIG_URL || DEFAULT_CONFIG_URL,
+            configFrom: s.configJson ? 'inline-json' : (s.configUrl ? 'custom-url' : 'default'),
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });
         }
@@ -427,7 +451,8 @@ export default {
           let body = {};
           try { body = await request.json(); } catch (e) { /* ignore */ }
           const saved = await saveSettings(env, body);
-          return json({ ok: true, settings: saved, storage: kv(env) ? 'kv' : 'memory' });
+          const { passwordHash, salt, ...safeSettings } = saved;
+          return json({ ok: true, settings: safeSettings, storage: kv(env) ? 'kv' : 'memory' });
         }
         /* ---- 后台修改管理密码 ---- */
         if (path === '/api/admin/password' && request.method === 'POST') {

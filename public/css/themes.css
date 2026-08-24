@@ -116,3 +116,119 @@
   --glow: 0 0 22px rgba(167, 139, 250, .35);
   --hero-overlay: linear-gradient(90deg, rgba(16,12,28,.96) 8%, rgba(16,12,28,.55) 55%, rgba(16,12,28,.18));
 }
+
+/* ============ 节日主题 ============ */
+
+/* 7. 圣诞夜(松绿+圣诞红+金) */
+:root[data-theme="christmas"] {
+  --bg: #071410;
+  --bg2: #0a1c15;
+  --card: #0f271d;
+  --card-hover: #153426;
+  --card-br: rgba(224, 57, 62, .22);
+  --txt: #eafbf2;
+  --dim: #8aa899;
+  --acc: #e0393e;
+  --acc2: #ffd166;
+  --danger: #ff5d73;
+  --ok: #34d399;
+  --glass: rgba(9, 25, 19, .8);
+  --shadow: 0 10px 34px rgba(0, 0, 0, .45);
+  --glow: 0 0 22px rgba(224, 57, 62, .35);
+  --hero-overlay: linear-gradient(90deg, rgba(7,20,16,.96) 8%, rgba(7,20,16,.55) 55%, rgba(7,20,16,.18));
+}
+
+/* 8. 新春红(中国红+鎏金) */
+:root[data-theme="spring"] {
+  --bg: #1c0808;
+  --bg2: #260c0b;
+  --card: #331010;
+  --card-hover: #451616;
+  --card-br: rgba(255, 179, 71, .24);
+  --txt: #fdf0e7;
+  --dim: #bd9088;
+  --acc: #ffb347;
+  --acc2: #ff5d5d;
+  --danger: #ff5d73;
+  --ok: #34d399;
+  --glass: rgba(35, 13, 12, .82);
+  --shadow: 0 10px 34px rgba(0, 0, 0, .5);
+  --glow: 0 0 22px rgba(255, 179, 71, .35);
+  --hero-overlay: linear-gradient(90deg, rgba(28,8,8,.96) 8%, rgba(28,8,8,.55) 55%, rgba(28,8,8,.18));
+}
+
+/* 9. 元宵灯彩(夜紫+灯彩粉金) */
+:root[data-theme="lantern"] {
+  --bg: #170b20;
+  --bg2: #1f0f2c;
+  --card: #29153a;
+  --card-hover: #361d4c;
+  --card-br: rgba(255, 122, 182, .22);
+  --txt: #fbeefb;
+  --dim: #a68cb5;
+  --acc: #ff7ab6;
+  --acc2: #ffc857;
+  --danger: #ff5d73;
+  --ok: #34d399;
+  --glass: rgba(28, 14, 39, .8);
+  --shadow: 0 10px 34px rgba(0, 0, 0, .5);
+  --glow: 0 0 22px rgba(255, 122, 182, .35);
+  --hero-overlay: linear-gradient(90deg, rgba(23,11,32,.96) 8%, rgba(23,11,32,.55) 55%, rgba(23,11,32,.18));
+}
+
+/* 10. 万圣夜(暗紫+南瓜橙) */
+:root[data-theme="halloween"] {
+  --bg: #140b1d;
+  --bg2: #1b1027;
+  --card: #241537;
+  --card-hover: #301d49;
+  --card-br: rgba(255, 138, 61, .22);
+  --txt: #f7effb;
+  --dim: #9d8bb3;
+  --acc: #ff8a3d;
+  --acc2: #b980ff;
+  --danger: #ff5d73;
+  --ok: #34d399;
+  --glass: rgba(23, 13, 33, .8);
+  --shadow: 0 10px 34px rgba(0, 0, 0, .52);
+  --glow: 0 0 22px rgba(255, 138, 61, .35);
+  --hero-overlay: linear-gradient(90deg, rgba(20,11,29,.96) 8%, rgba(20,11,29,.55) 55%, rgba(20,11,29,.18));
+}
+
+/* 11. 情人节(浅色玫瑰) */
+:root[data-theme="valentine"] {
+  --bg: #fdf0f2;
+  --bg2: #fbe3e8;
+  --card: #ffffff;
+  --card-hover: #fff2f5;
+  --card-br: rgba(229, 72, 77, .22);
+  --txt: #45222b;
+  --dim: #a97f88;
+  --acc: #e5484d;
+  --acc2: #c084fc;
+  --danger: #e5484d;
+  --ok: #30a46c;
+  --glass: rgba(255, 246, 248, .84);
+  --shadow: 0 10px 30px rgba(214, 51, 108, .15);
+  --glow: 0 0 22px rgba(229, 72, 77, .26);
+  --hero-overlay: linear-gradient(90deg, rgba(253,240,242,.97) 8%, rgba(253,240,242,.6) 55%, rgba(253,240,242,.2));
+}
+
+/* 12. 中秋月(夜蓝+月光金) */
+:root[data-theme="midautumn"] {
+  --bg: #0a1224;
+  --bg2: #0e1830;
+  --card: #14203c;
+  --card-hover: #1b2b4e;
+  --card-br: rgba(245, 198, 109, .22);
+  --txt: #eef3fc;
+  --dim: #8b9ab8;
+  --acc: #f5c66d;
+  --acc2: #8fb7ff;
+  --danger: #ff5d73;
+  --ok: #34d399;
+  --glass: rgba(13, 21, 40, .8);
+  --shadow: 0 10px 34px rgba(0, 0, 0, .5);
+  --glow: 0 0 22px rgba(245, 198, 109, .32);
+  --hero-overlay: linear-gradient(90deg, rgba(10,18,36,.96) 8%, rgba(10,18,36,.55) 55%, rgba(10,18,36,.18));
+}

@@ -121,6 +121,13 @@
     { id: 'sakura', name: '樱花粉', dot: '#ff6b9d', bg: '#fdf4f7' },
     { id: 'ocean', name: '海洋青', dot: '#0ea5b7', bg: '#f1f9fc' },
     { id: 'royal', name: '鎏金紫', dot: '#a78bfa', bg: '#100c1c' },
+    // 节日主题
+    { id: 'christmas', name: '圣诞夜 🎄', dot: '#e0393e', bg: '#071410' },
+    { id: 'spring', name: '新春红 🧨', dot: '#ffb347', bg: '#1c0808' },
+    { id: 'lantern', name: '元宵灯彩 🏮', dot: '#ff7ab6', bg: '#170b20' },
+    { id: 'halloween', name: '万圣夜 🎃', dot: '#ff8a3d', bg: '#140b1d' },
+    { id: 'valentine', name: '情人节 💝', dot: '#ff5d73', bg: '#fdf0f2' },
+    { id: 'midautumn', name: '中秋月 🌕', dot: '#f5c66d', bg: '#0a1224' },
   ];
   function applyTheme(id) {
     if (!THEME_META.some((t) => t.id === id)) id = 'midnight';
@@ -180,8 +187,8 @@
       else if (parts[0] === 'search') await viewSearch(query.q ? dec(query.q) : '', alive);
       else if (parts[0] === 'detail') await viewDetail(parts[1], dec(parts[2]), alive);
       else if (parts[0] === 'play') await viewPlay(parts[1], dec(parts[2]), query, alive);
-      else if (parts[0] === 'sources') await viewSources(alive);
-      else if (parts[0] === 'source') await viewSource(dec(parts[1]), query, alive);
+      else if (parts[0] === 'sources') await viewSources(dec(parts[1]) || '', query, alive);
+      else if (parts[0] === 'source') await viewSources(dec(parts[1]), query, alive); // 兼容旧链接
       else if (parts[0] === 'live') await viewLive(query);
       else if (parts[0] === 'admin') await viewAdmin(query);
       else await viewHome(alive);
@@ -447,10 +454,18 @@
     let done = 0, renderTimer = null;
 
     const applyProgress = () => {
+      const finished = done >= sources.length;
       const bar = $('#progBar'), stat = $('#srcStat'), prog = $('.search-progress', v);
-      if (bar) bar.style.width = Math.round((done / Math.max(sources.length, 1)) * 100) + '%';
-      if (stat) stat.textContent = `已搜索 ${done}/${sources.length} 个源 · ${merged.size} 条结果`;
-      if (prog && done >= sources.length) prog.remove();
+      if (bar) {
+        bar.style.width = Math.round((done / Math.max(sources.length, 1)) * 100) + '%';
+        bar.classList.toggle('done', finished);
+      }
+      if (stat) {
+        stat.innerHTML = finished
+          ? `<span class="search-done">✅ 搜索完成</span> · ${sources.length} 个源 · 共 ${merged.size} 条结果`
+          : `<span class="spin"></span> 正在搜索 <b>${done}</b>/${sources.length} 个源 · 已找到 ${merged.size} 条…`;
+      }
+      if (prog && finished) prog.remove();
     };
     const renderGrid = () => {
       if (!alive()) return;
@@ -775,23 +790,102 @@
       } catch (e) {}
     })();
 
-    // 相关推荐: 用清洗后的片名关键词跨源搜索, 展示最多 28 个
-    (async () => {
-      try {
-        const kwRaw = String(vod.vod_name || '');
-        const kw = kwRaw
-          .replace(/[【\[（(].*?[】\]）)]/g, '')   // 去括号内容
-          .replace(/\d{4}$/, '')                  // 去末尾年份
-          .trim().slice(0, 10) || kwRaw.trim();
-        const others = visibleSources().filter((s) => s.key !== key).slice(0, 8);
-        const curNorm = kwRaw.replace(/\s/g, '');
-        const seenR = new Set([curNorm]);
-        const relItems = [];
-        await Promise.allSettled(others.map(async (s) => {
-          if (!alive()) return;
+    // 相关推荐(渐进式加载)
+    loadRelated(vod, key, alive);
+
+    renderSideEps();
+    playCurrent(true);
+  }
+
+  /* ---- 播放页相关推荐: 多关键词跨源搜索, 边搜边显示, 不足28部用同类补足 ---- */
+  const REL_COUNT = 28;
+  function buildRelKeywords(vod) {
+    const raw = String(vod.vod_name || '').trim();
+    if (!raw) return [];
+    const t1 = raw.replace(/[【\[（(].*?[】\]）)]/g, '').replace(/\d{4}$/, '').trim();
+    const t2 = t1.replace(/第.{1,7}[季部].*$/, '').replace(/[：:].*$/, '').trim(); // 去季数/副标题
+    const t3 = t1.length > 4 ? t1.slice(0, Math.ceil(t1.length / 2)) : '';          // 前半词根兜底
+    return [...new Set([t1, t2, t3].map((k) => k.trim()).filter((k) => k && k.length >= 2))];
+  }
+  async function loadRelated(vod, curKey, alive) {
+    const sec = document.getElementById('relSec');
+    if (!sec || !alive()) return;
+    sec.innerHTML = `
+      <div class="row-head"><div class="row-title">相关推荐</div>
+        <div class="rel-status" style="color:var(--dim);font-size:12.5px">⏳ 正在寻找相关影片…</div></div>
+      <div class="grid" id="relGrid">${skeletons(7)}</div>`;
+
+    const setStatus = (text) => {
+      if (alive()) { const el = $('.rel-status', sec); el && (el.textContent = text); }
+    };
+    const gridEl = () => document.getElementById('relGrid');
+
+    const kws = buildRelKeywords(vod);
+    const sources = visibleSources().filter((s) => s.key !== curKey);
+    // 打乱源顺序避免每次都同一批源先返回
+    for (let i = sources.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [sources[i], sources[j]] = [sources[j], sources[i]];
+    }
+    const batch = sources.slice(0, 10);
+
+    const seenR = new Set([String(vod.vod_name || '').replace(/\s/g, '')]);
+    let relItems = [];
+    let renderTimer = null;
+    const renderGrid = () => {
+      if (!alive()) return;
+      const g = gridEl();
+      if (g) g.innerHTML = relItems.slice(0, REL_COUNT).map(cardHtml).join('');
+    };
+    const scheduleRender = () => {
+      if (renderTimer) return;
+      renderTimer = setTimeout(() => { renderTimer = null; renderGrid(); }, 150);
+    };
+    const absorb = (s, r) => {
+      for (const v2 of (r.list || [])) {
+        if (relItems.length >= REL_COUNT) break;
+        const t = String(v2.vod_name || '').trim();
+        if (!t || !v2.vod_pic) continue;
+        const kk = t.replace(/\s/g, '') + '|' + (v2.vod_year || '');
+        if (seenR.has(kk)) continue;
+        seenR.add(kk);
+        relItems.push({
+          sourceKey: s.key, sourceName: s.name, id: v2.vod_id, title: t,
+          pic: v2.vod_pic, remarks: v2.vod_remarks, year: v2.vod_year, typeName: v2.type_name,
+        });
+      }
+      scheduleRender();
+    };
+
+    try {
+      let doneCount = 0;
+      for (const kw of kws.slice(0, 2)) {
+        if (relItems.length >= REL_COUNT || !alive()) break;
+        let idx = 0;
+        const worker = async () => {
+          while (idx < batch.length) {
+            if (!alive() || relItems.length >= REL_COUNT) return;
+            const i = idx++;
+            try { absorb(batch[i], await API.search(batch[i], kw)); } catch (e) { /* 该源失败 */ }
+            doneCount++;
+            setStatus(`⏳ 关键词「${kw}」· 已检索 ${doneCount}/${batch.length} 源 · 找到 ${relItems.length} 部`);
+          }
+        };
+        await Promise.allSettled(Array.from({ length: Math.min(6, batch.length) }, worker));
+      }
+
+      // 仍不足时用同类型影片补足(取前几个源的列表页)
+      if (relItems.length < REL_COUNT && alive()) {
+        setStatus(`⏳ 关键词结果 ${relItems.length} 部 · 正在补充同类影片…`);
+        const padSources = batch.slice(0, 3);
+        const curBucket = Object.keys(CAT_REGEX).find((c) => CAT_REGEX[c].test(String(vod.type_name || '')));
+        await Promise.allSettled(padSources.map(async (s) => {
           try {
-            const r2 = await API.search(s, kw);
-            for (const v2 of (r2.list || [])) {
+            const r = await API.list(s, 1);
+            for (const v2 of (r.list || [])) {
+              if (relItems.length >= REL_COUNT) break;
+              const tn = String(v2.type_name || '');
+              if (curBucket && !CAT_REGEX[curBucket].test(tn)) continue;
               const t = String(v2.vod_name || '').trim();
               if (!t || !v2.vod_pic) continue;
               const kk = t.replace(/\s/g, '') + '|' + (v2.vod_year || '');
@@ -799,121 +893,219 @@
               seenR.add(kk);
               relItems.push({
                 sourceKey: s.key, sourceName: s.name, id: v2.vod_id, title: t,
-                pic: v2.vod_pic, remarks: v2.vod_remarks, year: v2.vod_year, typeName: v2.type_name,
+                pic: v2.vod_pic, remarks: v2.vod_remarks, year: v2.vod_year, typeName: tn,
               });
-              if (relItems.length >= 28) return;
             }
-          } catch (e) {}
+          } catch (e) { /* ignore */ }
         }));
-        if (!alive()) return;
-        const sec = document.getElementById('relSec');
-        if (sec && relItems.length) {
-          sec.innerHTML = `
-            <div class="row-head"><div class="row-title">相关推荐</div>
-              <div style="color:var(--dim);font-size:12.5px">关键词「${esc(kw)}」· ${Math.min(relItems.length, 28)} 部</div></div>
-            <div class="grid">${relItems.slice(0, 28).map(cardHtml).join('')}</div>`;
-        }
-      } catch (e) { /* 相关推荐失败不影响播放 */ }
-    })();
+      }
 
-    renderSideEps();
-    playCurrent(true);
+      if (!alive()) return;
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      relItems = relItems.slice(0, REL_COUNT);
+      if (!relItems.length) {
+        sec.innerHTML = '';
+        return;
+      }
+      sec.innerHTML = `
+        <div class="row-head"><div class="row-title">相关推荐</div>
+          <div style="color:var(--dim);font-size:12.5px">${relItems.length} 部相关影片</div></div>
+        <div class="grid">${relItems.map(cardHtml).join('')}</div>`;
+    } catch (e) { /* 相关推荐失败不影响播放 */ }
   }
 
   /* ============================================================
-     视图：影视源导航(全部源一览, 单源搜索/浏览)
+     视图：影视源(左侧文字源列表常驻 · 右侧该源分类/搜索/影片)
      ============================================================ */
   const cleanSrcName = (s) => String(s.name || s.key).replace(/🔞/g, '').trim() || s.key;
 
-  async function viewSources(alive) {
-    const v = $('#view');
-    const list = visibleSources();
-    v.innerHTML = `
-      <div class="container page-wrap">
-        <div class="page-head"><div class="page-title">🎬 全部影视源</div>
-          <div style="color:var(--dim);font-size:13px">共 ${list.length} 个源可用 · 后台可增删</div></div>
-        <p style="color:var(--dim);font-size:13px;margin:-6px 0 18px">在任意源卡片中输入关键词即可只搜该源；或点「浏览最新」看该源的最新影片。</p>
-        <div class="grid src-nav-grid">
-          ${list.map((s) => `
-            <div class="src-card" data-key="${esc(s.key)}">
-              <div class="src-card-head">
-                <span class="src-card-name" title="${esc(cleanSrcName(s))}">${esc(cleanSrcName(s))}</span>
-                ${s.custom ? '<span class="tag plain" style="font-size:10.5px;flex-shrink:0">自定义</span>' : ''}
-              </div>
-              <form class="src-card-search">
-                <input type="search" placeholder="在此源内搜索片名…" autocomplete="off">
-                <button class="btn primary small" type="submit">搜索</button>
-              </form>
-              <a class="src-card-browse" href="#/source/${encodeURIComponent(s.key)}">浏览最新影片 ›</a>
-            </div>`).join('')}
-        </div>
-        ${list.length ? '' : '<div class="empty"><div class="big">📭</div>没有可用影视源，请检查后台设置</div>'}
-      </div>`;
-    if (!alive()) return;
-    $$('.src-card', v).forEach((card) => {
-      const form = $('.src-card-search', card);
-      form.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const q = $('input', form).value.trim();
-        location.hash = `#/source/${encodeURIComponent(card.dataset.key)}${q ? '?q=' + encodeURIComponent(q) : ''}`;
-      });
-    });
+  /* ---- 源测速 ---- */
+  const speedCache = new Map(); // key -> {ms, fail, ts}
+  function speedGet(key) {
+    const c = speedCache.get(key);
+    if (!c) return null;
+    if (Date.now() - c.ts > 10 * 60 * 1000) { speedCache.delete(key); return null; }
+    return c;
+  }
+  function speedBadge(key) {
+    const c = speedGet(key);
+    if (!c) return '<i class="sp sp-unk">…</i>';
+    if (c.fail) return '<i class="sp sp-bad">失败</i>';
+    if (c.ms < 900) return `<i class="sp sp-good">${c.ms}ms</i>`;
+    if (c.ms < 2600) return `<i class="sp sp-mid">${c.ms}ms</i>`;
+    return `<i class="sp sp-bad">${c.ms}ms</i>`;
+  }
+  function refreshSpeedBadges() {
+    $$('.src-speed[data-sk]').forEach((el) => { el.innerHTML = speedBadge(el.dataset.sk); });
+  }
+  let speedPersistTimer = null;
+  function persistSpeed() {
+    if (speedPersistTimer) return;
+    speedPersistTimer = setTimeout(() => {
+      speedPersistTimer = null;
+      const obj = {};
+      for (const [k, c] of speedCache) obj[k] = c;
+      store.set('srcSpeed', obj);
+    }, 800);
+  }
+  async function startSpeedTests(alive) {
+    const saved = store.get('srcSpeed', {});
+    for (const [k, c] of Object.entries(saved)) speedCache.set(k, c);
+    refreshSpeedBadges();
+    const todo = visibleSources().filter((s) => !speedGet(s.key));
+    const stat = $('#speedStat');
+    let idx = 0, done = 0;
+    const total = todo.length;
+    const tick = () => { if (stat && alive()) stat.textContent = total ? `⚡ 测速中 ${done}/${total}` : ''; };
+    tick();
+    const worker = async () => {
+      while (idx < total) {
+        if (!alive()) return;
+        const s = todo[idx++];
+        const t0 = performance.now();
+        let rec;
+        try { await API.list(s, 1); rec = { ms: Math.round(performance.now() - t0), fail: false, ts: Date.now() }; }
+        catch (e) { rec = { ms: 0, fail: true, ts: Date.now() }; }
+        speedCache.set(s.key, rec);
+        done++;
+        tick();
+        refreshSpeedBadges();
+        persistSpeed();
+      }
+    };
+    if (total) await Promise.allSettled(Array.from({ length: Math.min(6, total) }, worker));
+    if (alive() && stat) stat.textContent = '⚡ 测速完成';
   }
 
-  async function viewSource(key, query, alive) {
-    const src = visibleSources().find((s) => s.key === key);
+  /* ---- 源分类节点 ---- */
+  async function loadSourceCats(src, alive) {
+    const ck = 'cats:' + src.key;
+    const c = store.get(ck, null);
+    if (c && Array.isArray(c.list) && Date.now() - c.ts < 86400000) return c.list;
+    try {
+      const r = await API.categories(src);
+      if (!alive()) return [];
+      const cls = (r && r.class) || [];
+      const list = cls.filter((x) => x.type_id != null && x.type_name).map((x) => ({ id: String(x.type_id), name: String(x.type_name).trim() })).slice(0, 40);
+      store.set(ck, { ts: Date.now(), list });
+      return list;
+    } catch (e) { return []; }
+  }
+
+  async function viewSources(selKey, query, alive) {
     const v = $('#view');
-    if (!src) { v.innerHTML = '<div class="container empty"><div class="big">📭</div>影视源不存在或已被停用<br><br><a class="btn ghost small" href="#/sources">← 返回源列表</a></div>'; return; }
+    const list = visibleSources();
+    if (!list.length) {
+      v.innerHTML = '<div class="container empty"><div class="big">📭</div>没有可用影视源，请检查后台设置<br><br><a class="btn ghost small" href="#/admin">前往后台</a></div>';
+      return;
+    }
+    if (!selKey || !list.some((s) => s.key === selKey)) {
+      const last = store.get('lastSrc', '');
+      selKey = list.some((s) => s.key === last) ? last : list[0].key;
+    }
+    const cur = list.find((s) => s.key === selKey);
+    store.set('lastSrc', selKey);
     const q = query.q || '';
+    const cat = query.cat || '';
+    const sortBySpeed = store.get('srcSortBySpeed', false);
+
+    const ordered = sortBySpeed
+      ? [...list].sort((a, b) => {
+          const ca = speedGet(a.key), cb = speedGet(b.key);
+          const va = ca ? (ca.fail ? 9e5 : ca.ms) : Infinity;
+          const vb = cb ? (cb.fail ? 9e5 : cb.ms) : Infinity;
+          return va - vb;
+        })
+      : list;
+
     v.innerHTML = `
       <div class="container page-wrap">
-        <div class="page-head">
-          <div class="page-title" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            🎬 ${esc(cleanSrcName(src))}
-            <span style="font-size:13.5px;color:var(--dim);font-weight:400">${q ? '· 搜索「' + esc(q) + '」' : '· 最新影片'}</span>
+        <div class="page-head"><div class="page-title">🎬 影视源</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span id="speedStat" style="color:var(--dim);font-size:12.5px"></span>
+            <button class="chip ${sortBySpeed ? 'on' : ''}" id="sortSpeed" title="按响应速度排序">⚡ 速度优先</button>
           </div>
-          <form class="src-page-search" id="srcPageSearch">
-            <input type="search" id="srcPageQ" placeholder="在该源内搜索…" value="${esc(q)}" autocomplete="off">
-            <button class="btn primary small" type="submit">搜索</button>
-            ${q ? `<a class="btn ghost small" href="#/source/${encodeURIComponent(key)}">看最新</a>` : ''}
-          </form>
         </div>
-        <div class="grid" id="srcGrid">${skeletons(HOME_ROW_COUNT)}</div>
-        <button class="load-more hidden" id="srcMore">加载更多</button>
+        <div class="src-layout">
+          <aside class="src-list" id="srcList">
+            ${ordered.map((s) => `
+              <a class="src-row ${s.key === cur.key ? 'on' : ''}" href="#/sources/${encodeURIComponent(s.key)}">
+                <span class="src-name">${esc(cleanSrcName(s))}${s.custom ? ' <i class="src-mini-tag">自</i>' : ''}</span>
+                <span class="src-speed" data-sk="${esc(s.key)}">${speedBadge(s.key)}</span>
+              </a>`).join('')}
+          </aside>
+          <div class="src-main" id="srcMain"></div>
+        </div>
       </div>`;
     if (!alive()) return;
 
+    $('#sortSpeed').addEventListener('click', () => {
+      store.set('srcSortBySpeed', !store.get('srcSortBySpeed', false));
+      route();
+    });
+
+    mountSourcePanel(cur, q, cat, alive);
+    startSpeedTests(alive);
+  }
+
+  async function mountSourcePanel(src, q, cat, alive) {
+    const main = $('#srcMain');
+    if (!main) return;
+    main.innerHTML = `
+      <div class="src-panel-head">
+        <div class="src-panel-title">
+          🎬 ${esc(cleanSrcName(src))}
+          <span class="src-panel-sub">${q ? '搜索「' + esc(q) + '」' : cat ? '分类：' + esc(cat) : '最新影片'}</span>
+        </div>
+        <form class="src-page-search" id="srcPageSearch">
+          <input type="search" id="srcPageQ" placeholder="在该源内搜索片名…" value="${esc(q)}" autocomplete="off">
+          <button class="btn primary small" type="submit">搜索</button>
+          ${q ? `<a class="btn ghost small" href="#/sources/${encodeURIComponent(src.key)}">看最新</a>` : ''}
+        </form>
+      </div>
+      <div class="chips src-cats hidden" id="srcCats"></div>
+      <div class="src-status" id="srcStatus"></div>
+      <div class="grid" id="srcGrid">${skeletons(HOME_ROW_COUNT)}</div>
+      <button class="load-more hidden" id="srcMore">加载更多</button>`;
+
     let page = 1, busy = false, exhausted = false;
-    const grid = $('#srcGrid'), moreBtn = $('#srcMore');
+    const grid = $('#srcGrid'), moreBtn = $('#srcMore'), statusEl = $('#srcStatus');
+
+    const setStatus = (t) => { if (alive() && statusEl) statusEl.textContent = t; };
 
     async function loadPage() {
       if (busy || exhausted || !alive()) return;
       busy = true;
       moreBtn.textContent = '加载中…'; moreBtn.classList.remove('hidden');
+      setStatus('⏳ 正在加载…');
       try {
-        const r = q ? await API.search(src, q, page) : await API.list(src, page);
+        const r = q ? await API.search(src, q, page) : await API.list(src, page, cat);
         if (!alive()) return;
         const items = (r.list || []).filter((vod) => String(vod.vod_name || '').trim());
         if (!items.length && page === 1) {
-          setHtml(grid, '<div class="empty" style="grid-column:1/-1"><div class="big">🙈</div>没有找到内容，换个关键词试试</div>');
+          setHtml(grid, '<div class="empty" style="grid-column:1/-1"><div class="big">🙈</div>没有找到内容，换个关键词或分类试试</div>');
           exhausted = true;
           moreBtn.classList.add('hidden');
+          setStatus('❌ 没有找到内容');
         } else if (!items.length) {
           exhausted = true;
-          moreBtn.textContent = '没有更多了';
+          moreBtn.textContent = '✅ 已加载全部';
+          setStatus('');
         } else {
           grid.insertAdjacentHTML('beforeend', items.map((vod) => cardHtml({
             sourceKey: src.key, sourceName: src.name, id: vod.vod_id,
             title: String(vod.vod_name).trim(), pic: vod.vod_pic,
             remarks: vod.vod_remarks, year: vod.vod_year, typeName: vod.type_name,
           })).join(''));
+          setStatus(`已显示 ${page * 20 - 20 + items.length} 部`);
           page++;
-          moreBtn.textContent = '加载更多';
-          if (items.length < 20) { exhausted = true; moreBtn.textContent = '没有更多了'; }
+          if (items.length < 20) { exhausted = true; moreBtn.textContent = '✅ 已加载全部'; }
+          else moreBtn.textContent = '加载更多';
         }
       } catch (e) {
         if (alive()) {
           grid.insertAdjacentHTML('beforeend', `<div class="empty" style="grid-column:1/-1;font-size:13px;color:var(--dim)">该源请求失败：${esc(e.message)}</div>`);
+          setStatus('❌ 该源请求失败');
           exhausted = true;
           moreBtn.classList.add('hidden');
         }
@@ -921,13 +1113,28 @@
       busy = false;
     }
 
+    // 分类节点(异步加载, 不阻塞首屏)
+    loadSourceCats(src, alive).then((cats) => {
+      if (!alive() || !cats.length) return;
+      const box = $('#srcCats');
+      if (!box) return;
+      box.classList.remove('hidden');
+      box.innerHTML = [`<button class="chip ${!cat ? 'on' : ''}" data-cat="">全部</button>`]
+        .concat(cats.map((c2) => `<button class="chip ${cat === c2.id ? 'on' : ''}" data-cat="${esc(c2.id)}" title="${esc(c2.name)}">${esc(c2.name)}</button>`))
+        .join('');
+      $$('#srcCats .chip').forEach((chipEl) => chipEl.addEventListener('click', () => {
+        const cId = chipEl.dataset.cat;
+        location.hash = `#/sources/${encodeURIComponent(src.key)}${cId ? '?cat=' + encodeURIComponent(cId) : ''}`;
+      }));
+    });
+
     await loadPage();
     if (!alive()) return;
     moreBtn.addEventListener('click', loadPage);
     $('#srcPageSearch').addEventListener('submit', (e) => {
       e.preventDefault();
       const nq = $('#srcPageQ').value.trim();
-      if (nq && nq !== q) location.hash = `#/source/${encodeURIComponent(key)}?q=` + encodeURIComponent(nq);
+      if (nq && nq !== q) location.hash = `#/sources/${encodeURIComponent(src.key)}?q=` + encodeURIComponent(nq);
     });
   }
 
@@ -1077,6 +1284,17 @@
               <label class="switch red"><input type="checkbox" id="adultSwitch" ${s.adultEnabled ? 'checked' : ''}><span class="track"></span></label>
             </div>
             <p class="hint">⚠️ 本站不生产任何内容。请遵守所在地区法律法规；未满 18 岁请勿开启。</p>
+          </div>
+
+          <div class="admin-card">
+            <h3>📡 采集源配置</h3>
+            <p class="hint">默认每日同步 LunaTV-config。你可以改成自己的配置地址（JSON 格式：<code>{"api_site":{"key":{"name":"..","api":".."}}}</code>），也可以直接把 JSON 内容粘贴进来。保存后立即生效。</p>
+            <label class="field-label">当前生效：${s.configFrom === 'inline-json' ? '后台内联 JSON' : s.configFrom === 'custom-url' ? '自定义地址' : '默认 LunaTV-config'}</label>
+            <input class="field-input" id="cfgUrlInput" value="${esc(s.effectiveConfigUrl)}" placeholder="https://.../xxx.json 或直接粘贴 { 开头的 JSON">
+            <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+              <button class="btn primary" id="saveCfgBtn">保存采集源配置</button>
+              <button class="btn ghost" id="resetCfgBtn">恢复默认(LunaTV-config)</button>
+            </div>
           </div>
 
           <div class="admin-card">
@@ -1295,6 +1513,28 @@
           try { await API.adminLogout(); } catch (e) {}
           viewAdmin();
         } catch (err) { toast('修改失败：' + err.message, 'err'); }
+      });
+
+      /* ---- 采集源配置 ---- */
+      $('#saveCfgBtn').addEventListener('click', async () => {
+        const val = $('#cfgUrlInput').value.trim();
+        if (val && !/^https?:\/\//i.test(val) && !val.startsWith('{')) {
+          return toast('请填写 http(s) 地址，或粘贴 { 开头的 JSON 内容', 'err');
+        }
+        try {
+          await API.adminSaveSettings({ configUrl: val });
+          State.config = await API.getConfig();
+          toast(`采集源配置已保存：当前 ${State.config.count} 个源可用`, 'ok');
+          renderPanel();
+        } catch (err) { toast('保存失败：' + err.message, 'err'); }
+      });
+      $('#resetCfgBtn').addEventListener('click', async () => {
+        try {
+          await API.adminSaveSettings({ configUrl: '' });
+          State.config = await API.getConfig();
+          toast('已恢复默认采集源配置', 'ok');
+          renderPanel();
+        } catch (err) { toast('操作失败：' + err.message, 'err'); }
       });
 
       /* 初始渲染源编辑器 */
