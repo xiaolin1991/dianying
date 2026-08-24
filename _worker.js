@@ -329,6 +329,21 @@ function clientIp(req) {
   return req.headers.get('CF-Connecting-IP') || req.headers.get('X-Forwarded-For') || 'local';
 }
 
+/** Cloudflare 边缘地理信息(精确到市级), 本地开发无该数据返回空 */
+const COUNTRY_NAMES = {
+  CN: '中国', HK: '香港', MO: '澳门', TW: '台湾', SG: '新加坡', MY: '马来西亚',
+  TH: '泰国', VN: '越南', JP: '日本', KR: '韩国', US: '美国', GB: '英国',
+  DE: '德国', FR: '法国', CA: '加拿大', AU: '澳大利亚', RU: '俄罗斯', IN: '印度',
+};
+function geoOf(req) {
+  try {
+    const cf = req.cf;
+    if (!cf || !cf.country) return '';
+    const country = COUNTRY_NAMES[cf.country] || cf.country;
+    return [country, cf.region || cf.province || '', cf.city || ''].filter(Boolean).join(' ');
+  } catch (e) { return ''; }
+}
+
 async function getUserRecord(env, username) {
   if (!kv(env)) return null;
   try {
@@ -547,6 +562,7 @@ export default {
           createdAt: Date.now(),
           lastLoginAt: Date.now(),
           lastLoginIp: clientIp(request),
+          lastLoginIpGeo: geoOf(request),
         });
         const token = await makeUserToken(env, username);
         return json({ ok: true, username }, 200, {
@@ -566,6 +582,7 @@ export default {
         }
         rec.lastLoginAt = Date.now();
         rec.lastLoginIp = clientIp(request);
+        rec.lastLoginIpGeo = geoOf(request);
         await putUserRecord(env, rec);
         const token = await makeUserToken(env, username);
         return json({ ok: true, username }, 200, {
@@ -629,7 +646,7 @@ export default {
           let body = {};
           try { body = await request.json(); } catch (e) { /* ignore */ }
           const q = String(body.q || '').trim().slice(0, 60);
-          if (q) await appendUhist(env, username, { kind: 'search', title: q, ip: clientIp(request) });
+          if (q) await appendUhist(env, username, { kind: 'search', title: q, ip: clientIp(request), geo: geoOf(request) });
           return json({ ok: true });
         }
         /* 观看心跳上报(累计观看时长 + 更新观看记录) */
@@ -652,7 +669,7 @@ export default {
               id: newEntryId(), kind: 'watch', title,
               srcKey, srcName: String(body.srcName || '').slice(0, 40), vidId,
               pic: /^https?:\/\//.test(String(body.pic || '')) ? String(body.pic) : '',
-              ep, t: pos, ts: Date.now(), ip: clientIp(request), delUser: false,
+              ep, t: pos, ts: Date.now(), ip: clientIp(request), geo: geoOf(request), delUser: false,
             });
           }
           await saveUhist(env, username, hist);
@@ -753,6 +770,7 @@ export default {
               createdAt: rec ? rec.createdAt : null,
               lastLoginAt: rec ? rec.lastLoginAt : null,
               lastLoginIp: rec ? rec.lastLoginIp : '',
+              lastLoginIpGeo: rec ? (rec.lastLoginIpGeo || '') : '',
               watchSec: hist.watchSec || 0,
               totalItems: hist.items.length,
               activeItems: hist.items.filter((it) => !it.delUser).length,
@@ -773,8 +791,9 @@ export default {
             createdAt: rec.createdAt,
             lastLoginAt: rec.lastLoginAt,
             lastLoginIp: rec.lastLoginIp,
+            lastLoginIpGeo: rec.lastLoginIpGeo || '',
             watchSec: hist.watchSec || 0,
-            items: hist.items.slice(0, 800).map((it) => ({ ...publicHistItem(it), ip: it.ip || '', delUser: Boolean(it.delUser) })),
+            items: hist.items.slice(0, 800).map((it) => ({ ...publicHistItem(it), ip: it.ip || '', geo: it.geo || '', delUser: Boolean(it.delUser) })),
           });
         }
         /* ---- 用户管理: 硬删记录(仅管理员) ---- */

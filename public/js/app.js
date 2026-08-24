@@ -413,57 +413,89 @@
       <div class="container page-wrap">
         <div class="page-head"><div class="page-title">${esc(cat)}</div></div>
         <div class="chips" id="yearChips">${YEARS.map((y) => `<button class="chip ${(query.year || '全部') === y ? 'on' : ''}" data-y="${y}">${y === '全部' ? '全部年份' : y}</button>`).join('')}</div>
+        <div class="src-status" id="browseStat">⏳ 正在并行加载多个源…</div>
         <div class="grid" id="browseGrid">${skeletons(18)}</div>
         <button class="load-more" id="loadMore">加载更多</button>
       </div>`;
 
-    const cur = { pool: featuredSources(6), idx: 0, pageBy: new Map(), seen: new Set(), year: query.year || '全部' };
+    const cur = { pool: featuredSources(6), pageBy: new Map(), seen: new Set(), year: query.year || '全部' };
     browseCursors.set(cat, cur);
 
     $$('#yearChips .chip').forEach((c) => c.addEventListener('click', () => {
       location.hash = `#/browse/${encodeURIComponent(cat)}?year=${encodeURIComponent(c.dataset.y)}`;
     }));
 
-    async function loadBatch() {
-      let added = 0;
-      for (let round = 0; round < cur.pool.length && added < 24; round++) {
-        if (!alive()) return false;
-        const s = cur.pool[cur.idx % cur.pool.length];
-        cur.idx++;
-        const pg = (cur.pageBy.get(s.key) || 0) + 1;
-        cur.pageBy.set(s.key, pg);
-        try {
-          const r = await API.list(s, pg);
-          const grid = $('#browseGrid');
-          if (!grid || !alive()) return false;
-          const frag = document.createElement('div');
-          for (const vod of (r.list || [])) {
-            const tn = String(vod.type_name || '');
-            if (!CAT_REGEX[cat].test(tn)) continue;
-            if (cur.year !== '全部' && String(vod.vod_year || '') !== cur.year) continue;
-            const k = s.key + ':' + vod.vod_id;
-            if (cur.seen.has(k)) continue;
-            cur.seen.add(k);
-            frag.insertAdjacentHTML('beforeend', cardHtml({
-              sourceKey: s.key, sourceName: s.name, id: vod.vod_id, title: vod.vod_name,
-              pic: vod.vod_pic, remarks: vod.vod_remarks, year: vod.vod_year, typeName: tn, showSource: true,
-            }));
-            added++;
-          }
-          [...frag.children].forEach((n) => grid.appendChild(n));
-          if (added >= 24) break;
-        } catch (e) { /* 该源失败，换下一个 */ }
-      }
-      return added > 0;
+    const statEl = $('#browseStat');
+    const setStat = (t) => { if (alive() && statEl) statEl.textContent = t; };
+
+    /** 并发执行一批任务(每源一页), 单个返回立即上屏 */
+    async function runWave(tasks) {
+      let added = 0, done = 0;
+      let idx = 0;
+      const CONC = 5;
+      const worker = async () => {
+        while (idx < tasks.length) {
+          if (!alive()) return added;
+          const { s, pg } = tasks[idx++];
+          try {
+            const r = await API.list(s, pg);
+            const grid = $('#browseGrid');
+            if (!grid || !alive()) return added;
+            const frag = [];
+            for (const vod of (r.list || [])) {
+              const tn = String(vod.type_name || '');
+              if (!CAT_REGEX[cat].test(tn)) continue;
+              if (cur.year !== '全部' && String(vod.vod_year || '') !== cur.year) continue;
+              const k = s.key + ':' + vod.vod_id;
+              if (cur.seen.has(k)) continue;
+              cur.seen.add(k);
+              frag.push(cardHtml({
+                sourceKey: s.key, sourceName: s.name, id: vod.vod_id, title: vod.vod_name,
+                pic: vod.vod_pic, remarks: vod.vod_remarks, year: vod.vod_year, typeName: tn, showSource: true,
+              }));
+              added++;
+            }
+            if (frag.length) {
+              // 首批结果到达时移除骨架屏, 之后直接追加
+              if ($('.skl-card', grid)) grid.innerHTML = '';
+              grid.insertAdjacentHTML('beforeend', frag.join(''));
+            }
+          } catch (e) { /* 该源失败, 忽略 */ }
+          done++;
+          setStat(`⏳ 已显示 ${added} 部 · 源批次 ${done}/${tasks.length}`);
+          if (added >= 24) { idx = tasks.length; } // 达标后其余任务跳过
+        }
+        return added;
+      };
+      await Promise.allSettled(Array.from({ length: Math.min(CONC, tasks.length) }, worker));
+      return added;
     }
 
-    const ok = await loadBatch();
+    function nextTasks(pagesPerSource) {
+      const tasks = [];
+      for (let n = 1; n <= pagesPerSource; n++) {
+        for (const s of cur.pool) {
+          const pg = (cur.pageBy.get(s.key) || 0) + 1;
+          cur.pageBy.set(s.key, pg);
+          tasks.push({ s, pg });
+        }
+      }
+      return tasks;
+    }
+
+    const ok = await runWave(nextTasks(2)) > 0; // 首波: 每源前2页并发
     if (!alive()) return;
+    setStat(ok ? `✅ 已显示 ${$('#browseGrid') ? $$('.card', $('#browseGrid')).length : 0} 部` : '');
     if (!ok) setHtml('#browseGrid', '<div class="empty" style="grid-column:1/-1"><div class="big">🎬</div>暂无内容，试试其他筛选</div>');
     $('#loadMore').addEventListener('click', async (e) => {
       e.target.textContent = '加载中…';
-      await loadBatch();
-      e.target.textContent = '加载更多';
+      e.target.disabled = true;
+      await runWave(nextTasks(2));
+      if (alive()) {
+        e.target.textContent = '加载更多';
+        e.target.disabled = false;
+        setStat('');
+      }
     });
   }
 
@@ -1165,10 +1197,13 @@
       store.set('srcSpeed', obj);
     }, 800);
   }
-  async function startSpeedTests(alive) {
+  /** 恢复上次测速缓存(10分钟内有效) */
+  function restoreSpeeds() {
     const saved = store.get('srcSpeed', {});
     for (const [k, c] of Object.entries(saved)) speedCache.set(k, c);
     refreshSpeedBadges();
+  }
+  async function startSpeedTests(alive) {
     const todo = visibleSources().filter((s) => !speedGet(s.key));
     const stat = $('#speedStat');
     let idx = 0, done = 0;
@@ -1211,6 +1246,7 @@
 
   async function viewSources(selKey, query, alive) {
     const v = $('#view');
+    restoreSpeeds(); // 先恢复测速缓存, 便于默认选中快速源
     const list = visibleSources();
     if (!list.length) {
       v.innerHTML = '<div class="container empty"><div class="big">📭</div>没有可用影视源，请检查后台设置<br><br><a class="btn ghost small" href="#/admin">前往后台</a></div>';
@@ -1218,7 +1254,16 @@
     }
     if (!selKey || !list.some((s) => s.key === selKey)) {
       const last = store.get('lastSrc', '');
-      selKey = list.some((s) => s.key === last) ? last : list[0].key;
+      if (list.some((s) => s.key === last)) selKey = last;
+      else {
+        // 默认选已知测速最快且可用的源
+        let best = null, bestMs = Infinity;
+        for (const s of list) {
+          const c = speedGet(s.key);
+          if (c && !c.fail && c.ms < bestMs) { best = s; bestMs = c.ms; }
+        }
+        selKey = best ? best.key : list[0].key;
+      }
     }
     const cur = list.find((s) => s.key === selKey);
     store.set('lastSrc', selKey);
@@ -1780,7 +1825,7 @@
               <span class="ulog-title" title="${esc(it.title)}">${esc(it.title)}${it.kind === 'watch' && it.ep ? ' <small>· ' + esc(it.ep) + '</small>' : ''}</span>
               ${it.kind === 'watch' ? `<span class="ulog-meta">${fmtWatchSec(it.t)}</span>` : ''}
               <span class="ulog-meta">${fmtDateTime(it.ts)}</span>
-              <span class="ulog-meta">${esc(it.ip || '—')}</span>
+              <span class="ulog-meta">${esc(it.ip || '—')}${it.geo ? '<br>' + esc(it.geo) : ''}</span>
               ${it.delUser ? '<span class="ulog-tag">用户已删</span>' : ''}
               <button class="hist-del row-del" data-id="${esc(it.id)}" title="彻底删除">×</button>
             </div>`).join('');
@@ -1793,7 +1838,7 @@
                   <button class="btn ghost small" id="closeUserLog">收起</button>
                 </div>
               </div>
-              <p class="hint">注册 ${fmtDateTime(d.createdAt)} · 最近登录 ${fmtDateTime(d.lastLoginAt)} · IP ${esc(d.lastLoginIp || '—')} · 灰色行 = 用户已自行删除</p>
+              <p class="hint">注册 ${fmtDateTime(d.createdAt)} · 最近登录 ${fmtDateTime(d.lastLoginAt)} · IP ${esc(d.lastLoginIp || '—')}${d.lastLoginIpGeo ? '（' + esc(d.lastLoginIpGeo) + '）' : ''} · 灰色行 = 用户已自行删除</p>
               <div style="margin-top:8px">${rows || '<p class="hint">暂无记录</p>'}</div>
             </div>`;
           $('#closeUserLog').addEventListener('click', () => { box.innerHTML = ''; });
@@ -1819,13 +1864,13 @@
           stat.textContent = `共 ${r.users.length} 个注册用户`;
           table.innerHTML = r.users.length ? `
             <table class="adm-table">
-              <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP</th><th>累计观看</th><th>有效/总记录</th><th></th></tr></thead>
+              <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP / 归属地</th><th>累计观看</th><th>有效/总记录</th><th></th></tr></thead>
               <tbody>${r.users.map((u) => `
                 <tr>
                   <td>${esc(u.username)}</td>
                   <td>${fmtDateTime(u.createdAt)}</td>
                   <td>${fmtDateTime(u.lastLoginAt)}</td>
-                  <td>${esc(u.lastLoginIp || '—')}</td>
+                  <td>${esc(u.lastLoginIp || '—')}${u.lastLoginIpGeo ? '<br><small style="color:var(--dim)">' + esc(u.lastLoginIpGeo) + '</small>' : ''}</td>
                   <td>${fmtWatchSec(u.watchSec)}</td>
                   <td>${u.activeItems}/${u.totalItems}</td>
                   <td style="white-space:nowrap;display:flex;gap:6px">
