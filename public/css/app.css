@@ -239,6 +239,8 @@ img { display: block; }
 .swap-grid .src-item { border-radius: 999px; padding: 6px 11px; font-size: 12.5px; align-items: center; gap: 6px; }
 .swap-grid .src-item .src-ico { width: 13px; height: 13px; vertical-align: -2px; color: var(--dim); }
 .swap-grid .src-item:hover .src-ico { color: var(--acc); }
+.play-fav.on { border-color: #f5b50a; color: #f5b50a; }
+.play-fav.on:hover { box-shadow: 0 0 14px rgba(245, 181, 10, .35); }
 .src-switch.miss-list { max-height: 150px; margin-top: 8px; }
 .miss-list .src-item { font-size: 12px; padding: 6px 10px; opacity: .55; }
 .swap-miss-toggle {
@@ -456,14 +458,17 @@ img { display: block; }
 .searchbox { padding-right: 6px; }
 .search-btn {
   background: linear-gradient(120deg, var(--acc), var(--acc2)); border: none; color: #fff;
-  width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center;
-  flex-shrink: 0; transition: transform .15s, box-shadow .2s;
+  width: 28px; height: 28px; border-radius: 9px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform .15s, box-shadow .2s;
 }
 .search-btn:hover { transform: scale(1.08); box-shadow: var(--glow); }
 .search-btn:active { transform: scale(.94); }
 .search-btn svg {
-  width: 16px; height: 16px; fill: none;
+  width: 16px; height: 16px; fill: none; display: block;
   stroke: currentColor; stroke-width: 2.6; stroke-linecap: round;
+  /* 放大镜镜片在字形里偏左上, 光学补偿让它正对按钮中心 */
+  transform: translate(.9px, .9px);
 }
 .search-pop {
   position: absolute; z-index: 96;
@@ -584,6 +589,15 @@ img { display: block; }
   .search-hist-row { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
   .search-hist-row time { order: 3; }
   .src-layout { grid-template-columns: 1fr; gap: 12px; }
+  /* 播放页换源药丸: 手机端在播放器下方单行横滑 */
+  .play-page-grid .src-switch.swap-grid {
+    flex-wrap: nowrap; overflow-x: auto; gap: 8px;
+    padding: 2px 2px 6px; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .play-page-grid .src-switch.swap-grid::-webkit-scrollbar { display: none; }
+  .play-page-grid .swap-grid .src-item { flex-shrink: 0; white-space: nowrap; }
+  .src-page-search input { width: min(240px, 56vw); }
   .src-list { position: static; max-height: none; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; }
   .src-row { border-left: none; border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0; white-space: nowrap; flex-shrink: 0; }
   .src-row.on { border-bottom-color: var(--acc); }

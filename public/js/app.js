@@ -840,6 +840,7 @@
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
           <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
           <h2 style="font-size:17px">${esc(vod.vod_name)} <span style="color:var(--acc);font-size:13px">${esc(groups[gi].eps[ei].name)}</span></h2>
+          <button class="btn ghost small play-fav ${store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id)) ? 'on' : ''}" id="playFav">${store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id)) ? '★ 已收藏' : '☆ 收藏'}</button>
         </div>
         <div class="play-page-grid">
           <div class="video-wrap"><video id="videoEl" controls playsinline autoplay></video>
@@ -939,6 +940,21 @@
       const nv = !store.get('autoNext', true);
       store.set('autoNext', nv);
       e.target.textContent = '自动连播: ' + (nv ? '开' : '关');
+    });
+
+    // 收藏(与详情页同一份本地收藏夹)
+    $('#playFav').addEventListener('click', () => {
+      const list = store.get('favs', []);
+      const idx = list.findIndex((f) => f.key === key && f.id === String(vod.vod_id));
+      if (idx >= 0) { list.splice(idx, 1); toast('已取消收藏'); }
+      else {
+        list.unshift({ key, id: String(vod.vod_id), title: vod.vod_name, pic: vod.vod_pic, remarks: vod.vod_remarks });
+        toast('已加入收藏', 'ok');
+      }
+      store.set('favs', list.slice(0, 200));
+      const btn = $('#playFav');
+      btn.textContent = idx >= 0 ? '☆ 收藏' : '★ 已收藏';
+      btn.classList.toggle('on', idx < 0);
     });
 
     // ⚡ 快速换源: 并发探测全部其他源, 谁响应快谁先出现(带实测延迟), 本页切换并同步集数
