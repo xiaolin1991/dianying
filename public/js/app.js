@@ -82,8 +82,8 @@
     const box = $('#userBox');
     if (!box) return;
     box.innerHTML = State.me
-      ? `<a class="user-chip" href="#/user" title="个人中心"><span class="u-ava">${esc(State.me.slice(0, 1).toUpperCase())}</span>${esc(State.me)}</a>`
-      : `<a class="btn ghost small" href="#/login">登录 / 注册</a>`;
+      ? `<a class="user-chip" href="#/user" title="${esc(State.me)} · 个人中心"><span class="u-ava">${esc(State.me.slice(0, 1).toUpperCase())}</span><span class="u-name">${esc(State.me)}</span></a>`
+      : `<a class="btn ghost small login-short" href="#/login">登录</a>`;
   }
   function logSearch(q) {
     if (!q) return;
@@ -242,6 +242,7 @@
     // 强制登录: 未登录只允许登录页与后台
     if (loginRequired() && !['login', 'admin'].includes(parts[0])) {
       markNav('');
+      if (location.hash && location.hash !== '#/login') store.set('afterLogin', location.hash); // 记住来路, 登录/注册后送回
       return viewLogin(alive, true);
     }
     try {
@@ -1099,7 +1100,11 @@
         State.me = username;
         updateUserBox();
         toast((mode === 'login' ? '欢迎回来，' : '注册成功，') + username, 'ok');
-        location.hash = '#/home';
+        // 关键: 若当前哈希已等于目标(如一直停在 #/home), 赋值不会触发路由, 必须手动调用
+        const target = store.get('afterLogin', '') || '#/home';
+        store.set('afterLogin', '');
+        if ((location.hash || '') === target) route();
+        else location.hash = target;
       } catch (e) {
         toast(e.message || '操作失败', 'err');
       }
