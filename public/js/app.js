@@ -839,13 +839,7 @@
     const isFav = store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id));
     v.innerHTML = `
       <div class="container page-wrap play-head">
-        <div class="play-bar">
-          <div class="pb-title">${esc(vod.vod_name)}<span id="curEpName">${esc(groups[gi].eps[ei].name)}</span></div>
-          <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
-          <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
-          <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
-          <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
-        </div>
+        <div class="pb-title">${esc(vod.vod_name)}<span id="curEpName">${esc(groups[gi].eps[ei].name)}</span></div>
       </div>
       <div class="play-stage">
         <div class="video-wrap"><video id="videoEl" controls playsinline autoplay></video>
@@ -854,6 +848,12 @@
         </div>
       </div>
       <div class="container page-wrap play-below">
+        <div class="play-actions">
+          <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
+          <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
+          <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
+          <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
+        </div>
         <div class="side-card swap-card">
           <h4>⚡ 快速换源</h4>
           <div class="swap-stat" id="swapStat"><span class="spin"></span> 正在探测其他播放源…</div>

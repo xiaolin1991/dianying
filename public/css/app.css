@@ -230,9 +230,9 @@ img { display: block; }
 html, body { overflow-x: hidden; }
 .play-stage { width: min(100vw, calc((100vh - 150px) * 1.7778)); margin: 0 auto; background: #000; }
 .play-stage .video-wrap { border-radius: 0; height: min(56.25vw, calc(100vh - 150px)); }
-.play-head { padding-bottom: 10px; } /* 与导航栏、播放器之间留出呼吸空间 */
+.play-head { padding-bottom: 10px; } /* 标题与导航栏、播放器之间的呼吸空间 */
 .play-below { margin-top: 14px; }
-.play-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 0; }
+.play-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .pb-title { font-size: 17px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .pb-title span { color: var(--acc); font-size: 13px; font-weight: 400; margin-left: 6px; }
 .play-fav.on:hover { box-shadow: 0 0 14px rgba(245, 181, 10, .35); }
