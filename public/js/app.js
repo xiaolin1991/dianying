@@ -859,6 +859,8 @@
           <div class="swap-stat" id="swapStat"><span class="spin"></span> 正在探测其他播放源…</div>
           <button class="btn primary swap-open" id="openSwapBtn" disabled>🔍 探测中…</button>
           <div class="src-switch swap-flow" id="srcSwitch"></div>
+          <button class="swap-miss-toggle hidden" id="swapMissToggle" type="button"></button>
+          <div class="src-switch swap-flow hidden" id="swapMiss"></div>
         </div>
         <div class="side-card eps-card" style="margin-top:14px">
           <h4>📺 选集 · 共 ${groups.reduce((n, g) => n + g.eps.length, 0)} 集<button class="chip" id="epsFold">收起 ▴</button></h4>
@@ -1049,10 +1051,25 @@
       const statEl = $('#swapStat');
       const openBtn = $('#openSwapBtn');
       const swapOk = $('#srcSwitch');
+      const swapMiss = $('#swapMiss');
+      const missToggle = $('#swapMissToggle');
       const hits = [];   // {s, ms, spdCls, id}
       const misses = []; // {s, ms, spdCls, why}
       let pending = others.length;
       const norm = (s2) => String(s2 || '').replace(/\s/g, '');
+      // 桌面端失效源收缩区(与可用源同款 5 列排列); 手机端由 CSS 隐藏
+      const updMissToggle = () => {
+        if (!missToggle) return;
+        const collapsed = swapMiss.classList.contains('hidden');
+        missToggle.textContent = `${collapsed ? '▶' : '▼'} 无此片/已失效的源 ${misses.length} 个（点击${collapsed ? '展开' : '收起'}）`;
+        missToggle.classList.toggle('hidden', misses.length === 0);
+      };
+      if (missToggle) {
+        missToggle.addEventListener('click', () => {
+          swapMiss.classList.toggle('hidden');
+          updMissToggle();
+        });
+      }
       const updStat = () => {
         if (!alive() || !statEl) return;
         if (pending > 0) {
@@ -1115,12 +1132,21 @@
                 `<a class="src-item" href="#/play/${esc(s.key)}/${encodeURIComponent(hit.vod_id)}?ep=${ei}&group=${gi}" title="${esc(s.name)} · 延迟${ms}ms · 点击切换并同步到第${ei + 1}集">
                    ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span></a>`);
             } else {
-              misses.push({ s, ms, spdCls, why: '无此片' }); // 桌面不显示失效源, 仅手机弹窗内灰显
+              misses.push({ s, ms, spdCls, why: '无此片' });
+              // 桌面端: 收进下方可展开区(同款排列); 手机端该区域 display:none
+              if (swapMiss) swapMiss.insertAdjacentHTML('beforeend',
+                `<span class="src-item miss" title="${esc(s.name)} · 响应${ms}ms但无本片">
+                   ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span><small>无此片</small></span>`);
+              updMissToggle();
             }
           } catch (e) {
             if (!alive()) return;
             pending--;
             misses.push({ s, ms: 0, spdCls: '', why: '超时/失效' });
+            if (swapMiss) swapMiss.insertAdjacentHTML('beforeend',
+              `<span class="src-item miss" title="${esc(s.name)} · 请求超时或源已失效">
+                 ${srcIconHtml(s)}<span>${esc(s.name)}</span><small class="fail">超时/失效</small></span>`);
+            updMissToggle();
           }
           updStat();
         })();
@@ -2425,6 +2451,42 @@
       if (!e.target.closest('#searchPop') && !e.target.closest('.searchbox')) searchPop && searchPop.classList.add('hidden');
     });
     $('#searchInput').addEventListener('keydown', (e) => e.key === 'Enter' && doSearch());
+
+    // 手机端: 放大镜按钮 → 搜索弹窗(输入/历史 → 确认立即跳转并关闭)
+    const mBtn = $('#searchMBtn');
+    if (mBtn) {
+      mBtn.addEventListener('click', () => {
+        const box = document.createElement('div');
+        box.className = 'modal-mask';
+        const hist = store.get('searchHist', []);
+        box.innerHTML = `<div class="modal-box" style="width:min(92vw,420px)">
+            <h3 style="margin-bottom:12px">🔍 搜索影视</h3>
+            <div style="display:flex;gap:8px">
+              <input id="mSearchInput" class="field-input" style="flex:1;min-width:0;font-size:16px" type="search" placeholder="电影 / 剧集 / 综艺…" autocomplete="off">
+              <button class="btn primary" id="mSearchGo" style="flex-shrink:0">搜索</button>
+            </div>
+            ${hist.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">${hist.map((k) =>
+              `<button class="chip m-sh" data-q="${esc(k)}">${esc(k)}</button>`).join('')}</div>` : ''}
+          </div>`;
+        const go = () => {
+          const q = $('#mSearchInput', box).value.trim();
+          if (!q) return;
+          pushSearchHist(q);
+          box.remove();
+          location.hash = '#/search?q=' + encodeURIComponent(q);
+        };
+        $('#mSearchGo', box).addEventListener('click', go);
+        $('#mSearchInput', box).addEventListener('keydown', (e) => e.key === 'Enter' && go());
+        $$('.m-sh', box).forEach((el) => el.addEventListener('click', () => {
+          pushSearchHist(el.dataset.q);
+          box.remove();
+          location.hash = '#/search?q=' + encodeURIComponent(el.dataset.q);
+        }));
+        box.addEventListener('click', (ev) => { if (ev.target === box) box.remove(); });
+        document.body.appendChild(box);
+        setTimeout(() => { const inp = $('#mSearchInput', box); inp && inp.focus(); }, 50);
+      });
+    }
     window.addEventListener('scroll', () => $('#backTop').classList.toggle('show', window.scrollY > 600));
     $('#backTop').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
     window.addEventListener('hashchange', route);
