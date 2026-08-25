@@ -1813,48 +1813,67 @@
       return;
     }
     const apkBtn = dlUrl
-      ? `<a class="btn primary" style="font-size:15px;padding:12px 22px" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 ${isAndroid ? '立即下载安卓版' : '下载安卓 APK'}</a>`
-      : `<span class="hint">安卓安装包即将发布，可先看下方教程</span>`;
+      ? `<a class="btn primary" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 ${isAndroid ? '立即安装到本机' : '下载安卓 APK'}</a>`
+      : `<span class="dl-soon">安装包整备中 · 可先看下方教程</span>`;
+    const tvBtn = dlUrl
+      ? `<a class="btn ghost" href="${esc(dlUrl).replace('xiaolintv-phone-', 'xiaolintv-tv-')}" target="_blank" rel="noopener">获取 TV 版</a>`
+      : '';
+    const siteName = esc((State.settings && State.settings.siteName) || '晓林影院');
     v.innerHTML = `
-      <div class="container page-wrap" style="max-width:860px">
-        <div class="page-head"><div class="page-title">📲 下载 APP</div></div>
-        <p class="hint" style="margin-bottom:16px">把 晓林影视 装进手机/电视，全屏播放、无地址栏干扰、收藏多设备云同步。</p>
+      <div class="container page-wrap dl-wrap">
 
-        <div class="side-card" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-          <div style="flex:1;min-width:220px">
-            <h4 style="margin-bottom:6px;font-size:16px">🤖 安卓手机 / 平板</h4>
-            <p class="hint">独立安装包（WebView 壳），站点更新无需重装 App。</p>
+        <!-- Hero -->
+        <section class="dl-hero">
+          <i class="dl-blob b1"></i><i class="dl-blob b2"></i><i class="dl-blob b3"></i>
+          <img class="dl-icon" src="./icons/icon-192.png" alt="app">
+          <h2 class="dl-name">${siteName} <em>App</em></h2>
+          <p class="dl-slogan">装进口袋的私人影院 —— 全屏沉浸 · 收藏云同步 · 大屏同享</p>
+          <div class="dl-hero-cta">${apkBtn}${isIOS ? '<a class="btn ghost" href="#dl-ios">🍎 我用 iPhone</a>' : ''}</div>
+        </section>
+
+        <!-- 特性条 -->
+        <section class="dl-strip">
+          <span>🎬 全屏沉浸</span><span>☁️ 双向云同步</span><span>⚡ 聚合秒搜</span><span>📶 电视直播</span><span>🌗 护眼暗色</span>
+        </section>
+
+        <!-- 三端卡片 -->
+        <section class="dl-grid">
+          <div class="dl-card ${isAndroid ? 'hot' : ''}">
+            ${isAndroid ? '<i class="dl-ribbon">当前设备</i>' : ''}
+            <div class="dl-badge" style="--bd1:#3ddc84;--bd2:#0f9d58">🤖</div>
+            <h4>安卓手机 / 平板</h4>
+            <p>独立客户端 · 站点更新免重装<br>覆盖安装不丢收藏与进度</p>
+            ${apkBtn}
           </div>
-          ${apkBtn}
-        </div>
-
-        <div class="side-card" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:14px">
-          <div style="flex:1;min-width:220px">
-            <h4 style="margin-bottom:6px;font-size:16px">📺 电视 / 机顶盒</h4>
-            <p class="hint">同一通用包已内置 TV 启动器，遥控器方向键即可操作；安装后电视桌面直接出现图标。TV 安装包可在 Release 列表选择 <b>xiaolintv-tv-*.apk</b>。</p>
+          <div class="dl-card">
+            <div class="dl-badge" style="--bd1:#8ab4ff;--bd2:#5b7fff">📺</div>
+            <h4>电视 / 机顶盒</h4>
+            <p>内置 TV 启动器 · 遥控器直用<br>大屏观影最佳选择</p>
+            ${tvBtn || '<span class="dl-soon">TV 包见 Release 列表</span>'}
           </div>
-          ${dlUrl ? `<a class="btn ghost" href="${esc(dlUrl).replace('xiaolintv-phone-', 'xiaolintv-tv-')}" target="_blank" rel="noopener">📥 TV 版直链</a>` : ''}
-        </div>
+          <div class="dl-card ${isIOS ? 'hot' : ''}" id="dl-ios">
+            ${isIOS ? '<i class="dl-ribbon">当前设备</i>' : ''}
+            <div class="dl-badge iosb">🍎</div>
+            <h4>iPhone / iPad</h4>
+            <ol class="dl-timeline">
+              <li><b>Safari</b> 打开本站<span>微信内请点 ⋯ 选「在浏览器打开」</span></li>
+              <li>点底部<b>分享</b>按钮 ⎋<span>方框加向上箭头</span></li>
+              <li>选择<b>添加到主屏幕</b></li>
+              <li>点右上角<b>添加</b> ✅<span>获得独立图标 · 全屏运行</span></li>
+            </ol>
+          </div>
+        </section>
 
-        <div class="side-card" style="margin-top:14px">
-          <h4 style="margin-bottom:10px;font-size:16px">🍎 iPhone / iPad（免下载 · PWA）</h4>
-          <ol class="dl-steps">
-            <li>用 <b>Safari 浏览器</b> 打开本站（微信内请点右上角 ⋯ 选择「在浏览器打开」）</li>
-            <li>点击底部工具栏的 <b>分享按钮</b> <span style="color:var(--acc)">⎋</span>（方框加向上箭头）</li>
-            <li>在列表中找到并点击 <b>「添加到主屏幕」</b></li>
-            <li>确认名称后点击右上角 <b>添加</b> ✅</li>
-          </ol>
-          <p class="hint" style="margin-top:10px">完成后主屏幕会出现 晓林影院 图标，点开即全屏运行，体验与原生 App 一致，且始终自动跟随网站最新版本。</p>
-        </div>
-
-        <div class="side-card" style="margin-top:14px">
-          <h4 style="margin-bottom:10px;font-size:16px">❓ 安卓安装常见问题</h4>
+        <!-- FAQ -->
+        <section class="side-card dl-faq">
+          <h4>🛠️ 安装小贴士</h4>
           <ul class="dl-steps">
-            <li>提示「未知来源」：设置 → 允许来自此来源的应用 / 仅本次允许</li>
-            <li>覆盖安装新版本无需卸载旧版，收藏与进度不丢失（登录账号云端同步）</li>
-            <li>华为/鸿蒙：安装时若被拦截，选「继续安装」即可</li>
+            <li>安卓提示「未知来源」：设置中允许，或选「仅本次允许」</li>
+            <li>华为 / 鸿蒙拦截时选择「继续安装」即可</li>
+            <li>覆盖升级无需卸载：登录账号后收藏与观看进度云端同步</li>
+            <li>iOS 卸载主屏图标即等于卸载，随时可重新添加</li>
           </ul>
-        </div>
+        </section>
       </div>`;
   }
 
@@ -1870,21 +1889,27 @@
   function openAppPromoModal() {
     const box = document.createElement('div');
     box.className = 'modal-mask';
-    box.innerHTML = `<div class="modal-box" style="width:min(92vw,400px);text-align:center">
-        <button class="modal-close" id="promoX">×</button>
-        <div style="font-size:44px;line-height:1">📱</div>
-        <h3 style="margin:10px 0 6px">安装 晓林影院 App</h3>
-        <p class="hint" style="margin-bottom:12px">全屏播放 · 无地址栏 · 收藏云同步 · 支持电视盒</p>
-        <div style="display:grid;gap:9px">
-          <a class="btn primary" href="#/download">📥 前往下载 / 安装教程</a>
-          <button class="btn ghost" id="promoForever">已安装 · 不再提示</button>
+    box.innerHTML = `<div class="modal-box promo-box">
+        <button class="modal-close promo-x">×</button>
+        <div class="promo-hero">
+          <img class="promo-icon" src="./icons/icon-192.png" alt="App">
+          <div class="promo-title-wrap">
+            <h3 class="promo-title">${esc((State.settings && State.settings.siteName) || '晓林影院')}</h3>
+            <div class="promo-sub">掌上观影 · 沉浸体验</div>
+            <div class="promo-stars">★★★★★ <small>口碑推荐</small></div>
+          </div>
         </div>
+        <div class="promo-feats">
+          <span>🎬 全屏播放</span><span>☁️ 收藏云同步</span><span>📺 电视盒子</span><span>⚡ 秒开换源</span>
+        </div>
+        <a class="btn primary promo-go" href="#/download">📥 免费安装</a>
+        <button class="promo-skip" id="promoForever">已安装，不再提示</button>
       </div>`;
     box.addEventListener('click', (ev) => {
       if (ev.target === box) box.remove();
-      if (ev.target.closest('a')) setTimeout(() => box.remove(), 0);
+      if (ev.target.closest('a.promo-go')) setTimeout(() => box.remove(), 0);
     });
-    $('#promoX', box).addEventListener('click', () => box.remove()); // × 关闭 = 10 天后再弹
+    $('.promo-x', box).addEventListener('click', () => box.remove()); // × 关闭 = 10 天后再弹
     $('#promoForever', box).addEventListener('click', () => {
       store.set('appPromoState', { ...store.get('appPromoState', {}), forever: true });
       box.remove();
