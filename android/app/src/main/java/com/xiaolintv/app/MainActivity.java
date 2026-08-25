@@ -1,4 +1,4 @@
-package com.XIAOLIN-TV.app;
+package com.xiaolintv.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;

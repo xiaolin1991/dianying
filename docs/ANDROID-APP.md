@@ -24,8 +24,10 @@
 只要 push 到 `main` 分支（或手动在 Actions 页点 Run workflow）：
 
 1. GitHub 会自动跑 `Android APK` 工作流（JDK17 + Android SDK + Gradle 8.7 构建）。
-2. 跑完进入该次运行页面底部 **Artifacts** → 下载 `XIAOLIN-TV-debug-apk`。
-3. 解压得到 `app-debug.apk`，传到手机安装即可（首次需允许"未知来源"安装）。
+2. **下载 APK（推荐）：仓库首页右侧 Releases → `latest` → 下载 `xiaolintv-v*.apk`**。
+   每次构建自动覆盖更新这个 Release，版本号 `v1.0.<构建编号>` 自动递增。
+   （备用：该次 Actions 运行底部 Artifacts → `xiaolintv-apk`）
+3. 传到手机安装即可（首次需允许"未知来源"安装）。
 
 ## 三、本地验证构建（可选）
 

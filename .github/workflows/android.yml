@@ -1,10 +1,13 @@
 name: Android APK
 
-# 每次 push 到 main 自动打包调试版 APK; 也可在 Actions 页手动触发
+# 每次 push 到 main 自动打包并发布到 Releases(latest); 也可在 Actions 页手动触发
 on:
   push:
     branches: [ main ]
   workflow_dispatch: {}
+
+permissions:
+  contents: write   # 允许创建 Release 并上传 APK
 
 jobs:
   build:
@@ -26,14 +29,16 @@ jobs:
           gradle-version: '8.7'
 
       # 可选: 在仓库 Settings → Secrets and variables → Actions → Variables 里
-      # 添加变量 START_URL = https://你的域名/ , APK 将自动装载该地址
+      # 添加变量 START_URL = https://dy2026.hanglinkj.com/ , APK 将自动装载该地址
+      # 版本号自动递增: v1.0.<构建编号>
       - name: Build Debug APK
         env:
           START_URL: ${{ vars.START_URL }}
+          RUN_NO: ${{ github.run_number }}
         run: |
-          ARGS=""
+          ARGS="-PverCode=$RUN_NO -PverName=1.0.$RUN_NO"
           if [ -n "$START_URL" ]; then
-            ARGS="-PstartUrl=$START_URL"
+            ARGS="$ARGS -PstartUrl=$START_URL"
           fi
           set -o pipefail
           gradle -p android assembleDebug --no-daemon --stacktrace $ARGS 2>&1 | tee build-log.txt
@@ -47,9 +52,29 @@ jobs:
           path: build-log.txt
           if-no-files-found: ignore
 
-      - name: Upload APK
+      - name: Rename APK
+        run: |
+          mkdir -p out
+          cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-v1.0.${{ github.run_number }}.apk"
+          ls -la out
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: XIAOLIN-TV-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: xiaolintv-apk
+          path: out/*.apk
           if-no-files-found: error
+
+      # 发布/更新 latest Release(每次构建覆盖附件), 手机直接从 Releases 下载安装
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: 晓林影视 Android 最新版 (v1.0.${{ github.run_number }})
+          body: |
+            自动构建 · commit ${{ github.sha }} · build #${{ github.run_number }}
+
+            📲 安装方法: 下载下方 `xiaolintv-v*.apk` 传到手机安装（首次需允许「未知来源」）。
+            当前版本 **v1.0.${{ github.run_number }}**
+          files: out/*.apk
+          make_latest: true
