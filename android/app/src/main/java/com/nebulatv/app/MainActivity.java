@@ -1,4 +1,4 @@
-package com.nebulatv.app;
+package com.XIAOLIN-TV.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -12,7 +12,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 /**
- * 星河影视 安卓壳客户端
+ * 晓林影视 安卓壳客户端
  * - 全屏 WebView 装载线上站点(地址来自 BuildConfig.START_URL)
  * - 返回键 = 网页后退(hash 路由), 退出全屏优先
  * - target=_blank 链接留在 App 内打开

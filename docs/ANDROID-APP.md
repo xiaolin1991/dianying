@@ -15,7 +15,7 @@
 2. 让 APK 知道你的网站地址（二选一）：
    - **推荐**：仓库页 → Settings → Secrets and variables → Actions → **Variables** 标签 →
      New repository variable：名称 `START_URL`，值填你的线上地址
-     （如 `https://nebulatv.xxx.workers.dev/`，末尾带 `/`）
+     （如 `https://XIAOLIN-TV.xxx.workers.dev/`，末尾带 `/`）
    - 或直接改 `android/app/build.gradle` 里 `findProperty('startUrl') ?: '...'` 的默认值。
 3. 不配置时 APK 会使用默认占位地址，打开后无法访问——记得配置。
 
@@ -24,7 +24,7 @@
 只要 push 到 `main` 分支（或手动在 Actions 页点 Run workflow）：
 
 1. GitHub 会自动跑 `Android APK` 工作流（JDK17 + Android SDK + Gradle 8.7 构建）。
-2. 跑完进入该次运行页面底部 **Artifacts** → 下载 `NebulaTV-debug-apk`。
+2. 跑完进入该次运行页面底部 **Artifacts** → 下载 `XIAOLIN-TV-debug-apk`。
 3. 解压得到 `app-debug.apk`，传到手机安装即可（首次需允许"未知来源"安装）。
 
 ## 三、本地验证构建（可选）

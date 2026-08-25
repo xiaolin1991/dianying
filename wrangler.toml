@@ -1,12 +1,12 @@
 # ============================================================
-# 星河影视 NebulaTV — Cloudflare Workers 部署配置
+# 晓林影视 XIAOLIN-TV — Cloudflare Workers 部署配置
 # 用法:
 #   1. npm install          (安装 wrangler)
 #   2. 创建 KV: npx wrangler kv namespace create CONFIG_KV
 #      把输出的 id 填到下面 [[kv_namespaces]] 的 id 中
 #   3. npm run deploy
 # ============================================================
-name = "nebulatv"
+name = "xiaolin-tv"
 main = "_worker.js"
 compatibility_date = "2025-01-01"
 

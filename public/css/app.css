@@ -1,5 +1,5 @@
 /* ============================================================
-   星河影视 NebulaTV — 主样式(依赖 themes.css 的 CSS 变量)
+   晓林影视 XIAOLIN-TV — 主样式(依赖 themes.css 的 CSS 变量)
    ============================================================ */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -233,6 +233,21 @@ html, body { overflow-x: hidden; }
 .play-head { padding-bottom: 10px; } /* 标题与导航栏、播放器之间的呼吸空间 */
 .play-below { margin-top: 14px; }
 .play-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+/* 换源弹窗 */
+.swap-open { margin-top: 4px; }
+.swap-modal-list { display: grid; gap: 8px; max-height: 52vh; overflow-y: auto; }
+.swap-modal-list .src-item,
+.swap-modal-list .src-row {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--card-br); border-radius: 11px;
+  padding: 9px 12px; color: var(--txt); text-decoration: none; font-size: 13.5px;
+}
+.swap-modal-list .src-item:hover, .swap-modal-list .src-row:hover { border-color: var(--acc); }
+.swap-modal-list .src-item.miss { opacity: .5; pointer-events: none; }
+.swap-modal-list .src-item small { margin-left: auto; color: var(--dim); }
+.swap-modal-list .src-row .src-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swap-modal-list .src-row.on { border-color: var(--acc); box-shadow: var(--glow); }
+.src-switch-m { display: none; } /* 桌面端隐藏手机专用切换按钮 */
 .pb-title { font-size: 17px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .pb-title span { color: var(--acc); font-size: 13px; font-weight: 400; margin-left: 6px; }
 .play-fav.on:hover { box-shadow: 0 0 14px rgba(245, 181, 10, .35); }
@@ -588,34 +603,33 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   /* 播放页已是上下堆叠布局, 无需栅格 */
 }
 @media (max-width: 820px) {
-  /* 播放器全宽 + 换源单行横滑 */
+  /* 播放器全宽 */
   .play-stage { width: 100%; }
   .play-stage .video-wrap { height: auto; aspect-ratio: 16/9; }
-  .src-switch.swap-flow {
-    grid-template-columns: none; grid-auto-flow: column;
-    grid-auto-columns: minmax(150px, max-content); /* 每颗药丸保底宽度, 名字完整可读 */
-    grid-template-rows: repeat(1, auto);
-    max-height: none; overflow-x: auto; overflow-y: hidden; gap: 8px;
-    padding: 2px 2px 6px; scrollbar-width: none;
-  }
-  .src-switch.swap-flow::-webkit-scrollbar { display: none; }
-  .src-switch.swap-flow .src-item { font-size: 13px; padding: 9px 14px; }
-  .src-switch.swap-flow .src-item .spd { font-size: 11px; padding: 2px 8px; }
-  .src-switch.swap-flow .src-item { flex-shrink: 0; }
+  /* 换源/选源改为弹窗选择, 不再左右横滑 */
+  .src-layout { display: block; }
+  .src-list { display: none; } /* 手机隐藏左侧竖列表, 用 #srcPickBtn 弹窗代替 */
+  .src-switch-m { display: inline-flex !important; align-items: center; gap: 6px; margin-bottom: 12px; }
+  /* 播放页四个操作按钮压缩到一行 */
+  .play-actions { gap: 7px; margin-bottom: 10px; }
+  .play-actions .btn,
+  .play-actions .chip { font-size: 11.5px; padding: 5px 9px; white-space: nowrap; }
   /* 禁止整页横向滑动 */
   html, body { overflow-x: hidden; max-width: 100vw; }
   #app { overflow-x: clip; }
   /* 顶栏单行: logo | 搜索框(占最大) | 用户 | 主题 ; 导航第二行 */
-  .topbar-inner { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px; }
+  /* 华为等安卓机字体渲染偏宽, 全面收紧: 缩短搜索框/按钮, 保证一行放得下 */
+  .topbar-inner { flex-wrap: wrap; height: auto; padding: 8px 10px; gap: 6px; }
   .topbar-right { display: contents; } /* 子元素直接参与 topbar-inner 排列 */
   .brand-name { display: none; }
-  .brand-logo { width: 30px; height: 30px; }
-  .searchbox { order: 1; flex: 1 1 auto; width: auto; min-width: 0; margin-left: 4px; }
+  .brand-logo { width: 26px; height: 26px; }
+  .searchbox { order: 1; flex: 1 1 96px; width: auto; min-width: 96px; max-width: 46vw; margin-left: 0; padding: 6px 10px; gap: 6px; }
   .searchbox input { font-size: 16px; } /* ≥16px 防 iOS 聚焦自动放大导致页面横滑 */
   /* 历史下拉在手机上通栏显示, 防止按输入框右缘锚定导致溢出屏幕 */
   .search-pop { left: 12px !important; right: 12px !important; width: auto; }
   .user-box { order: 2; flex-shrink: 0; margin-left: 0; }
-  .icon-btn#themeBtn { order: 3; width: 34px; height: 34px; flex-shrink: 0; }
+  .user-box .btn { font-size: 12px; padding: 6px 10px; white-space: nowrap; }
+  .icon-btn#themeBtn { order: 3; width: 32px; height: 32px; flex-shrink: 0; }
   .nav { order: 4; flex-basis: 100%; overflow-x: auto; }
   .container, .topbar-inner { padding-left: 14px; padding-right: 14px; }
   .page-wrap { padding-top: 18px; }

@@ -1,8 +1,8 @@
 {
-  "name": "nebulatv",
+  "name": "XIAOLIN-TV",
   "version": "1.0.0",
   "private": true,
-  "description": "星河影视 NebulaTV — 影视聚合 + 电视直播, 部署于 Cloudflare Workers / Pages",
+  "description": "晓林影视 XIAOLIN-TV — 影视聚合 + 电视直播, 部署于 Cloudflare Workers / Pages",
   "scripts": {
     "dev": "wrangler dev",
     "dev:pages": "node scripts/build-pages.mjs && wrangler pages dev dist",

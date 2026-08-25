@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.nebulatv.app'
+    namespace 'com.XIAOLIN-TV.app'
     compileSdk 34
 
     defaultConfig {
-        applicationId 'com.nebulatv.app'
+        applicationId 'com.XIAOLIN-TV.app'
         minSdk 24          // 覆盖 Android 7.0+, 约98%设备
         targetSdk 34
         versionCode 1

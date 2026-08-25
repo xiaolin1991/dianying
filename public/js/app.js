@@ -1,5 +1,5 @@
 /* ============================================================
-   星河影视 NebulaTV — 前端应用(原生 JS, 无构建)
+   晓林影视 XIAOLIN-TV — 前端应用(原生 JS, 无构建)
    视图: 首页 / 分类 / 搜索 / 详情 / 播放 / 电视直播 / 后台
    ============================================================ */
 (function () {
@@ -857,11 +857,7 @@
         <div class="side-card swap-card">
           <h4>⚡ 快速换源</h4>
           <div class="swap-stat" id="swapStat"><span class="spin"></span> 正在探测其他播放源…</div>
-          <div class="src-switch swap-flow" id="srcSwitch">
-            <span class="src-item cur">${srcIconHtml(src)} 当前 · ${esc(src.name)}</span>
-          </div>
-          <button class="swap-miss-toggle hidden" id="swapMissToggle" type="button"></button>
-          <div class="src-switch swap-flow hidden" id="swapMiss"></div>
+          <button class="btn primary swap-open" id="openSwapBtn" disabled>🔍 探测中…</button>
         </div>
         <div class="side-card eps-card" style="margin-top:14px">
           <h4>📺 选集 · 共 ${groups.reduce((n, g) => n + g.eps.length, 0)} 集<button class="chip" id="epsFold">收起 ▴</button></h4>
@@ -1044,37 +1040,57 @@
       }, { passive: true });
     }
 
-    // ⚡ 快速换源: 并发探测全部其他源, 谁响应快谁先出现(带实测延迟), 本页切换并同步集数
-    // 有效源=亮色可点药丸; 无此片/超时=默认收缩, 展开后与有效源完全同款排列(灰显)
+    // ⚡ 快速换源: 并发探测全部其他源, 结果收进弹窗统一选择(不再左右滑动药丸)
+    // 可用源可点击直接切换并同步集数; 无此片/超时的灰显列在下方
     (function startSwapSearch() {
       const others = visibleSources().filter((s) => s.key !== key);
-      const swapOk = $('#srcSwitch');
-      const swapMiss = $('#swapMiss');
-      const missToggle = $('#swapMissToggle');
       const statEl = $('#swapStat');
-      let pending = others.length, okCount = 0, missCount = 0;
-      const updMissToggle = () => {
-        if (!missToggle) return;
-        const collapsed = swapMiss.classList.contains('hidden');
-        missToggle.textContent = `${collapsed ? '▶' : '▼'} 无此片/已失效的源 ${missCount} 个（点击${collapsed ? '展开' : '收起'}）`;
-        missToggle.classList.toggle('hidden', missCount === 0);
-      };
-      if (missToggle) {
-        missToggle.addEventListener('click', () => {
-          swapMiss.classList.toggle('hidden');
-          updMissToggle();
-        });
-      }
+      const openBtn = $('#openSwapBtn');
+      const hits = [];   // {s, ms, spdCls, id}
+      const misses = []; // {s, ms, spdCls, why}
+      let pending = others.length;
+      const norm = (s2) => String(s2 || '').replace(/\s/g, '');
       const updStat = () => {
         if (!alive() || !statEl) return;
-        statEl.innerHTML = pending > 0
-          ? `<span class="spin"></span> 探测中 ${others.length - pending}/${others.length} · 可换源 <b style="color:var(--acc)">${okCount}</b> 个 · 无此片/失效 ${missCount} 个`
-          : okCount > 0
-            ? `✅ 探测完成 · 点击亮色药丸即换源，<b>集数自动同步</b>`
-            : '❌ 其他源都没有本片或已失效';
+        if (pending > 0) {
+          statEl.innerHTML = `<span class="spin"></span> 探测中 ${others.length - pending}/${others.length} · 可换源 <b style="color:var(--acc)">${hits.length}</b> 个 · 无此片/失效 ${misses.length} 个`;
+        } else if (hits.length > 0) {
+          statEl.textContent = `✅ 探测完成 · ${hits.length} 个源有本片，点击即换且集数自动同步`;
+        } else {
+          statEl.textContent = '❌ 其他源都没有本片或已失效';
+        }
+        if (openBtn) {
+          openBtn.disabled = pending > 0 || hits.length === 0;
+          openBtn.textContent = pending > 0
+            ? `🔍 探测中…（${hits.length} 可用）`
+            : hits.length > 0 ? `🔍 选择播放源（${hits.length} 个可用）` : '暂无可用播放源';
+        }
       };
       updStat();
-      const norm = (s2) => String(s2 || '').replace(/\s/g, '');
+
+      function openSwapModal() {
+        const box = document.createElement('div');
+        box.className = 'modal-mask';
+        const row = (h) => `<a class="src-item" href="#/play/${esc(h.s.key)}/${encodeURIComponent(h.id)}?ep=${ei}&group=${gi}" title="${esc(h.s.name)} · 延迟${h.ms}ms · 点击切换并同步到第${ei + 1}集">
+             ${srcIconHtml(h.s)}<i class="spd ${h.spdCls}">⚡${h.ms}ms</i><span>${esc(h.s.name)}</span><small>切换 →</small></a>`;
+        const missRow = (m) => `<span class="src-item miss" title="${esc(m.s.name)} · ${m.why}">
+             ${srcIconHtml(m.s)}${m.ms ? `<i class="spd ${m.spdCls}">⚡${m.ms}ms</i>` : ''}<span>${esc(m.s.name)}</span><small>${esc(m.why)}</small></span>`;
+        box.innerHTML = `<div class="modal-box" style="width:min(92vw,540px)">
+            <h3 style="margin-bottom:6px">⚡ 选择播放源</h3>
+            <p class="hint" style="margin-bottom:12px">当前：${esc(src.name)} · 第 ${ei + 1} 集 · 切换后自动跳到同一集</p>
+            <div class="swap-modal-list">${hits.map(row).join('') || '<p class="hint">没有找到可用播放源</p>'}</div>
+            ${misses.length ? `<div style="margin-top:14px"><p class="hint" style="margin-bottom:8px">以下 ${misses.length} 个源无此片或已失效</p><div class="swap-modal-list">${misses.map(missRow).join('')}</div></div>` : ''}
+          </div>`;
+        box.addEventListener('click', (ev) => { if (ev.target === box) box.remove(); });
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'modal-close';
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', () => box.remove());
+        box.firstChild.appendChild(closeBtn);
+        document.body.appendChild(box);
+      }
+      if (openBtn) openBtn.addEventListener('click', () => { if (!openBtn.disabled) openSwapModal(); });
+
       others.forEach((s) => {
         (async () => {
           const t0 = performance.now();
@@ -1086,26 +1102,12 @@
             const spdCls = ms < 900 ? 'sp-good' : ms < 2600 ? 'sp-mid' : 'sp-bad';
             const hit = (r2.list || []).find((v2) => norm(v2.vod_name) === norm(vod.vod_name));
             pending--;
-            if (hit && hit.vod_id) {
-              okCount++;
-              swapOk.insertAdjacentHTML('beforeend',
-                `<a class="src-item" href="#/play/${esc(s.key)}/${encodeURIComponent(hit.vod_id)}?ep=${ei}&group=${gi}" title="${esc(s.name)} · 延迟${ms}ms · 点击切换并同步到第${ei + 1}集">
-                   ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span></a>`);
-            } else {
-              missCount++;
-              swapMiss.insertAdjacentHTML('beforeend',
-                `<span class="src-item miss" title="${esc(s.name)} · 响应${ms}ms但无本片">
-                   ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span><small>无此片</small></span>`);
-              updMissToggle();
-            }
+            if (hit && hit.vod_id) hits.push({ s, ms, spdCls, id: hit.vod_id });
+            else misses.push({ s, ms, spdCls, why: '无此片' });
           } catch (e) {
             if (!alive()) return;
             pending--;
-            missCount++;
-            swapMiss.insertAdjacentHTML('beforeend',
-              `<span class="src-item miss" title="${esc(s.name)} · 请求超时或源已失效">
-                 ${srcIconHtml(s)}<span>${esc(s.name)}</span><small class="fail">超时/失效</small></span>`);
-            updMissToggle();
+            misses.push({ s, ms: 0, spdCls: '', why: '超时/失效' });
           }
           updStat();
         })();
@@ -1540,6 +1542,7 @@
             <button class="chip ${sortBySpeed ? 'on' : ''}" id="sortSpeed" title="按响应速度排序">⚡ 速度优先</button>
           </div>
         </div>
+        <button class="btn ghost small src-switch-m" id="srcPickBtn">🔀 切换播放源：当前「${esc(cleanSrcName(cur))}」 ${speedBadge(cur.key)}</button>
         <div class="src-layout">
           <aside class="src-list" id="srcList">
             ${ordered.map((s) => `
@@ -1557,6 +1560,29 @@
     $('#sortSpeed').addEventListener('click', () => {
       store.set('srcSortBySpeed', !store.get('srcSortBySpeed', false));
       route();
+    });
+
+    // 手机端: 弹窗选择播放源(替代左右滑动列表, 防误碰)
+    $('#srcPickBtn').addEventListener('click', () => {
+      const box = document.createElement('div');
+      box.className = 'modal-mask';
+      box.innerHTML = `<div class="modal-box" style="width:min(92vw,540px)">
+          <h3 style="margin-bottom:6px">🔀 选择播放源</h3>
+          <p class="hint" style="margin-bottom:12px">点击任意源切换 · ⚡ 为实测响应速度</p>
+          <div class="swap-modal-list">${ordered.map((s) => `
+            <a class="src-row ${s.key === cur.key ? 'on' : ''} ${s.adult ? 'adult' : ''}" href="#/sources/${encodeURIComponent(s.key)}">
+              ${srcIconHtml(s)}
+              <span class="src-name">${esc(cleanSrcName(s))}${s.custom ? ' <i class="src-mini-tag">自</i>' : ''}</span>
+              <span class="src-speed">${speedBadge(s.key)}</span>
+            </a>`).join('')}</div>
+        </div>`;
+      box.addEventListener('click', (ev) => { if (ev.target === box) box.remove(); });
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'modal-close';
+      closeBtn.textContent = '×';
+      closeBtn.addEventListener('click', () => box.remove());
+      box.firstChild.appendChild(closeBtn);
+      document.body.appendChild(box);
     });
 
     mountSourcePanel(cur, q, cat, alive);
@@ -1852,13 +1878,13 @@
           </div>
 
           <div class="admin-card">
-            <h3>📡 采集源配置</h3>
-            <p class="hint">默认每日同步 LunaTV-config。你可以改成自己的配置地址（JSON 格式：<code>{"api_site":{"key":{"name":"..","api":".."}}}</code>），也可以直接把 JSON 内容粘贴进来。保存后立即生效。</p>
-            <label class="field-label">当前生效：${s.configFrom === 'inline-json' ? '后台内联 JSON' : s.configFrom === 'custom-url' ? '自定义地址' : '默认 LunaTV-config'}</label>
-            <input class="field-input" id="cfgUrlInput" value="${esc(s.effectiveConfigUrl)}" placeholder="https://.../xxx.json 或直接粘贴 { 开头的 JSON">
+            <h3>📡 采集源配置（支持多个）</h3>
+            <p class="hint">每行一个配置地址，可添加多个，<b>按行顺序合并</b>（前面的源优先、后面的只补缺）。留空恢复默认 LunaTV-config。也可以在下方粘贴 <code>{</code> 开头的 JSON 直接作为唯一来源。</p>
+            <label class="field-label">当前生效：${s.configFrom === 'inline-json' ? '后台内联 JSON' : s.configFrom === 'multi-url' ? `多地址合并（${(s.effectiveConfigUrls || []).length} 个）` : '默认 LunaTV-config'}</label>
+            <textarea class="field-input" id="cfgUrlsInput" rows="4" placeholder="https://config1.example/xxx.json&#10;https://config2.example/yyy.json">${esc((s.effectiveConfigUrls || []).join('\n'))}</textarea>
             <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
               <button class="btn primary" id="saveCfgBtn">保存采集源配置</button>
-              <button class="btn ghost" id="resetCfgBtn">恢复默认(LunaTV-config)</button>
+              <button class="btn ghost" id="resetCfgBtn">清空并恢复默认(LunaTV-config)</button>
             </div>
           </div>
 
@@ -2245,13 +2271,14 @@
           stat.textContent = `共 ${r.users.length} 个注册用户`;
           table.innerHTML = r.users.length ? `
             <table class="adm-table">
-              <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP / 归属地</th><th>累计观看</th><th>有效/总记录</th><th></th></tr></thead>
+              <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP / 归属地</th><th>成人源</th><th>累计观看</th><th>有效/总记录</th><th></th></tr></thead>
               <tbody>${r.users.map((u) => `
                 <tr>
                   <td>${esc(u.username)}</td>
                   <td>${fmtDateTime(u.createdAt)}</td>
                   <td>${fmtDateTime(u.lastLoginAt)}</td>
                   <td>${esc(u.lastLoginIp || '—')}${u.lastLoginIpGeo ? '<br><small style="color:var(--dim)">' + esc(u.lastLoginIpGeo) + '</small>' : ''}</td>
+                  <td title="需全局「成人内容」开关开启后生效"><label class="switch"><input type="checkbox" class="u-adult" data-u="${esc(u.username)}" ${u.adultAllowed ? 'checked' : ''}><span class="track"></span></label></td>
                   <td>${fmtWatchSec(u.watchSec)}</td>
                   <td>${u.activeItems}/${u.totalItems}</td>
                   <td style="white-space:nowrap;display:flex;gap:6px">
@@ -2261,6 +2288,17 @@
                 </tr>`).join('')}</tbody>
             </table>` : '<p class="hint">暂无注册用户（开放注册后，前台 #/login 可注册）</p>';
           $$('#usersTable .u-log').forEach((b) => b.addEventListener('click', () => showUserLog(b.dataset.u)));
+          $$('#usersTable .u-adult').forEach((el) => el.addEventListener('change', async () => {
+            el.disabled = true;
+            try {
+              await API.adminUserAdult(el.dataset.u, el.checked);
+              toast(el.checked ? `已允许「${el.dataset.u}」观看成人源` : `已对「${el.dataset.u}」隐藏成人源`, 'ok');
+            } catch (e) {
+              el.checked = !el.checked;
+              toast('操作失败：' + e.message, 'err');
+            }
+            el.disabled = false;
+          }));
           $$('#usersTable .u-del').forEach((b) => b.addEventListener('click', async () => {
             if (!confirm(`确定删除用户「${b.dataset.u}」及其全部数据？不可恢复！`)) return;
             await API.adminDeleteUser(b.dataset.u);
@@ -2277,14 +2315,24 @@
 
       /* ---- 采集源配置 ---- */
       $('#saveCfgBtn').addEventListener('click', async () => {
-        const val = $('#cfgUrlInput').value.trim();
-        if (val && !/^https?:\/\//i.test(val) && !val.startsWith('{')) {
-          return toast('请填写 http(s) 地址，或粘贴 { 开头的 JSON 内容', 'err');
+        const raw = $('#cfgUrlsInput').value.trim();
+        if (raw.startsWith('{')) {
+          // 整段 JSON 直接作为唯一来源(优先级最高)
+          try { JSON.parse(raw); } catch (e) { return toast('JSON 格式有误：' + e.message, 'err'); }
+          try {
+            await API.adminSaveSettings({ configUrl: raw });
+            State.config = await API.getConfig();
+            toast(`内联 JSON 已保存：当前 ${State.config.count} 个源可用`, 'ok');
+            renderPanel();
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+          return;
         }
+        const lines = raw.split(/\r?\n/).map((x) => x.trim()).filter((x) => /^https?:\/\//i.test(x));
+        if (raw && !lines.length) return toast('每行需为 http(s) 配置地址', 'err');
         try {
-          await API.adminSaveSettings({ configUrl: val });
+          await API.adminSaveSettings({ configUrls: lines });
           State.config = await API.getConfig();
-          toast(`采集源配置已保存：当前 ${State.config.count} 个源可用`, 'ok');
+          toast(`已保存 ${lines.length} 个采集源：合并后 ${State.config.count} 个源可用`, 'ok');
           renderPanel();
         } catch (err) { toast('保存失败：' + err.message, 'err'); }
       });
@@ -2292,7 +2340,7 @@
         try {
           await API.adminSaveSettings({ configUrl: '' });
           State.config = await API.getConfig();
-          toast('已恢复默认采集源配置', 'ok');
+          toast('已清空并恢复默认采集源配置', 'ok');
           renderPanel();
         } catch (err) { toast('操作失败：' + err.message, 'err'); }
       });
@@ -2405,8 +2453,8 @@
 
     // 应用服务端默认主题（用户本地无偏好时）
     if (!store.get('theme', null) && State.settings.defaultTheme) applyTheme(State.settings.defaultTheme);
-    $('#brandName').textContent = State.settings.siteName || '星河影视';
-    document.title = State.settings.siteName || '星河影视';
+    $('#brandName').textContent = State.settings.siteName || '晓林影视';
+    document.title = State.settings.siteName || '晓林影视';
     applyAnnouncement(State.settings.announcement);
     route();
   }

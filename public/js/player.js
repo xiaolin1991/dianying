@@ -1,4 +1,4 @@
-/* 星河影视 NebulaTV — HLS 播放器封装 */
+/* 晓林影视 XIAOLIN-TV — HLS 播放器封装 */
 (function () {
   'use strict';
 

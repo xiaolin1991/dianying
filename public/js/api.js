@@ -1,4 +1,4 @@
-/* 星河影视 NebulaTV — 后端 API 封装(同源 /api/*) */
+/* 晓林影视 XIAOLIN-TV — 后端 API 封装(同源 /api/*) */
 (function () {
   'use strict';
 
@@ -104,6 +104,12 @@
       }, 8000).catch(() => {}),
 
     adminUsers: () => jfetch('/api/admin/users', {}, 15000),
+    adminUserAdult: (u, allowed) =>
+      jfetch('/api/admin/user-adult', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ u, allowed }),
+      }, 10000),
     adminStats: () => jfetch('/api/admin/stats', {}, 15000),
     adminClearStats: () => jfetch('/api/admin/stats/clear', { method: 'POST' }, 10000),
     adminUserLog: (u) => jfetch('/api/admin/user-log?u=' + encodeURIComponent(u), {}, 15000),

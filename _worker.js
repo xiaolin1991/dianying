@@ -1,5 +1,5 @@
 /**
- * 星河影视 NebulaTV — Cloudflare Worker / Pages 后端
+ * 晓林影视 XIAOLIN-TV — Cloudflare Worker / Pages 后端
  * ------------------------------------------------
  * 同一份代码可部署到:
  *   - Cloudflare Workers (wrangler.toml 中 [assets] directory = "./public")
@@ -33,7 +33,7 @@ const DEFAULT_LIVE_SOURCES = [
 ];
 
 const DEFAULT_SETTINGS = {
-  siteName: '星河影视',
+  siteName: '晓林影视 XIAOLIN-TV',
   adultEnabled: false,
   defaultTheme: 'midnight',
   announcement: '',
@@ -42,8 +42,9 @@ const DEFAULT_SETTINGS = {
   disabledSources: [],  // 被后台停用的内置源 key 列表
   passwordHash: '',     // 后台改密的 SHA-256(salt+password) 十六进制, 空则用环境变量/默认密码
   salt: '',
-  configUrl: '',        // 后台自定义采集源配置地址(http), 空则用 CONFIG_URL/默认 LunaTV-config
-  configJson: '',       // 后台直接粘贴的 JSON 配置内容(优先于 configUrl)
+  configUrl: '',        // (兼容保留) 单个采集源地址
+  configUrls: [],       // 多个采集源配置地址, 顺序即优先级(前面的 key 不被后面覆盖)
+  configJson: '',       // 后台直接粘贴的 JSON 配置内容(优先于所有 URL)
   requireLogin: true,   // 强制登录观看: 未注册/未登录用户不能观看
   allowRegister: true,  // 开放前台注册
   homeSources: [],      // 首页默认加载的影视源 key 顺序列表(空=内置精选)
@@ -108,10 +109,19 @@ async function getSettings(env) {
   try {
     if (kv(env)) {
       const raw = await env.CONFIG_KV.get('settings');
-      if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+      if (raw) {
+        const s = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+        // 一次性迁移: 旧默认站名自动改为新站名(管理员改过的自定义名不受影响)
+        if (s.siteName === '星河影视') s.siteName = DEFAULT_SETTINGS.siteName;
+        return s;
+      }
     }
   } catch (e) { /* fallthrough */ }
-  if (MEM.settings) return { ...DEFAULT_SETTINGS, ...MEM.settings };
+  if (MEM.settings) {
+    const s = { ...DEFAULT_SETTINGS, ...MEM.settings };
+    if (s.siteName === '星河影视') s.siteName = DEFAULT_SETTINGS.siteName;
+    return s;
+  }
   const s = { ...DEFAULT_SETTINGS };
   if ((env.ADULT_ENABLED || '').toLowerCase() === 'true') s.adultEnabled = true;
   return s;
@@ -138,10 +148,19 @@ async function saveSettings(env, patch) {
   if (Array.isArray(patch.homeSources)) {
     next.homeSources = [...new Set(patch.homeSources.filter((k) => typeof k === 'string' && k.trim()).map((k) => k.trim()))].slice(0, 12);
   }
+  if (Array.isArray(patch.configUrls)) {
+    // 多采集源: 去空/去重/校验 http(s), 最多 10 条; 空数组 = 清空恢复默认
+    const list = [...new Set(patch.configUrls
+      .filter((k) => typeof k === 'string' && /^https?:\/\//i.test(k.trim()))
+      .map((k) => k.trim().slice(0, 600)))].slice(0, 10);
+    next.configUrls = list;
+    next.configUrl = list[0] || '';
+    if (!list.length) next.configJson = '';
+  }
   if (typeof patch.configUrl === 'string') {
     const cu = patch.configUrl.trim();
-    if (!cu) { next.configUrl = ''; next.configJson = ''; }
-    else if (/^https?:\/\//i.test(cu)) { next.configUrl = cu.slice(0, 600); next.configJson = ''; }
+    if (!cu) { next.configUrl = ''; next.configUrls = []; next.configJson = ''; }
+    else if (/^https?:\/\//i.test(cu)) { next.configUrl = cu.slice(0, 600); next.configUrls = [cu.slice(0, 600)]; next.configJson = ''; }
     else if (cu.startsWith('{')) {
       try { JSON.parse(cu); next.configJson = cu.slice(0, 500000); next.configUrl = ''; }
       catch (e) { /* 非法 JSON, 忽略 */ }
@@ -205,10 +224,18 @@ function mergeSources(remoteSources, settings) {
 async function loadSources(env, ctx, settingsArg) {
   const settings = settingsArg || (await getSettings(env));
   const inline = typeof settings.configJson === 'string' ? settings.configJson.trim() : '';
-  const url = (!inline && settings.configUrl) || env.CONFIG_URL || DEFAULT_CONFIG_URL;
+  // 多采集源: configUrls 数组优先, 兼容旧单 configUrl; 都空则用部署默认
+  let urls = [];
+  if (!inline) {
+    const cfgList = Array.isArray(settings.configUrls) && settings.configUrls.length
+      ? settings.configUrls
+      : (settings.configUrl ? [settings.configUrl] : []);
+    urls = cfgList.slice(0, 10);
+    if (!urls.length) urls = [env.CONFIG_URL || DEFAULT_CONFIG_URL];
+  }
   // 缓存键随配置来源变化, 换配置后立即生效
-  const tag = inline ? 'inline-' + inline.length + '-' + (inline.length % 97) : String(url);
-  const cacheKey = new Request('https://cache.internal/nebulatv/sources/v1?u=' + encodeURIComponent(tag));
+  const tag = inline ? 'inline-' + inline.length + '-' + (inline.length % 97) : 'm-' + urls.join('|');
+  const cacheKey = new Request('https://cache.internal/xiaolintv/sources/v2?u=' + encodeURIComponent(tag));
   try {
     const hit = await caches.default.match(cacheKey);
     if (hit) return await hit.json();
@@ -220,14 +247,24 @@ async function loadSources(env, ctx, settingsArg) {
     let rawText;
     if (inline) { rawText = inline; from = 'inline-json'; }
     else {
-      const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 NebulaTV/1.0' },
+      // 并发抓取全部采集源, 按 key 合并: 排在前面的配置优先, 后面的只补缺
+      const results = await Promise.allSettled(urls.map((u) => fetch(u, {
+        headers: { 'User-Agent': 'Mozilla/5.0 XIAOLIN-TV/1.0' },
         cf: { cacheTtl: 7200, cacheEverything: true },
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      rawText = await res.text();
+      })));
+      const byKey = new Map();
+      for (const r of results) {
+        if (r.status !== 'fulfilled' || !r.value.ok) continue;
+        try {
+          for (const s of parseConfig(JSON.parse(await r.value.text()))) {
+            if (!byKey.has(s.key)) byKey.set(s.key, s);
+          }
+        } catch (e) { /* 单个配置失败不影响其他 */ }
+      }
+      sources = [...byKey.values()];
+      if (!sources.length) throw new Error('all configs failed');
+      from = 'multi:' + urls.length + 'cfg/' + sources.length + 'src';
     }
-    sources = parseConfig(JSON.parse(rawText));
     if (!sources.length) throw new Error('empty config');
   } catch (e) {
     sources = FALLBACK_SOURCES.map((s) => ({ ...s, adult: s.name.includes('🔞') }));
@@ -260,7 +297,7 @@ async function verifyToken(env, token) {
 async function adminSecret(env) {
   const s = await getSettings(env);
   const base = s.passwordHash || env.ADMIN_PASSWORD || 'admin123';
-  return base + '::nebulatv-hmac';
+  return base + '::XIAOLIN-TV-hmac';
 }
 function readToken(req, url) {
   const authz = req.headers.get('Authorization') || '';
@@ -463,7 +500,7 @@ function parseM3U(text, tag) {
 async function loadLive(env, ctx) {
   const settings = await getSettings(env);
   const list = (settings.liveSources && settings.liveSources.length ? settings.liveSources : DEFAULT_LIVE_SOURCES);
-  const cacheKey = new Request('https://cache.internal/nebulatv/live/v1');
+  const cacheKey = new Request('https://cache.internal/XIAOLIN-TV/live/v1');
   try {
     const hit = await caches.default.match(cacheKey);
     if (hit) return await hit.json();
@@ -532,13 +569,27 @@ export default {
         });
       }
 
-      /* ---- 源列表(远程源 + 后台自定义源, 按停用/成人开关过滤) ---- */
+      /* ---- 源列表(远程源 + 后台自定义源, 按停用/成人开关 + 观看者成人权限过滤) ---- */
       if (path === '/api/config' && request.method === 'GET') {
         const settings = await getSettings(env);
         const { sources: remote } = await loadSources(env, ctx, settings);
-        const { all, enabled } = mergeSources(remote, settings);
+        const { all } = mergeSources(remote, settings);
+        // 成人源可见性: 全局开关开 且 (管理员 或 已获成人授权的登录用户)
+        let allowAdult = false;
+        if (settings.adultEnabled) {
+          if (await verifyToken(env, readToken(request, url))) allowAdult = true;
+          else {
+            const uname = await currentUser(request, env, url);
+            if (uname) {
+              const rec = await getUserRecord(env, uname);
+              allowAdult = Boolean(rec && rec.adultAllowed);
+            }
+          }
+        }
+        const enabled = allowAdult ? all.filter((s) => !s.disabled) : all.filter((s) => !s.disabled && !s.adult);
         return json({
           adultEnabled: settings.adultEnabled,
+          adultForYou: allowAdult,
           total: all.length,
           count: enabled.length,
           sources: enabled.map(({ key, name, api, detail, adult }) => ({ key, name, api, detail, adult })),
@@ -569,7 +620,7 @@ export default {
         if (!ok) return json({ error: 'host not allowed' }, 403);
 
         const upstream = await fetch(tu.toString(), {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) NebulaTV/1.0', Accept: '*/*' },
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) XIAOLIN-TV/1.0', Accept: '*/*' },
           signal: AbortSignal.timeout(20000),
           cf: { cacheTtl: 120, cacheEverything: true },
         });
@@ -636,6 +687,7 @@ export default {
           lastLoginAt: Date.now(),
           lastLoginIp: clientIp(request),
           lastLoginIpGeo: geoOf(request),
+          adultAllowed: false, // 默认开启成人限制, 管理员可按用户放开
         });
         const token = await makeUserToken(env, username);
         return json({ ok: true, username }, 200, {
@@ -786,7 +838,11 @@ export default {
             passwordFromEnv: Boolean(env.ADMIN_PASSWORD),
             hasCustomPassword: Boolean(s.passwordHash),
             effectiveConfigUrl: s.configUrl || env.CONFIG_URL || DEFAULT_CONFIG_URL,
-            configFrom: s.configJson ? 'inline-json' : (s.configUrl ? 'custom-url' : 'default'),
+            configUrls: Array.isArray(s.configUrls) ? s.configUrls : [],
+            effectiveConfigUrls: (Array.isArray(s.configUrls) && s.configUrls.length)
+              ? s.configUrls
+              : [env.CONFIG_URL || DEFAULT_CONFIG_URL],
+            configFrom: s.configJson ? 'inline-json' : ((Array.isArray(s.configUrls) && s.configUrls.length) ? 'multi-url' : 'default'),
             requireLogin: s.requireLogin !== false,
             allowRegister: s.allowRegister !== false,
             homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
@@ -877,6 +933,7 @@ export default {
               lastLoginAt: rec ? rec.lastLoginAt : null,
               lastLoginIp: rec ? rec.lastLoginIp : '',
               lastLoginIpGeo: rec ? (rec.lastLoginIpGeo || '') : '',
+              adultAllowed: Boolean(rec && rec.adultAllowed),
               watchSec: hist.watchSec || 0,
               totalItems: hist.items.length,
               activeItems: hist.items.filter((it) => !it.delUser).length,
@@ -884,6 +941,17 @@ export default {
           }
           users.sort((a, b) => (b.lastLoginAt || 0) - (a.lastLoginAt || 0));
           return json({ users });
+        }
+        /* ---- 用户管理: 单用户成人源授权开关 ---- */
+        if (path === '/api/admin/user-adult' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const u = String(body.u || '');
+          const rec = await getUserRecord(env, u);
+          if (!rec) return json({ error: '用户不存在' }, 404);
+          rec.adultAllowed = Boolean(body.allowed);
+          await putUserRecord(env, rec);
+          return json({ ok: true, u, adultAllowed: rec.adultAllowed });
         }
         /* ---- 用户管理: 单用户完整记录(含用户已删) ---- */
         if (path === '/api/admin/user-log' && request.method === 'GET') {
