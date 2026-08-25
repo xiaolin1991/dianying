@@ -77,6 +77,13 @@
       }, 10000),
     userLogout: () => jfetch('/api/user/logout', { method: 'POST' }, 8000),
     userMe: () => jfetch('/api/user/me', {}, 8000),
+    userFavs: () => jfetch('/api/user/favs', {}, 12000),
+    userSaveFavs: (favs) =>
+      jfetch('/api/user/favs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ favs }),
+      }, 12000).catch(() => {}),
     userHistory: () => jfetch('/api/user/history', {}, 12000),
     userClearHistory: (kind) =>
       jfetch('/api/user/history/clear', {

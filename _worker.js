@@ -48,6 +48,8 @@ const DEFAULT_SETTINGS = {
   requireLogin: true,   // 强制登录观看: 未注册/未登录用户不能观看
   allowRegister: true,  // 开放前台注册
   homeSources: [],      // 首页默认加载的影视源 key 顺序列表(空=内置精选)
+  appPromoEnabled: true, // 手机访问弹「下载APP」引导弹窗(后台可关)
+  downloadUrl: '',      // APK 下载地址(GitHub Releases 直链或页面), 空则只显示教程
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -145,6 +147,8 @@ async function saveSettings(env, patch) {
   if (typeof patch.salt === 'string' && /^[0-9a-f]{32}$/.test(patch.salt)) next.salt = patch.salt;
   if (typeof patch.requireLogin === 'boolean') next.requireLogin = patch.requireLogin;
   if (typeof patch.allowRegister === 'boolean') next.allowRegister = patch.allowRegister;
+  if (typeof patch.appPromoEnabled === 'boolean') next.appPromoEnabled = patch.appPromoEnabled;
+  if (typeof patch.downloadUrl === 'string') next.downloadUrl = patch.downloadUrl.trim().slice(0, 300);
   if (Array.isArray(patch.homeSources)) {
     next.homeSources = [...new Set(patch.homeSources.filter((k) => typeof k === 'string' && k.trim()).map((k) => k.trim()))].slice(0, 12);
   }
@@ -414,6 +418,27 @@ async function saveUhist(env, username, hist) {
   hist.items = hist.items.slice(0, 800);
   await env.CONFIG_KV.put('uhist:' + username, JSON.stringify(hist));
 }
+/* ---- 收藏服务端同步(KV): 换设备登录不丢 ---- */
+async function loadFavs(env, username) {
+  if (!kv(env)) return [];
+  try {
+    const raw = await env.CONFIG_KV.get('favs:' + username);
+    const p = raw ? JSON.parse(raw) : [];
+    return Array.isArray(p) ? p : [];
+  } catch (e) { return []; }
+}
+async function saveFavs(env, username, list) {
+  if (!kv(env)) return;
+  // 只保留白名单字段, 上限 200 条
+  const clean = list.slice(0, 200).map((f) => ({
+    key: String(f.key || '').slice(0, 60),
+    id: String(f.id || '').slice(0, 60),
+    title: String(f.title || '').slice(0, 120),
+    pic: String(f.pic || '').slice(0, 600),
+    remarks: String(f.remarks || '').slice(0, 120),
+  })).filter((f) => f.key && f.id);
+  await env.CONFIG_KV.put('favs:' + username, JSON.stringify(clean));
+}
 let entrySeq = 0;
 function newEntryId() { return Date.now().toString(36) + '-' + (++entrySeq % 1296).toString(36); }
 /** 用户侧历史条目脱敏输出 */
@@ -566,6 +591,8 @@ export default {
           requireLogin: s.requireLogin !== false,
           allowRegister: s.allowRegister !== false,
           homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
+          appPromoEnabled: s.appPromoEnabled !== false,
+          downloadUrl: s.downloadUrl || '',
         });
       }
 
@@ -582,7 +609,8 @@ export default {
             const uname = await currentUser(request, env, url);
             if (uname) {
               const rec = await getUserRecord(env, uname);
-              allowAdult = Boolean(rec && rec.adultAllowed);
+              // 默认开通: 仅当明确存了 false 才关闭(旧用户无字段视为开通)
+              allowAdult = Boolean(rec && rec.adultAllowed !== false);
             }
           }
         }
@@ -687,7 +715,7 @@ export default {
           lastLoginAt: Date.now(),
           lastLoginIp: clientIp(request),
           lastLoginIpGeo: geoOf(request),
-          adultAllowed: false, // 默认开启成人限制, 管理员可按用户放开
+          adultAllowed: true, // 新注册用户默认开通成人内容, 管理员可按用户关闭
         });
         const token = await makeUserToken(env, username);
         return json({ ok: true, username }, 200, {
@@ -716,6 +744,23 @@ export default {
       }
       if (path === '/api/user/logout' && request.method === 'POST') {
         return json({ ok: true }, 200, { 'Set-Cookie': `${USER_COOKIE}=; Path=/; HttpOnly; Max-Age=0` });
+      }
+      /* ---- 收藏同步: 拉取 / 整体覆盖保存(前端负责合并) ---- */
+      if (path === '/api/user/favs' && request.method === 'GET') {
+        const username = await currentUser(request, env, url);
+        if (!username) return json({ error: '请先登录' }, 401);
+        if (!kv(env)) return json({ favs: [] });
+        return json({ favs: await loadFavs(env, username) });
+      }
+      if (path === '/api/user/favs' && request.method === 'POST') {
+        const username = await currentUser(request, env, url);
+        if (!username) return json({ error: '请先登录' }, 401);
+        if (!kv(env)) return json({ error: '未绑定 KV 存储' }, 500);
+        let body = {};
+        try { body = await request.json(); } catch (e) { /* ignore */ }
+        const list = Array.isArray(body.favs) ? body.favs : [];
+        await saveFavs(env, username, list);
+        return json({ ok: true, count: Math.min(list.length, 200) });
       }
       if (path === '/api/user/me' && request.method === 'GET') {
         const username = await currentUser(request, env, url);
@@ -845,6 +890,8 @@ export default {
             configFrom: s.configJson ? 'inline-json' : ((Array.isArray(s.configUrls) && s.configUrls.length) ? 'multi-url' : 'default'),
             requireLogin: s.requireLogin !== false,
             allowRegister: s.allowRegister !== false,
+            appPromoEnabled: s.appPromoEnabled !== false,
+            downloadUrl: s.downloadUrl || '',
             homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });
@@ -933,7 +980,7 @@ export default {
               lastLoginAt: rec ? rec.lastLoginAt : null,
               lastLoginIp: rec ? rec.lastLoginIp : '',
               lastLoginIpGeo: rec ? (rec.lastLoginIpGeo || '') : '',
-              adultAllowed: Boolean(rec && rec.adultAllowed),
+              adultAllowed: rec ? rec.adultAllowed !== false : false,
               watchSec: hist.watchSec || 0,
               totalItems: hist.items.length,
               activeItems: hist.items.filter((it) => !it.delUser).length,

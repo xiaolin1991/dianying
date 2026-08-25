@@ -44,6 +44,8 @@ public class MainActivity extends Activity {
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         // 卡片是 target=_blank: 关闭多窗口后, 新窗口导航会落到当前 WebView, 不弹出外部浏览器
         s.setSupportMultipleWindows(false);
+        // 专属 UA 标识: 网站据此识别"已在官方 App 内", 自动隐藏下载入口与推广弹窗
+        s.setUserAgentString(s.getUserAgentString() + " XIAOLIN-TV-APP/" + android.os.Build.VERSION.RELEASE);
 
         web.setWebViewClient(new WebViewClient() {
             @Override

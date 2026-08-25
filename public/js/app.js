@@ -108,6 +108,31 @@
     h.unshift(q);
     store.set('searchHist', h.slice(0, 12));
   }
+  /* ---- 收藏云同步: 登录后本地与服务器合并, 收藏变更即时上传 ---- */
+  function pushFavsToServer() {
+    if (!State.me) return;
+    API.userSaveFavs(store.get('favs', []));
+  }
+  async function pullFavsMerge() {
+    if (!State.me) return;
+    try {
+      const r = await API.userFavs();
+      const remote = Array.isArray(r.favs) ? r.favs : [];
+      const local = store.get('favs', []);
+      const seen = new Set(local.map((f) => f.key + '|' + f.id));
+      let changed = false;
+      for (const f of remote) {
+        const k = (f.key || '') + '|' + (f.id || '');
+        if (!f.key || !f.id || seen.has(k)) continue;
+        local.push({ key: f.key, id: String(f.id), title: f.title || '', pic: f.pic || '', remarks: f.remarks || '' });
+        seen.add(k);
+        changed = true;
+      }
+      if (changed) store.set('favs', local.slice(0, 200));
+      // 双向收敛: 把合并结果推回服务器, 多设备最终一致
+      API.userSaveFavs(store.get('favs', []));
+    } catch (e) { /* 未登录/无KV 静默 */ }
+  }
   function featuredSources(max = 6) {
     const vis = visibleSources();
     const picked = [];
@@ -209,9 +234,12 @@
   const NAVS = [
     ['#/home', '首页'], ['#/browse/电影', '电影'], ['#/browse/剧集', '剧集'],
     ['#/browse/综艺', '综艺'], ['#/browse/动漫', '动漫'], ['#/sources', '影视源'], ['#/live', '电视直播'],
+    ['#/download', '下载APP'],
   ];
   function buildNav() {
-    $('#mainNav').innerHTML = NAVS.map(([href, label]) =>
+    // 已在官方 App 内(WebView 专属 UA) → 自动隐藏「下载APP」入口
+    const items = inApp() ? NAVS.filter(([href]) => href !== '#/download') : NAVS;
+    $('#mainNav').innerHTML = items.map(([href, label]) =>
       `<a href="${href}" data-href="${href}">${label}</a>`).join('');
   }
   function markNav(hash) {
@@ -256,6 +284,7 @@
       else if (parts[0] === 'login') await viewLogin(alive, false);
       else if (parts[0] === 'user') await viewUser(alive);
       else if (parts[0] === 'live') await viewLive(query);
+      else if (parts[0] === 'download') await viewDownload(alive);
       else if (parts[0] === 'admin') await viewAdmin(query);
       else await viewHome(alive);
     } catch (err) {
@@ -745,6 +774,7 @@
         toast('已加入收藏', 'ok');
       }
       store.set('favs', list.slice(0, 200));
+      pushFavsToServer();
       $('#btnFav').textContent = idx >= 0 ? '☆ 收藏' : '★ 已收藏';
     });
     $('#descToggle') && ($('#descToggle').addEventListener('click', (e) => {
@@ -1002,6 +1032,7 @@
         toast('已加入收藏', 'ok');
       }
       store.set('favs', list.slice(0, 200));
+      pushFavsToServer();
       const btn = $('#playFav');
       btn.textContent = idx >= 0 ? '☆ 收藏' : '★ 已收藏';
       btn.classList.toggle('on', idx < 0);
@@ -1317,6 +1348,7 @@
         }
         State.me = username;
         updateUserBox();
+        pullFavsMerge(); // 登录/注册成功: 拉取云端收藏并合并
         toast((mode === 'login' ? '欢迎回来，' : '注册成功，') + username, 'ok');
         // 关键: 若当前哈希已等于目标(如一直停在 #/home), 赋值不会触发路由, 必须手动调用
         const target = store.get('afterLogin', '') || '#/home';
@@ -1383,6 +1415,7 @@
         $$('#uBody .hist-del').forEach((b) => b.addEventListener('click', () => {
           favs.splice(Number(b.dataset.fi), 1);
           store.set('favs', favs);
+          pushFavsToServer();
           renderBody();
           toast('已取消收藏');
         }));
@@ -1758,8 +1791,123 @@
   /* ============================================================
      视图：电视直播
      ============================================================ */
-  async function viewLive(query) {
+  /* ============================================================
+     视图：下载 APP(安卓 APK / 电视 / iOS PWA 教程)
+     ============================================================ */
+  async function viewDownload(alive) {
     const v = $('#view');
+    const dlUrl = (State.settings && State.settings.downloadUrl) || '';
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (inApp()) {
+      // 已安装用户(安卓壳/PWA): 自动识别, 显示确认信息而非推广
+      v.innerHTML = `
+        <div class="container page-wrap" style="max-width:680px">
+          <div class="side-card" style="text-align:center;padding:40px 20px">
+            <div style="font-size:52px">✅</div>
+            <h3 style="margin:12px 0 8px">你已在官方 App 中</h3>
+            <p class="hint">系统自动识别：当前正通过 晓林影院 App 访问，无需重复安装。<br>下载入口与引导弹窗已为你自动隐藏。</p>
+            <a class="btn primary" style="margin-top:14px" href="#/home">回到首页观影</a>
+          </div>
+        </div>`;
+      return;
+    }
+    const apkBtn = dlUrl
+      ? `<a class="btn primary" style="font-size:15px;padding:12px 22px" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 ${isAndroid ? '立即下载安卓版' : '下载安卓 APK'}</a>`
+      : `<span class="hint">安卓安装包即将发布，可先看下方教程</span>`;
+    v.innerHTML = `
+      <div class="container page-wrap" style="max-width:860px">
+        <div class="page-head"><div class="page-title">📲 下载 APP</div></div>
+        <p class="hint" style="margin-bottom:16px">把 晓林影视 装进手机/电视，全屏播放、无地址栏干扰、收藏多设备云同步。</p>
+
+        <div class="side-card" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <h4 style="margin-bottom:6px;font-size:16px">🤖 安卓手机 / 平板</h4>
+            <p class="hint">独立安装包（WebView 壳），站点更新无需重装 App。</p>
+          </div>
+          ${apkBtn}
+        </div>
+
+        <div class="side-card" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:14px">
+          <div style="flex:1;min-width:220px">
+            <h4 style="margin-bottom:6px;font-size:16px">📺 电视 / 机顶盒</h4>
+            <p class="hint">同一通用包已内置 TV 启动器，遥控器方向键即可操作；安装后电视桌面直接出现图标。TV 安装包可在 Release 列表选择 <b>xiaolintv-tv-*.apk</b>。</p>
+          </div>
+          ${dlUrl ? `<a class="btn ghost" href="${esc(dlUrl).replace('xiaolintv-phone-', 'xiaolintv-tv-')}" target="_blank" rel="noopener">📥 TV 版直链</a>` : ''}
+        </div>
+
+        <div class="side-card" style="margin-top:14px">
+          <h4 style="margin-bottom:10px;font-size:16px">🍎 iPhone / iPad（免下载 · PWA）</h4>
+          <ol class="dl-steps">
+            <li>用 <b>Safari 浏览器</b> 打开本站（微信内请点右上角 ⋯ 选择「在浏览器打开」）</li>
+            <li>点击底部工具栏的 <b>分享按钮</b> <span style="color:var(--acc)">⎋</span>（方框加向上箭头）</li>
+            <li>在列表中找到并点击 <b>「添加到主屏幕」</b></li>
+            <li>确认名称后点击右上角 <b>添加</b> ✅</li>
+          </ol>
+          <p class="hint" style="margin-top:10px">完成后主屏幕会出现 晓林影院 图标，点开即全屏运行，体验与原生 App 一致，且始终自动跟随网站最新版本。</p>
+        </div>
+
+        <div class="side-card" style="margin-top:14px">
+          <h4 style="margin-bottom:10px;font-size:16px">❓ 安卓安装常见问题</h4>
+          <ul class="dl-steps">
+            <li>提示「未知来源」：设置 → 允许来自此来源的应用 / 仅本次允许</li>
+            <li>覆盖安装新版本无需卸载旧版，收藏与进度不丢失（登录账号云端同步）</li>
+            <li>华为/鸿蒙：安装时若被拦截，选「继续安装」即可</li>
+          </ul>
+        </div>
+      </div>`;
+  }
+
+  /* ---- APP 下载引导弹窗: 首次访问弹出; 永久关闭 or 10天后再弹; 后台可整体关闭 ---- */
+  // 已在官方 App 内? (安卓壳 WebView 专属UA / iOS PWA standalone 模式)
+  function inApp() {
+    return /XIAOLIN-TV-APP/i.test(navigator.userAgent || '') || isStandalone();
+  }
+  function isMobileUA() { return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || ''); }
+  function isStandalone() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  }
+  function openAppPromoModal() {
+    const box = document.createElement('div');
+    box.className = 'modal-mask';
+    box.innerHTML = `<div class="modal-box" style="width:min(92vw,400px);text-align:center">
+        <button class="modal-close" id="promoX">×</button>
+        <div style="font-size:44px;line-height:1">📱</div>
+        <h3 style="margin:10px 0 6px">安装 晓林影院 App</h3>
+        <p class="hint" style="margin-bottom:12px">全屏播放 · 无地址栏 · 收藏云同步 · 支持电视盒</p>
+        <div style="display:grid;gap:9px">
+          <a class="btn primary" href="#/download">📥 前往下载 / 安装教程</a>
+          <button class="btn ghost" id="promoForever">已安装 · 不再提示</button>
+        </div>
+      </div>`;
+    box.addEventListener('click', (ev) => {
+      if (ev.target === box) box.remove();
+      if (ev.target.closest('a')) setTimeout(() => box.remove(), 0);
+    });
+    $('#promoX', box).addEventListener('click', () => box.remove()); // × 关闭 = 10 天后再弹
+    $('#promoForever', box).addEventListener('click', () => {
+      store.set('appPromoState', { ...store.get('appPromoState', {}), forever: true });
+      box.remove();
+      toast('好的，不再打扰');
+    });
+    document.body.appendChild(box);
+  }
+  function maybeAppPromo() {
+    try {
+      if (!State.settings || State.settings.appPromoEnabled === false) return; // 后台总开关
+      if (inApp()) return;                                                    // 已安装: 安卓壳/PWA 一律不弹
+      if (!isMobileUA()) return;
+      if ((location.hash || '').startsWith('#/download')) return;
+      const st = store.get('appPromoState', {});
+      if (st.forever) return;                                                  // 用户永久关闭
+      const TEN_DAYS = 10 * 24 * 3600 * 1000;
+      if (st.lastShown && Date.now() - st.lastShown < TEN_DAYS) return;        // 10天内不重复
+      store.set('appPromoState', { ...st, lastShown: Date.now() });
+      setTimeout(openAppPromoModal, 1500);                                     // 等首屏渲染完再弹
+    } catch (e) { /* ignore */ }
+  }
+
+  async function viewLive(query) {    const v = $('#view');
     v.innerHTML = `<div class="container page-wrap">
       <div class="video-wrap" style="aspect-ratio:auto;height:min(52vh,430px)">
         <video id="videoEl" controls playsinline autoplay muted></video>
@@ -1928,6 +2076,18 @@
               <button class="btn primary" id="saveCfgBtn">保存采集源配置</button>
               <button class="btn ghost" id="resetCfgBtn">清空并恢复默认(LunaTV-config)</button>
             </div>
+          </div>
+
+          <div class="admin-card">
+            <h3>📲 APP下载弹窗</h3>
+            <p class="hint">手机用户首次访问弹出下载引导；点 × 后 <b>10 天内不再打扰</b>，点「不再提示」则永久关闭。若体验不佳可在此一键总关闭。</p>
+            <label style="display:flex;align-items:center;gap:10px;margin:10px 0;cursor:pointer">
+              <span class="switch"><input type="checkbox" id="promoSw" ${s.appPromoEnabled !== false ? 'checked' : ''}><span class="track"></span></span>
+              <b>启用下载引导弹窗</b>
+            </label>
+            <label class="field-label">APK 下载地址（GitHub Releases 直链或页面，留空则弹窗/下载页仅显示教程）</label>
+            <input class="field-input" id="dlUrlInput" value="${esc(s.downloadUrl || '')}" placeholder="https://github.com/你的用户名/仓库名/releases/latest/download/xiaolintv-phone-latest.apk">
+            <button class="btn primary" id="savePromoBtn" style="margin-top:12px">保存弹窗设置</button>
           </div>
 
           <details class="admin-card adm-details">
@@ -2320,7 +2480,7 @@
                   <td>${fmtDateTime(u.createdAt)}</td>
                   <td>${fmtDateTime(u.lastLoginAt)}</td>
                   <td>${esc(u.lastLoginIp || '—')}${u.lastLoginIpGeo ? '<br><small style="color:var(--dim)">' + esc(u.lastLoginIpGeo) + '</small>' : ''}</td>
-                  <td title="需全局「成人内容」开关开启后生效"><label class="switch"><input type="checkbox" class="u-adult" data-u="${esc(u.username)}" ${u.adultAllowed ? 'checked' : ''}><span class="track"></span></label></td>
+                  <td title="需全局「成人内容」开关开启后生效；绿色=允许观看，灰色=已隐藏"><button type="button" class="u-adult-tag ${u.adultAllowed ? 'on' : 'off'}" data-u="${esc(u.username)}">${u.adultAllowed ? '开' : '关'}</button></td>
                   <td>${fmtWatchSec(u.watchSec)}</td>
                   <td>${u.activeItems}/${u.totalItems}</td>
                   <td style="white-space:nowrap;display:flex;gap:6px">
@@ -2330,15 +2490,16 @@
                 </tr>`).join('')}</tbody>
             </table>` : '<p class="hint">暂无注册用户（开放注册后，前台 #/login 可注册）</p>';
           $$('#usersTable .u-log').forEach((b) => b.addEventListener('click', () => showUserLog(b.dataset.u)));
-          $$('#usersTable .u-adult').forEach((el) => el.addEventListener('change', async () => {
+          $$('#usersTable .u-adult-tag').forEach((el) => el.addEventListener('click', async () => {
+            const to = el.classList.contains('off'); // 当前关 → 点击变开
             el.disabled = true;
             try {
-              await API.adminUserAdult(el.dataset.u, el.checked);
-              toast(el.checked ? `已允许「${el.dataset.u}」观看成人源` : `已对「${el.dataset.u}」隐藏成人源`, 'ok');
-            } catch (e) {
-              el.checked = !el.checked;
-              toast('操作失败：' + e.message, 'err');
-            }
+              await API.adminUserAdult(el.dataset.u, to);
+              el.classList.toggle('on', to);
+              el.classList.toggle('off', !to);
+              el.textContent = to ? '开' : '关';
+              toast(to ? `已允许「${el.dataset.u}」观看成人源` : `已对「${el.dataset.u}」隐藏成人源`, 'ok');
+            } catch (e) { toast('操作失败：' + e.message, 'err'); }
             el.disabled = false;
           }));
           $$('#usersTable .u-del').forEach((b) => b.addEventListener('click', async () => {
@@ -2385,6 +2546,17 @@
           toast('已清空并恢复默认采集源配置', 'ok');
           renderPanel();
         } catch (err) { toast('操作失败：' + err.message, 'err'); }
+      });
+
+      /* ---- APP下载弹窗设置 ---- */
+      $('#savePromoBtn').addEventListener('click', async () => {
+        const url = $('#dlUrlInput').value.trim();
+        if (url && !/^https?:\/\//i.test(url)) return toast('下载地址需为 http(s) 链接', 'err');
+        try {
+          await API.adminSaveSettings({ appPromoEnabled: $('#promoSw').checked, downloadUrl: url });
+          State.settings = { ...State.settings, appPromoEnabled: $('#promoSw').checked, downloadUrl: url };
+          toast('弹窗设置已保存', 'ok');
+        } catch (err) { toast('保存失败：' + err.message, 'err'); }
       });
 
       /* 初始渲染源编辑器 */
@@ -2522,7 +2694,7 @@
     }
 
     // 登录态(用户优先; 管理员会话也可浏览前台)
-    try { const m = await API.userMe(); State.me = m.me ? m.me.username : null; }
+    try { const m = await API.userMe(); State.me = m.me ? m.me.username : null; if (State.me) pullFavsMerge(); }
     catch (e) { State.me = null; }
     if (!State.me) {
       try { await API.adminSession(); State.me = '管理员'; } catch (e2) { /* 未登录管理员 */ }
@@ -2535,6 +2707,7 @@
     document.title = State.settings.siteName || '晓林影视';
     applyAnnouncement(State.settings.announcement);
     route();
+    maybeAppPromo(); // 首屏就绪后判断是否弹下载引导
   }
 
   boot();
