@@ -858,6 +858,7 @@
           <h4>⚡ 快速换源</h4>
           <div class="swap-stat" id="swapStat"><span class="spin"></span> 正在探测其他播放源…</div>
           <button class="btn primary swap-open" id="openSwapBtn" disabled>🔍 探测中…</button>
+          <div class="src-switch swap-flow" id="srcSwitch"></div>
         </div>
         <div class="side-card eps-card" style="margin-top:14px">
           <h4>📺 选集 · 共 ${groups.reduce((n, g) => n + g.eps.length, 0)} 集<button class="chip" id="epsFold">收起 ▴</button></h4>
@@ -1040,12 +1041,14 @@
       }, { passive: true });
     }
 
-    // ⚡ 快速换源: 并发探测全部其他源, 结果收进弹窗统一选择(不再左右滑动药丸)
-    // 可用源可点击直接切换并同步集数; 无此片/超时的灰显列在下方
+    // ⚡ 快速换源: 并发探测全部其他源
+    // 桌面端: 可用源以药丸排列(一行5个)直接点击; 手机端: 按钮打开弹窗选择(一行3个)
+    // 无此片/超时的源: 桌面不显示, 手机弹窗内灰显列出
     (function startSwapSearch() {
       const others = visibleSources().filter((s) => s.key !== key);
       const statEl = $('#swapStat');
       const openBtn = $('#openSwapBtn');
+      const swapOk = $('#srcSwitch');
       const hits = [];   // {s, ms, spdCls, id}
       const misses = []; // {s, ms, spdCls, why}
       let pending = others.length;
@@ -1072,16 +1075,19 @@
         const box = document.createElement('div');
         box.className = 'modal-mask';
         const row = (h) => `<a class="src-item" href="#/play/${esc(h.s.key)}/${encodeURIComponent(h.id)}?ep=${ei}&group=${gi}" title="${esc(h.s.name)} · 延迟${h.ms}ms · 点击切换并同步到第${ei + 1}集">
-             ${srcIconHtml(h.s)}<i class="spd ${h.spdCls}">⚡${h.ms}ms</i><span>${esc(h.s.name)}</span><small>切换 →</small></a>`;
+             ${srcIconHtml(h.s)}<i class="spd ${h.spdCls}">⚡${h.ms}ms</i><span>${esc(h.s.name)}</span><small>切换</small></a>`;
         const missRow = (m) => `<span class="src-item miss" title="${esc(m.s.name)} · ${m.why}">
              ${srcIconHtml(m.s)}${m.ms ? `<i class="spd ${m.spdCls}">⚡${m.ms}ms</i>` : ''}<span>${esc(m.s.name)}</span><small>${esc(m.why)}</small></span>`;
         box.innerHTML = `<div class="modal-box" style="width:min(92vw,540px)">
             <h3 style="margin-bottom:6px">⚡ 选择播放源</h3>
-            <p class="hint" style="margin-bottom:12px">当前：${esc(src.name)} · 第 ${ei + 1} 集 · 切换后自动跳到同一集</p>
+            <p class="hint" style="margin-bottom:12px">当前：${esc(src.name)} · 第 ${ei + 1} 集 · 点击后自动关闭并跳到同一集</p>
             <div class="swap-modal-list">${hits.map(row).join('') || '<p class="hint">没有找到可用播放源</p>'}</div>
             ${misses.length ? `<div style="margin-top:14px"><p class="hint" style="margin-bottom:8px">以下 ${misses.length} 个源无此片或已失效</p><div class="swap-modal-list">${misses.map(missRow).join('')}</div></div>` : ''}
           </div>`;
-        box.addEventListener('click', (ev) => { if (ev.target === box) box.remove(); });
+        // 点击任意可选源: 导航的同时自动关闭弹窗
+        box.addEventListener('click', (ev) => {
+          if (ev.target === box || ev.target.closest('a.src-item')) box.remove();
+        });
         const closeBtn = document.createElement('button');
         closeBtn.className = 'modal-close';
         closeBtn.textContent = '×';
@@ -1102,8 +1108,15 @@
             const spdCls = ms < 900 ? 'sp-good' : ms < 2600 ? 'sp-mid' : 'sp-bad';
             const hit = (r2.list || []).find((v2) => norm(v2.vod_name) === norm(vod.vod_name));
             pending--;
-            if (hit && hit.vod_id) hits.push({ s, ms, spdCls, id: hit.vod_id });
-            else misses.push({ s, ms, spdCls, why: '无此片' });
+            if (hit && hit.vod_id) {
+              hits.push({ s, ms, spdCls, id: hit.vod_id });
+              // 桌面端药丸(手机上该区域 display:none)
+              if (swapOk) swapOk.insertAdjacentHTML('beforeend',
+                `<a class="src-item" href="#/play/${esc(s.key)}/${encodeURIComponent(hit.vod_id)}?ep=${ei}&group=${gi}" title="${esc(s.name)} · 延迟${ms}ms · 点击切换并同步到第${ei + 1}集">
+                   ${srcIconHtml(s)}<i class="spd ${spdCls}">⚡${ms}ms</i><span>${esc(s.name)}</span></a>`);
+            } else {
+              misses.push({ s, ms, spdCls, why: '无此片' }); // 桌面不显示失效源, 仅手机弹窗内灰显
+            }
           } catch (e) {
             if (!alive()) return;
             pending--;
@@ -1576,7 +1589,10 @@
               <span class="src-speed">${speedBadge(s.key)}</span>
             </a>`).join('')}</div>
         </div>`;
-      box.addEventListener('click', (ev) => { if (ev.target === box) box.remove(); });
+      // 点击任意源: 跳转的同时自动关闭弹窗, 让用户继续选片
+      box.addEventListener('click', (ev) => {
+        if (ev.target === box || ev.target.closest('a.src-row')) box.remove();
+      });
       const closeBtn = document.createElement('button');
       closeBtn.className = 'modal-close';
       closeBtn.textContent = '×';

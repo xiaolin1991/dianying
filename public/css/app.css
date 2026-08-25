@@ -233,18 +233,20 @@ html, body { overflow-x: hidden; }
 .play-head { padding-bottom: 10px; } /* 标题与导航栏、播放器之间的呼吸空间 */
 .play-below { margin-top: 14px; }
 .play-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-/* 换源弹窗 */
-.swap-open { margin-top: 4px; }
-.swap-modal-list { display: grid; gap: 8px; max-height: 52vh; overflow-y: auto; }
+/* 换源弹窗: 一行 3 个, 手机上也能看清名字 */
+.swap-open { display: none; margin-top: 4px; }
+.swap-modal-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-height: 52vh; overflow-y: auto; }
 .swap-modal-list .src-item,
 .swap-modal-list .src-row {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 6px;
   background: var(--card); border: 1px solid var(--card-br); border-radius: 11px;
-  padding: 9px 12px; color: var(--txt); text-decoration: none; font-size: 13.5px;
+  padding: 9px 10px; color: var(--txt); text-decoration: none; font-size: 12.5px;
 }
 .swap-modal-list .src-item:hover, .swap-modal-list .src-row:hover { border-color: var(--acc); }
 .swap-modal-list .src-item.miss { opacity: .5; pointer-events: none; }
-.swap-modal-list .src-item small { margin-left: auto; color: var(--dim); }
+.swap-modal-list .src-item > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swap-modal-list .src-item small { flex-shrink: 0; color: var(--dim); font-size: 11px; }
+.swap-modal-list .src-item .spd { font-size: 10.5px; padding: 2px 7px; }
 .swap-modal-list .src-row .src-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .swap-modal-list .src-row.on { border-color: var(--acc); box-shadow: var(--glow); }
 .src-switch-m { display: none; } /* 桌面端隐藏手机专用切换按钮 */
@@ -260,11 +262,12 @@ html, body { overflow-x: hidden; }
 .src-item:hover { border-color: var(--acc); }
 .src-item.cur { border-color: var(--acc); color: var(--acc); }
 
-/* 换源药丸: 按行优先铺满(每行尽量多), 可见约4行, 超出竖向滚动 */
+/* 换源药丸: 桌面端固定一行 5 个; 手机端隐藏药丸改用弹窗按钮 */
 .swap-stat { font-size: 12px; color: var(--dim); margin-bottom: 10px; }
+.swap-open { display: none; margin-top: 4px; } /* 桌面隐藏, ≤820px 显示 */
 .src-switch.swap-flow {
   display: grid; grid-auto-flow: row;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr)); /* 一行固定 5 个 */
   gap: 8px;
   max-height: calc(4 * 40px + 3 * 8px);
   overflow-y: auto; padding-right: 4px; scrollbar-width: thin;
@@ -606,9 +609,12 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   /* 播放器全宽 */
   .play-stage { width: 100%; }
   .play-stage .video-wrap { height: auto; aspect-ratio: 16/9; }
-  /* 换源/选源改为弹窗选择, 不再左右横滑 */
+  /* 播放页换源: 手机隐藏药丸区, 用按钮+弹窗选择(一行3个) */
+  .src-switch.swap-flow { display: none; }
+  .swap-open { display: inline-flex; align-items: center; gap: 6px; }
+  /* 影视源页: 手机隐藏左侧竖列表, 用 #srcPickBtn 弹窗代替 */
   .src-layout { display: block; }
-  .src-list { display: none; } /* 手机隐藏左侧竖列表, 用 #srcPickBtn 弹窗代替 */
+  .src-list { display: none; }
   .src-switch-m { display: inline-flex !important; align-items: center; gap: 6px; margin-bottom: 12px; }
   /* 播放页四个操作按钮压缩到一行 */
   .play-actions { gap: 7px; margin-bottom: 10px; }

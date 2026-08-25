@@ -11,8 +11,9 @@ android {
         minSdk 24          // 覆盖 Android 7.0+, 约98%设备
         targetSdk 34
         // CI 可注入版本号: -PverCode=构建号 -PverName=x.y.z
-        versionCode (project.findProperty('verCode') ?: '1').toInteger()
-        versionName (project.findProperty('verName') ?: '1.0')
+        // 注意: 必须整体加括号, 否则 Groovy 会把 versionCode(...) 当方法链解析导致 Value is null
+        versionCode ((project.findProperty('verCode') ?: '1').toInteger())
+        versionName "${project.findProperty('verName') ?: '1.0'}"
         // 启动地址: 构建时可用 -PstartUrl=https://你的域名/ 覆盖
         def su = project.findProperty('startUrl') ?: 'https://your-worker.your-subdomain.workers.dev/'
         buildConfigField 'String', 'START_URL', "\"${su}\""
