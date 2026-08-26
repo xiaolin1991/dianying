@@ -3358,6 +3358,10 @@
     // 游客试看: 拉取剩余时长; 试看到期由接口 401 事件触发注册框
     initGuest();
     window.addEventListener('xl:need-login', () => showTrialModal(true));
+    // TV 模式: 向独立皮肤层(tv.js)暴露本地首字母搜索引擎
+    if (document.body.classList.contains('tv')) {
+      window.XLTV = { ti: titleInitials, idx: TitleIdx };
+    }
   }
 
   boot();

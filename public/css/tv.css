@@ -1,0 +1,133 @@
+/* ============================================================
+ * XIAOLIN-TV · TV 大屏皮肤 (腾讯视频TV风格) — 仅 body.tv 生效
+ * 深色海军蓝底 · 大字排版 · 海报横滑行 · 强焦点光圈 · 虚拟键盘
+ * ========================================================== */
+body.tv {
+  --tvbg: #0a0f1e;
+  --tvbg2: #111a30;
+  background: var(--tvbg);
+  color: #eef1fa;
+  font-size: 17px;
+}
+
+/* ---------- 顶栏 = 频道栏 ---------- */
+body.tv .topbar { background: linear-gradient(180deg, rgba(10,15,30,.96), rgba(10,15,30,.82)); border-bottom: 1px solid rgba(255,255,255,.06); }
+body.tv .topbar-inner { padding: 16px 34px; }
+body.tv .brand-name, body.tv #brandName { font-size: 27px; letter-spacing: 1px; }
+body.tv .nav { gap: 14px; }
+body.tv .nav a {
+  padding: 13px 28px; font-size: 20px; border-radius: 14px;
+  color: #cfd6ea; background: transparent;
+}
+body.tv .nav a:hover { background: var(--tvbg2); }
+body.tv .nav a.active {
+  background: linear-gradient(135deg, #12b7f5, #3d7bff);
+  color: #fff; box-shadow: 0 4px 18px rgba(18,183,245,.35);
+}
+/* TV 下隐藏桌面/手机专属件(tv.js 同时兜底 display:none) */
+body.tv .searchbox, body.tv #voiceBtn, body.tv #searchMBtn,
+body.tv #themeBtn, body.tv #userBox, body.tv #backTop { display: none !important; }
+
+/* ---------- 焦点系统: 一眼可见的光圈 ---------- */
+body.tv :focus { outline: none; }
+body.tv .tv-f {
+  outline: none !important;
+  box-shadow: 0 0 0 4px #12b7f5, 0 0 26px rgba(18,183,245,.55) !important;
+  border-radius: 14px;
+  transform: scale(1.06);
+  z-index: 5; position: relative;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+
+/* ---------- 首页 Banner 大卡 ---------- */
+#tvBanner {
+  position: relative; width: min(100%, 1400px); margin: 18px auto 6px;
+  border-radius: 20px; overflow: hidden; background: var(--tvbg2);
+  aspect-ratio: 21/8; max-height: 430px;
+  box-shadow: 0 14px 44px rgba(0,0,0,.5);
+}
+#tvBanner .tb-poster { position: absolute; inset: 0; display: block; }
+#tvBanner img { width: 100%; height: 100%; object-fit: cover; object-position: center 22%; display: block; }
+#tvBanner::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(10,15,30,.94) 0%, rgba(10,15,30,.55) 42%, transparent 70%);
+}
+#tvBanner .tb-meta {
+  position: absolute; left: 40px; bottom: 34px; z-index: 2;
+  display: flex; flex-direction: column; gap: 16px; align-items: flex-start;
+}
+#tvBanner .tb-title { font-size: 34px; font-weight: 900; text-shadow: 0 2px 12px rgba(0,0,0,.8); }
+#tvBanner .tb-play {
+  padding: 13px 34px; font-size: 19px; border-radius: 999px;
+  background: linear-gradient(135deg, #12b7f5, #3d7bff); color: #fff; border: none;
+}
+
+/* ---------- 海报行: 横向滑动 + 行标题 ---------- */
+body.tv .container { max-width: 1460px; }
+body.tv .row-head .row-title { font-size: 23px; }
+body.tv .grid {
+  display: flex; overflow-x: auto; overflow-y: visible;
+  gap: 20px; padding: 6px 4px 14px;
+  scrollbar-width: none;
+}
+body.tv .grid::-webkit-scrollbar { display: none; }
+body.tv .card { flex: 0 0 236px; margin: 0; }
+body.tv .card-poster { border-radius: 16px; }
+body.tv .card-name { font-size: 16.5px; margin-top: 9px; text-align: center; }
+body.tv .page-title { font-size: 26px; }
+
+/* ---------- 按钮/胶囊 ---------- */
+body.tv .btn { padding: 11px 22px; font-size: 16px; border-radius: 12px; }
+body.tv .chip { padding: 10px 18px; font-size: 15px; }
+
+/* ---------- TV 搜索页 ---------- */
+.tv-search-wrap { min-height: calc(100vh - 130px); }
+.tvs-layout { display: grid; grid-template-columns: minmax(0,1fr) 480px; gap: 26px; align-items: start; }
+.tvs-input {
+  min-height: 64px; display: flex; align-items: center;
+  background: var(--tvbg2); border: 1px solid rgba(255,255,255,.09);
+  border-radius: 14px; padding: 12px 20px; font-size: 24px; font-weight: 700;
+  letter-spacing: 3px; word-break: break-all;
+}
+.tvs-local-h { margin: 16px 0 10px; color: #8fa3cc; font-size: 14px; }
+.tvs-hit {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px; border-radius: 12px; color: #eef1fa; text-decoration: none;
+}
+.tvs-hit img { width: 92px; height: 52px; object-fit: cover; border-radius: 8px; background: #000; }
+.tvs-hit span { font-size: 16.5px; }
+.tvs-kb {
+  display: grid; grid-template-columns: repeat(6, 1fr);
+  gap: 12px; background: var(--tvbg2); border-radius: 18px; padding: 18px;
+}
+.tvs-kb button {
+  height: 62px; font-size: 21px; font-weight: 700; color: #eef1fa;
+  background: #18233f; border: 1px solid rgba(255,255,255,.07);
+  border-radius: 12px;
+}
+.tvs-kb button.tvs-go {
+  background: linear-gradient(135deg, #12b7f5, #3d7bff);
+  color: #fff; font-size: 17px; letter-spacing: 1px;
+}
+
+/* ---------- 底部按键提示条 ---------- */
+#tvLegend {
+  position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+  display: flex; gap: 26px; z-index: 60;
+  background: rgba(10,15,30,.78); border: 1px solid rgba(255,255,255,.08);
+  border-radius: 999px; padding: 9px 26px;
+  color: #93a5cd; font-size: 13.5px; pointer-events: none;
+}
+#tvLegend b { color: #dfe6ff; margin-right: 5px; }
+
+/* ---------- 播放页微调 ---------- */
+body.tv .rel-rail { background: var(--tvbg2); border-color: rgba(255,255,255,.07); }
+body.tv .play-actions { justify-content: center; }
+body.tv .gest-hud { display: none !important; } /* 遥控器无滑动亮度/音量手势 */
+
+/* ---------- 弱机性能 ---------- */
+body.tv * { text-shadow: none; }
+@media (max-width: 1080px) {
+  .tvs-layout { grid-template-columns: 1fr; }
+  .tvs-kb { grid-template-columns: repeat(6, 1fr); }
+}
