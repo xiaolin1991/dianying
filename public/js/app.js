@@ -1071,19 +1071,30 @@
     const allProg = store.get(progKey, {});
 
     const isFav = store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id));
+    // 该采集源的网页版地址(详情页优先, 否则取接口域名)
+    const srcSite = (() => { try { return src.detail || new URL(src.api).origin; } catch (e) { return ''; } })();
     v.innerHTML = `
       <div class="container page-wrap play-head">
         <div class="pb-title">${esc(vod.vod_name)}<span id="curEpName">${esc(groups[gi].eps[ei].name)}</span></div>
       </div>
       <div class="container page-wrap">
         <div class="play-top-row">
-          <div class="play-stage">
-            <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
-          <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
-          <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
-          <div class="video-tip hidden" id="videoTip"></div>
-          <div class="gest-hud" id="gestHud"></div>
-        </div>
+          <div class="play-col">
+            <div class="play-stage">
+              <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
+                <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
+                <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
+                <div class="video-tip hidden" id="videoTip"></div>
+                <div class="gest-hud" id="gestHud"></div>
+              </div>
+            </div>
+            <div class="play-actions">
+              <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
+              <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
+              <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
+              <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
+              ${srcSite ? `<a class="btn ghost small" href="${esc(srcSite)}" target="_blank" rel="noopener" title="打开该采集源的网页版">🌐 源站</a>` : ''}
+            </div>
           </div>
           <aside class="rel-rail" id="relRail">
             <div class="rail-head">📺 同类推荐 <small>同关键词 · 换源也能看</small></div>
@@ -1092,12 +1103,6 @@
         </div>
       </div>
       <div class="container page-wrap play-below">
-        <div class="play-actions">
-          <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
-          <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
-          <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
-          <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
-        </div>
         <div class="side-card swap-card">
           <h4>⚡ 快速换源</h4>
           <div class="swap-stat" id="swapStat"><span class="spin"></span> 正在探测其他播放源…</div>

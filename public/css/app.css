@@ -237,17 +237,20 @@ img { display: block; }
 html, body { overflow-x: hidden; }
 .play-stage { width: min(100vw, 1152px); margin: 0 auto; background: #000; }
 .play-stage .video-wrap { border-radius: 0; aspect-ratio: 16/9; height: auto; }
-/* 播放页双栏: 左播放器 + 右同类推荐(YouTube 式); 高度受限设备播放器自动缩小留出滚动空间 */
-.play-top-row { display: flex; gap: 18px; align-items: flex-start; }
-.play-top-row .play-stage { flex: 1; min-width: 0; }
-.play-top-row .play-stage .video-wrap { max-width: min(100%, calc((100vh - 240px) * 1.7778)); margin: 0 auto; }
+/* 播放页双栏: 左播放器+操作行 / 右同类推荐(等高); 下方区块与整行同宽 */
+.play-top-row { display: flex; gap: 18px; align-items: stretch; }
+.play-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.play-col .play-stage { width: 100%; }
+.play-top-row .play-stage .video-wrap { max-width: min(100%, calc((100vh - 300px) * 1.7778)); margin: 0 auto; }
+.play-col .play-actions { margin-top: 12px; justify-content: center; flex-wrap: wrap; gap: 10px; width: 100%; }
 .rel-rail {
-  width: 330px; flex-shrink: 0;
+  width: 330px; flex-shrink: 0; align-self: stretch;
+  display: flex; flex-direction: column;
   background: var(--card); border: 1px solid var(--card-br); border-radius: 16px; padding: 14px;
 }
-.rail-head { font-weight: 800; font-size: 15px; margin-bottom: 12px; display: flex; align-items: baseline; gap: 7px; }
+.rail-head { font-weight: 800; font-size: 15px; margin-bottom: 12px; display: flex; align-items: baseline; gap: 7px; flex-shrink: 0; }
 .rail-head small { font-weight: 400; font-size: 11.5px; color: var(--dim); }
-.rail-list { display: flex; flex-direction: column; gap: 10px; max-height: min(70vh, 620px); overflow-y: auto; padding-right: 4px; scrollbar-width: thin; }
+.rail-list { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; }
 .rcard {
   display: grid; grid-template-columns: 104px 1fr; gap: 10px; align-items: center;
   border-radius: 11px; padding: 5px; text-decoration: none; color: var(--txt);
@@ -267,7 +270,7 @@ html, body { overflow-x: hidden; }
   .rcard { flex: 0 0 236px; }
 }
 .play-head { padding-bottom: 10px; } /* 标题与导航栏、播放器之间的呼吸空间 */
-.play-below { margin-top: 14px; max-width: 1196px; } /* 与播放器同列对齐(1152+两侧padding) */
+.play-below { margin-top: 14px; } /* 与上方 播放器+右栏 同宽(同一 .container) */
 .play-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 /* 换源弹窗: 一行 3 个, 手机上也能看清名字 */
 .swap-open { display: none; margin-top: 4px; }
