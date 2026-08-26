@@ -2398,7 +2398,7 @@
               <button class="btn ghost small" id="refreshStatsBtn">🔄 刷新</button>
               <button class="btn danger small" id="clearStatsBtn">🗑 清空统计数据</button>
             </div>
-            <div id="statRecent" style="margin-top:14px;overflow-x:auto"></div>
+            <div id="statRecent" class="table-scroll" style="margin-top:14px"></div>
           </div>`;
         let statRows = [], statPg = 0;
         const STAT_PER = 10;
@@ -2473,7 +2473,7 @@
               <button class="btn primary small" id="loadUsersBtn">🔄 刷新用户列表</button>
               <span style="color:var(--dim);font-size:12px" id="usersStat"></span>
             </div>
-            <div id="usersTable" style="margin-top:10px;overflow-x:auto"></div>
+            <div id="usersTable" class="table-scroll" style="margin-top:10px"></div>
             <div id="userLogDetail" style="margin-top:14px"></div>
           </div>`;
         $('#requireLoginSwitch').addEventListener('change', async (e) => {
@@ -2540,8 +2540,8 @@
             const r = await API.adminUsers();
             stat.textContent = `共 ${r.users.length} 个注册用户`;
             table.innerHTML = r.users.length ? `
-              <table class="adm-table">
-                <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP / 归属地</th><th>成人源</th><th>累计观看</th><th>有效/总记录</th><th></th></tr></thead>
+              <table class="adm-table" style="min-width:960px">
+                <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP / 归属地</th><th style="text-align:center">成人源</th><th>累计观看</th><th>有效/总记录</th><th style="text-align:right">操作</th></tr></thead>
                 <tbody>${r.users.map((u) => `
                   <tr>
                     <td>${esc(u.username)}</td>
@@ -2551,9 +2551,9 @@
                     <td title="需全局「成人内容」开关开启后生效；绿色=允许观看，灰色=已隐藏"><button type="button" class="u-adult-tag ${u.adultAllowed ? 'on' : 'off'}" data-u="${esc(u.username)}">${u.adultAllowed ? '开' : '关'}</button></td>
                     <td>${fmtWatchSec(u.watchSec)}</td>
                     <td>${u.activeItems}/${u.totalItems}</td>
-                    <td style="white-space:nowrap;display:flex;gap:6px">
-                      <button class="btn ghost small u-log" data-u="${esc(u.username)}">记录</button>
-                      <button class="btn danger small u-del" data-u="${esc(u.username)}">删户</button>
+                    <td style="white-space:nowrap;text-align:right">
+                      <button class="btn ghost small u-log" data-u="${esc(u.username)}">📋 记录</button>
+                      <button class="btn danger small u-del" data-u="${esc(u.username)}">🗑 删户</button>
                     </td>
                   </tr>`).join('')}</tbody>
               </table>` : '<p class="hint">暂无注册用户（开放注册后，前台 #/login 可注册）</p>';
