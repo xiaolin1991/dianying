@@ -237,20 +237,16 @@ img { display: block; }
 html, body { overflow-x: hidden; }
 .play-stage { width: min(100vw, 1152px); margin: 0 auto; background: #000; }
 .play-stage .video-wrap { border-radius: 0; aspect-ratio: 16/9; height: auto; }
-/* 播放页双栏: 播放器 + 右侧竖排操作条 / 最右同类推荐(等高) */
+/* 播放页双栏: 左播放器(操作行贴右下角) / 右同类推荐(高度=播放器, JS 同步) */
 .play-top-row { display: flex; gap: 18px; align-items: stretch; }
 .play-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.play-inner { display: flex; gap: 12px; align-items: stretch; }
-.play-inner .play-stage { flex: 1; min-width: 0; width: auto; }
+.play-inner { display: block; }
+.play-inner .play-stage, .play-col .play-stage { flex: none; width: 100%; }
 .play-top-row .play-stage .video-wrap { max-width: min(100%, calc((100vh - 260px) * 1.7778)); margin: 0 auto; }
-/* 竖排操作工具条(播放器右侧, 不占下方空间) */
-.play-side-btns {
-  display: flex; flex-direction: column; gap: 9px;
-  width: 96px; flex-shrink: 0; padding-top: 2px;
-}
-.play-side-btns .btn, .play-side-btns .chip {
-  width: 100%; justify-content: center; margin: 0;
-  font-size: 13px; padding: 10px 4px; border-radius: 11px;
+/* 操作行: 播放器右下角(紧贴播放器底边, 右对齐) */
+.play-col .play-actions {
+  display: flex; gap: 9px; justify-content: flex-end; flex-wrap: wrap;
+  margin-top: 10px; width: 100%;
 }
 .rel-rail {
   width: 330px; flex-shrink: 0; align-self: stretch;
@@ -279,10 +275,6 @@ html, body { overflow-x: hidden; }
 }
 @media (max-width: 1080px) {
   .play-top-row { flex-direction: column; }
-  /* 窄屏: 操作条回到播放器下方横排 */
-  .play-inner { flex-direction: column; }
-  .play-side-btns { flex-direction: row; width: 100%; justify-content: center; padding-top: 0; }
-  .play-side-btns .btn, .play-side-btns .chip { width: auto; padding: 9px 14px; font-size: 13.5px; }
   .rel-rail { width: 100%; }
   .rail-list { flex-direction: row; overflow-x: auto; max-height: none; padding-bottom: 6px; }
   .rcard { flex: 0 0 236px; }

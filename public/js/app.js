@@ -1078,22 +1078,20 @@
       <div class="container page-wrap">
         <div class="play-top-row">
           <div class="play-col">
-            <div class="play-inner">
-              <div class="play-stage">
-                <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
-                  <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
-                  <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
-                  <div class="video-tip hidden" id="videoTip"></div>
-                  <div class="gest-hud" id="gestHud"></div>
-                </div>
+            <div class="play-stage">
+              <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
+                <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
+                <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
+                <div class="video-tip hidden" id="videoTip"></div>
+                <div class="gest-hud" id="gestHud"></div>
               </div>
-              <div class="play-side-btns">
-                <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
-                <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
-                <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
-                <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
-                <button class="chip" id="m3uBtn" title="复制本集 M3U8 播放地址">🔗 直链</button>
-              </div>
+            </div>
+            <div class="play-actions">
+              <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
+              <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
+              <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
+              <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
+              <button class="chip" id="m3uBtn" title="复制本集 M3U8 播放地址">🔗 直链</button>
             </div>
           </div>
           <aside class="rel-rail" id="relRail">
@@ -1124,6 +1122,21 @@
 
     const video = $('#videoEl');
     const tip = $('#videoTip');
+
+    // 右侧「同类推荐」栏高度 = 播放器实际渲染高度(含窗口缩放自适应; ≤1080px 横排模式自动解除)
+    const syncRailH = () => {
+      const rail = $('#relRail'), vw = $('#videoWrap');
+      if (!rail) { window.removeEventListener('resize', onRailResize); return; }
+      if (!vw) return;
+      if (window.innerWidth <= 1080) { rail.style.height = ''; return; }
+      rail.style.height = vw.offsetHeight + 'px';
+    };
+    const onRailResize = () => {
+      if (!alive() || !document.getElementById('relRail')) { window.removeEventListener('resize', onRailResize); return; }
+      syncRailH();
+    };
+    syncRailH();
+    window.addEventListener('resize', onRailResize);
 
     // ---- 选集: 翻页(60集/页) + 折叠, 长剧不再无限拉长页面 ----
     const EPP = 60;
