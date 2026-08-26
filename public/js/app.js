@@ -537,7 +537,7 @@
           // 数量不足时用通用池/其他分类补充
           const usedKeys = new Set(list.map((it) => it.title + '|' + it.year));
           const extras = [];
-          const donors = pool.general.concat(cats.map(([c]) => pool[c]).flat());
+          const donors = pool.general.concat(...cats.map(([c]) => pool[c])); // concat 展开替代 .flat()(老WebView兼容)
           for (const it of donors) {
             if (list.length + extras.length >= HOME_ROW_COUNT) break;
             const kk = it.title + '|' + it.year;
@@ -1271,8 +1271,20 @@
       try { wrap.style.filter = `brightness(${bright})`; } catch (e) {}
       let sx = 0, sy = 0, mode = '', startVal = 0, halfW = 200;
       let seekBase = 0, seekTarget = -1, lastSeekApply = 0, hudTimer = null;
-      const showHud = (t) => {
+      // 竖向手势: 图标 + 竖形进度条(左=亮度 / 右=音量), 一眼可见滑动生效
+      const showBarHud = (icon, pct, side) => {
+        const p = Math.max(0, Math.min(100, Math.round(pct)));
+        hud.innerHTML = `<div class="gh-ico">${icon}</div><div class="gh-bar"><i style="height:${p}%"></i></div><div class="gh-val">${p}%</div>`;
+        hud.style.left = side === 'b' ? '24%' : '76%';
+        hud.classList.add('bar');
+        hud.classList.add('show');
+        clearTimeout(hudTimer);
+        hudTimer = setTimeout(() => hud.classList.remove('show'), 550);
+      };
+      const showTextHud = (t) => {
         hud.textContent = t;
+        hud.style.left = '50%';
+        hud.classList.remove('bar');
         hud.classList.add('show');
         clearTimeout(hudTimer);
         hudTimer = setTimeout(() => hud.classList.remove('show'), 550);
@@ -1302,16 +1314,16 @@
           bright = Math.min(2.2, Math.max(0.25, startVal + dyUp / 180));
           try { wrap.style.filter = `brightness(${bright})`; } catch (err) {}
           store.set('vidBright', Number(bright.toFixed(2)));
-          showHud('☀️ 亮度 ' + Math.round(bright * 100) + '%');
+          showBarHud('☀️', ((bright - 0.25) / (2.2 - 0.25)) * 100, 'b');
         } else if (mode === 'v') {
           const nv = Math.min(1, Math.max(0, startVal + dyUp / 180));
           try { video.volume = nv; video.muted = false; } catch (err) { /* iOS 系统限制 */ }
-          showHud(nv <= 0 ? '🔇 静音' : '🔊 音量 ' + Math.round(nv * 100) + '%');
+          showBarHud(nv <= 0 ? '🔇' : '🔊', nv * 100, 'v');
         } else if (mode === 'seek' && video.duration) {
           // 整屏宽度 ≈ 快进/快退 90 秒
           seekTarget = Math.min(video.duration - 0.5, Math.max(0, seekBase + dx * (90 / halfW)));
           const fwd = seekTarget >= seekBase;
-          showHud(`${fwd ? '⏩' : '⏪'} ${fmtT(seekTarget)} / ${fmtT(video.duration)}`);
+          showTextHud(`${fwd ? '⏩' : '⏪'} ${fmtT(seekTarget)} / ${fmtT(video.duration)}`);
           const now = Date.now();
           if (now - lastSeekApply > 300 && video.readyState >= 2) {
             try { video.currentTime = seekTarget; lastSeekApply = now; } catch (err) {}
@@ -1323,7 +1335,7 @@
         // 结束时把最终目标时间精确落位(节流期间可能未应用到最后值)
         if (mode === 'seek' && seekTarget >= 0 && video.duration) {
           try { video.currentTime = seekTarget; } catch (e) {}
-          showHud('⏱ 已跳到 ' + fmtT(video.currentTime));
+          showTextHud('⏱ 已跳到 ' + fmtT(video.currentTime));
         }
         mode = ''; seekTarget = -1;
       });
