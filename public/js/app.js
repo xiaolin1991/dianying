@@ -1000,7 +1000,8 @@
       });
       const closeBtn = document.createElement('button');
       closeBtn.className = 'modal-close'; closeBtn.textContent = '×';
-      box.firstChild.appendChild(closeBtn);
+      const mbox993 = box.querySelector('.modal-box');
+      if (mbox993) mbox993.appendChild(closeBtn);
       closeBtn.addEventListener('click', () => box.remove());
       document.body.appendChild(box);
     });
@@ -1394,7 +1395,9 @@
         closeBtn.className = 'modal-close';
         closeBtn.textContent = '×';
         closeBtn.addEventListener('click', () => box.remove());
-        box.firstChild.appendChild(closeBtn);
+        // 注意: firstChild 可能是空白文本节点, 必须 querySelector 定位 modal-box
+        const mbox = box.querySelector('.modal-box');
+        if (mbox) mbox.appendChild(closeBtn);
         document.body.appendChild(box);
       }
       if (openBtn) openBtn.addEventListener('click', () => { if (!openBtn.disabled) openSwapModal(); });
@@ -1913,7 +1916,8 @@
       closeBtn.className = 'modal-close';
       closeBtn.textContent = '×';
       closeBtn.addEventListener('click', () => box.remove());
-      box.firstChild.appendChild(closeBtn);
+      const mbox1918 = box.querySelector('.modal-box');
+      if (mbox1918) mbox1918.appendChild(closeBtn);
       document.body.appendChild(box);
     });
 

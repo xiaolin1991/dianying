@@ -43,8 +43,13 @@ img { display: block; }
   padding: 8px 14px; border-radius: 10px; font-size: 14.5px; color: var(--dim);
   white-space: nowrap; transition: all .2s;
 }
-.nav a:hover { color: var(--txt); background: var(--card); }
-.nav a.active { color: var(--txt); background: var(--card); font-weight: 600; box-shadow: inset 0 -2px 0 var(--acc); }
+.nav a:hover { color: var(--txt); background: var(--bg2); }
+/* 选中态: 渐变胶囊 + 白字, 一眼可见当前分类 */
+.nav a.active {
+  color: #fff; font-weight: 700;
+  background: linear-gradient(135deg, var(--acc), var(--acc2));
+  box-shadow: 0 4px 14px rgba(91, 140, 255, .32);
+}
 .topbar-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .search-m-btn { display: none !important; } /* 桌面端强制隐藏(icon-btn 的 display:grid 在后方会覆盖, 必须 !important) */
 .searchbox {
@@ -857,11 +862,15 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   .brand { margin-right: auto; min-width: 0; } /* 站名占左, 右侧按钮贴右 */
   /* 内联搜索框隐藏, 改为放大镜按钮 → 弹窗搜索 */
   .searchbox { display: none !important; }
-  .search-m-btn { display: grid !important; order: 1; width: 34px; height: 34px; flex-shrink: 0; }
-  .user-box { order: 2; flex-shrink: 0; margin-left: 0; }
+  /* 右侧三枚图标统一 34px 方框, 图标严格居中 */
+  .icon-btn#voiceBtn { display: grid !important; order: 1; width: 34px; height: 34px; flex-shrink: 0; padding: 0; }
+  .icon-btn#voiceBtn .ico { width: 17px; height: 17px; }
+  .search-m-btn { display: grid !important; order: 2; width: 34px; height: 34px; flex-shrink: 0; }
+  .user-box { order: 3; flex-shrink: 0; margin-left: 0; }
   .user-box .btn { font-size: 12px; padding: 6px 10px; white-space: nowrap; }
-  .icon-btn#themeBtn { order: 3; width: 34px; height: 34px; flex-shrink: 0; }
-  .nav { order: 4; flex-basis: 100%; overflow-x: auto; }
+  .icon-btn#themeBtn { order: 4; width: 34px; height: 34px; flex-shrink: 0; padding: 0; }
+  .icon-btn#themeBtn .ico { width: 18px; height: 18px; }
+  .nav { order: 5; flex-basis: 100%; overflow-x: auto; }
   /* 换源/选源弹窗在手机上一行 2 个, 名字看得清 */
   .swap-modal-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
   .swap-modal-list .src-item,
