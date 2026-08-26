@@ -1636,6 +1636,72 @@
   }
   function USERNAME_OK(u) { return /^[\w\u4e00-\u9fa5]{2,20}$/.test(u); }
 
+  /* ---------------- 游客试看到期 → 弹出注册/登录框(不强制跳页) ---------------- */
+  let trialModalShown = false;
+  async function initGuest() {
+    try {
+      const r = await API.guestStatus();
+      State.guest = { required: r.required !== false, ok: !!r.ok, remain: r.remainSec, totalMin: r.trialMinutes || 0 };
+      if (State.guest.required && !r.ok && !State.me) showTrialModal(true);
+    } catch (e) { /* 探测失败不阻塞浏览 */ }
+  }
+  function showTrialModal(expired, remainSec) {
+    if (State.me || trialModalShown) return;
+    trialModalShown = true;
+    const box = document.createElement('div');
+    box.className = 'modal-mask';
+    const mins = Math.max(1, Math.round((remainSec != null ? remainSec : (State.guest && State.guest.remain) || 0) / 60));
+    box.innerHTML = `
+      <div class="modal-box" style="width:min(92vw,400px);text-align:center">
+        <button class="trial-x" type="button" title="稍后再说">×</button>
+        <div style="font-size:40px;line-height:1">${expired ? '⏰' : '🎁'}</div>
+        <h3 style="margin:10px 0 6px">${expired ? '试看时间已到' : `游客可免费试看 ${mins} 分钟`}</h3>
+        <p class="hint">注册账号后继续观看，还可解锁：<br>☁️ 收藏云同步 · 📺 观看进度续播 · 📲 APP 下载引导</p>
+        <div class="chips" style="justify-content:center;margin:12px 0 4px">
+          <button class="chip on" data-m="reg" type="button">注 册</button>
+          <button class="chip" data-m="login" type="button">登 录</button>
+        </div>
+        <input class="field-input t-user" placeholder="用户名（2-20位中文/字母/数字）">
+        <input class="field-input t-pwd" type="password" placeholder="密码（至少6位）" style="margin-top:10px">
+        <input class="field-input t-pwd2" type="password" placeholder="确认密码" style="margin-top:10px">
+        <button class="btn primary t-go" style="width:100%;justify-content:center;margin-top:14px">注册并继续观影</button>
+      </div>`;
+    document.body.appendChild(box);
+    let mode = 'reg';
+    const syncMode = () => {
+      $$('.chip', box).forEach((c) => c.classList.toggle('on', c.dataset.m === mode));
+      $('.t-go', box).textContent = mode === 'reg' ? '注册并继续观影' : '登录并继续观影';
+      $('.t-pwd2', box).style.display = mode === 'reg' ? '' : 'none';
+    };
+    $$('.chip', box).forEach((c) => c.addEventListener('click', () => { mode = c.dataset.m; syncMode(); }));
+    const close = () => { trialModalShown = false; box.remove(); };
+    $('.trial-x', box).addEventListener('click', close);
+    box.addEventListener('click', (e) => { if (e.target === box) close(); });
+    const submit = async () => {
+      const username = $('.t-user', box).value.trim();
+      const pwd = $('.t-pwd', box).value;
+      if (!USERNAME_OK(username)) return toast('用户名需 2-20 位中文/字母/数字/下划线', 'err');
+      if (pwd.length < 6) return toast('密码至少 6 位', 'err');
+      try {
+        if (mode === 'reg') {
+          if (pwd !== $('.t-pwd2', box).value) return toast('两次输入的密码不一致', 'err');
+          await API.userRegister(username, pwd);
+        } else {
+          await API.userLogin(username, pwd);
+        }
+        State.me = username;
+        updateUserBox();
+        try { const mm = await API.userMe(); if (mm && mm.me) State.meCreated = Number(mm.me.createdAt || 0); } catch (e) {}
+        pullFavsMerge();
+        toast((mode === 'reg' ? '注册成功，' : '欢迎回来，') + username + '，继续观影吧', 'ok');
+        close();
+      } catch (e) { toast(e.message || '操作失败', 'err'); }
+    };
+    $('.t-go', box).addEventListener('click', submit);
+    $('.t-pwd2', box).addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+    setTimeout(() => { const i = $('.t-user', box); i && i.focus(); }, 80);
+  }
+
   /* ============================================================
      视图：个人中心(观看记录 / 我的收藏)
      ============================================================ */
@@ -2477,12 +2543,20 @@
           <div class="admin-card">
             <h3>👥 用户管理</h3>
             <div class="admin-row">
-              <div class="admin-label">强制登录观看<small>开启后未登录用户无法获取影片数据（接口层拦截）</small></div>
+              <div class="admin-label">强制登录观看<small>开启后游客可先试看（时长见下行），到期弹出注册框；关闭 = 完全免登录自由观看</small></div>
               <label class="switch"><input type="checkbox" id="requireLoginSwitch" ${s.requireLogin !== false ? 'checked' : ''}><span class="track"></span></label>
             </div>
             <div class="admin-row">
               <div class="admin-label">开放前台注册<small>关闭后新用户无法自行注册</small></div>
               <label class="switch"><input type="checkbox" id="allowRegisterSwitch" ${s.allowRegister !== false ? 'checked' : ''}><span class="track"></span></label>
+            </div>
+            <div class="admin-row">
+              <div class="admin-label">游客试看时长<small>新 IP / 新设备 / 新访客无需注册即可试看 <b id="trialHintMin">${Number(s.trialMinutes === undefined ? 20 : s.trialMinutes)}</b> 分钟，到期自动弹出注册框；填 <b>0</b> = 不提供试看（立即要求登录）。需配合上方「强制登录观看」开启</small></div>
+              <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+                <input class="field-input" id="trialMinInput" type="number" min="0" max="2880" step="1" style="width:92px;text-align:center" value="${Number(s.trialMinutes === undefined ? 20 : s.trialMinutes)}">
+                <span style="color:var(--dim);font-size:12.5px">分钟</span>
+                <button class="btn primary small" id="saveTrialBtn">保存</button>
+              </div>
             </div>
             <p class="hint">查看每个用户的注册时间、最近登录 IP、搜索与观看记录（<b>包含用户已删除的记录</b>，灰色标记）。</p>
             <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -2507,6 +2581,17 @@
             State.settings = { ...State.settings, allowRegister: on };
             toast(on ? '已开放注册' : '已关闭注册', 'ok');
           } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
+        });
+        $('#saveTrialBtn').addEventListener('click', async () => {
+          const n = Math.round(Number($('#trialMinInput').value));
+          if (!isFinite(n) || n < 0 || n > 2880) return toast('试看时长需为 0-2880 的整数分钟', 'err');
+          try {
+            await API.adminSaveSettings({ trialMinutes: n });
+            const hint = $('#trialHintMin');
+            if (hint) hint.textContent = n;
+            State.settings = { ...State.settings, trialMinutes: n };
+            toast(`游客试看时长已保存：${n === 0 ? '立即要求登录' : n + ' 分钟'}`, 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
         async function showUserLog(u) {
           const box = $('#userLogDetail');
@@ -3147,6 +3232,9 @@
     applyAnnouncement(State.settings.announcement);
     route();
     maybeAppPromo(); // 首屏就绪后判断是否弹下载引导
+    // 游客试看: 拉取剩余时长; 试看到期由接口 401 事件触发注册框
+    initGuest();
+    window.addEventListener('xl:need-login', () => showTrialModal(true));
   }
 
   boot();

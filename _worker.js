@@ -45,7 +45,8 @@ const DEFAULT_SETTINGS = {
   configUrl: '',        // (兼容保留) 单个采集源地址
   configUrls: [],       // 多个采集源配置地址, 顺序即优先级(前面的 key 不被后面覆盖)
   configJson: '',       // 后台直接粘贴的 JSON 配置内容(优先于所有 URL)
-  requireLogin: true,   // 强制登录观看: 未注册/未登录用户不能观看
+  requireLogin: true,   // 登录观看: 开启=游客可试看 trialMinutes 分钟, 到期需注册; 关闭=完全免登录
+  trialMinutes: 20,     // 游客试看时长(分钟), 后台可自定义; 0=立即要求登录
   allowRegister: true,  // 开放前台注册
   homeSources: [],      // 首页默认加载的影视源 key 顺序列表(空=内置精选)
   appPromoEnabled: true, // 手机访问弹「下载APP」引导弹窗(后台可关)
@@ -147,6 +148,11 @@ async function saveSettings(env, patch) {
   if (typeof patch.passwordHash === 'string' && /^[0-9a-f]{64}$/.test(patch.passwordHash)) next.passwordHash = patch.passwordHash;
   if (typeof patch.salt === 'string' && /^[0-9a-f]{32}$/.test(patch.salt)) next.salt = patch.salt;
   if (typeof patch.requireLogin === 'boolean') next.requireLogin = patch.requireLogin;
+  if (patch.trialMinutes !== undefined) {
+    const n = Math.round(Number(patch.trialMinutes));
+    if (!isFinite(n) || n < 0 || n > 2880) throw new Error('试看时长需为 0-2880 分钟');
+    next.trialMinutes = n;
+  }
   if (typeof patch.allowRegister === 'boolean') next.allowRegister = patch.allowRegister;
   if (typeof patch.appPromoEnabled === 'boolean') next.appPromoEnabled = patch.appPromoEnabled;
   if (typeof patch.downloadUrl === 'string') next.downloadUrl = patch.downloadUrl.trim().slice(0, 300);
@@ -323,6 +329,42 @@ async function requireAuth(req, env, url) {
   if (await verifyToken(env, readToken(req, url))) return true;
   return false;
 }
+
+/* ---- 游客试看: 匿名设备签名 Cookie(ntv_guest=首次时间戳.签名) ----
+   新 IP / 新设备 / 新用户首次进入自动发放; 试用期内正常观看, 到期接口返回 login_required */
+const GUEST_COOKIE = 'ntv_guest';
+const GUEST_COOKIE_MAXAGE = 400 * 24 * 3600;
+async function guestStamp(env, ts) {
+  return ts + '.' + (await hmacHex(await adminSecret(env), 'guest:' + ts)).slice(0, 20);
+}
+function readGuest(req) {
+  const m = (req.headers.get('Cookie') || '').match(/(?:^|;\s*)ntv_guest=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+/** { ok: 是否放行, remainSec: 剩余秒, newCookie?: 需要种下的Cookie } */
+async function guestState(req, env, url) {
+  const s = await getSettings(env);
+  if (s.requireLogin === false) return { ok: true, remainSec: null };          // 完全开放
+  if (await anyValidSession(req, env, url)) return { ok: true, remainSec: null }; // 已登录/管理员
+  const trialMin = Number(s.trialMinutes === undefined ? 20 : s.trialMinutes);
+  if (!(trialMin > 0)) return { ok: false, remainSec: 0 };                     // 立即要求登录
+  let start = null;
+  const raw = readGuest(req);
+  if (raw && raw.includes('.')) {
+    const i = raw.lastIndexOf('.');
+    const v = raw.slice(0, i), sig = raw.slice(i + 1);
+    if (/^\d+$/.test(v) && safeEqual(sig, (await hmacHex(await adminSecret(env), 'guest:' + v)).slice(0, 20))) {
+      start = Number(v);
+    }
+  }
+  if (start === null) {
+    const now = Date.now();
+    return { ok: true, remainSec: trialMin * 60, newCookie: await guestStamp(env, String(now)) };
+  }
+  const remainSec = Math.max(0, Math.round(trialMin * 60 - (Date.now() - start) / 1000));
+  return { ok: remainSec > 0, remainSec };
+}
+const guestSetCookie = (v) => `${GUEST_COOKIE}=${v}; Max-Age=${GUEST_COOKIE_MAXAGE}; Path=/; SameSite=Lax`;
 function rateLimited(ip) {
   const now = Date.now();
   const arr = (MEM.loginHits.get(ip) || []).filter((t) => now - t < 60000);
@@ -598,6 +640,7 @@ export default {
           defaultTheme: s.defaultTheme,
           announcement: s.announcement,
           requireLogin: s.requireLogin !== false,
+          trialMinutes: Number(s.trialMinutes === undefined ? 20 : s.trialMinutes),
           allowRegister: s.allowRegister !== false,
           homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
           appPromoEnabled: s.appPromoEnabled !== false,
@@ -647,9 +690,8 @@ export default {
         if (!/^https?:$/.test(tu.protocol)) return json({ error: 'bad protocol' }, 400);
 
         const settings2 = await getSettings(env);
-        if (settings2.requireLogin !== false && !(await anyValidSession(request, env, url))) {
-          return json({ error: '请先登录后观看', code: 'login_required' }, 401);
-        }
+        const g1 = await guestState(request, env, url);
+        if (!g1.ok) return json({ error: '试看时间已到，注册/登录后继续观看', code: 'login_required' }, 401);
         const { sources: remote } = await loadSources(env, ctx, settings2);
         const { all } = mergeSources(remote, settings2);
         const allow = new Set();
@@ -671,16 +713,31 @@ export default {
         headers.set('Content-Type', upstream.headers.get('Content-Type') || 'application/json; charset=utf-8');
         headers.set('Access-Control-Allow-Origin', '*');
         headers.set('Cache-Control', 'public, max-age=120');
+        if (g1.newCookie) headers.set('Set-Cookie', guestSetCookie(g1.newCookie));
         return new Response(upstream.body, { status: upstream.status, headers });
       }
 
       /* ---- 电视直播频道 ---- */
       if (path === '/api/live' && request.method === 'GET') {
-        const s0 = await getSettings(env);
-        if (s0.requireLogin !== false && !(await anyValidSession(request, env, url))) {
-          return json({ error: '请先登录后观看', code: 'login_required' }, 401);
-        }
-        return json(await loadLive(env, ctx));
+        const g2 = await guestState(request, env, url);
+        if (!g2.ok) return json({ error: '试看时间已到，注册/登录后继续观看', code: 'login_required' }, 401);
+        const live = await loadLive(env, ctx);
+        return g2.newCookie
+          ? json(live, 200, { 'Set-Cookie': guestSetCookie(g2.newCookie) })
+          : json(live);
+      }
+
+      /* ---- 游客试看状态(公开): 前端据此决定是否弹注册框 ---- */
+      if (path === '/api/guest/status' && request.method === 'GET') {
+        const s = await getSettings(env);
+        const g = await guestState(request, env, url);
+        const extra = g.newCookie ? { 'Set-Cookie': guestSetCookie(g.newCookie) } : {};
+        return json({
+          required: s.requireLogin !== false,
+          ok: !!g.ok,
+          remainSec: g.remainSec,
+          trialMinutes: Number(s.trialMinutes === undefined ? 20 : s.trialMinutes),
+        }, 200, extra);
       }
 
       /* ---- 访问统计埋点(公开, 不需要登录) ---- */
@@ -904,6 +961,7 @@ export default {
               : [env.CONFIG_URL || DEFAULT_CONFIG_URL],
             configFrom: s.configJson ? 'inline-json' : ((Array.isArray(s.configUrls) && s.configUrls.length) ? 'multi-url' : 'default'),
             requireLogin: s.requireLogin !== false,
+            trialMinutes: Number(s.trialMinutes === undefined ? 20 : s.trialMinutes),
             allowRegister: s.allowRegister !== false,
             appPromoEnabled: s.appPromoEnabled !== false,
             downloadUrl: s.downloadUrl || '',

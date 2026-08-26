@@ -8,7 +8,15 @@
     try {
       const res = await fetch(url, { ...opt, signal: ctrl.signal });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      if (!res.ok) {
+        // 游客试看到期: 全局广播, 由应用层弹出注册框
+        if (res.status === 401 && data.code === 'login_required') {
+          try { window.dispatchEvent(new CustomEvent('xl:need-login')); } catch (e) {}
+        }
+        const err = new Error(data.error || ('HTTP ' + res.status));
+        err.code = data.code;
+        throw err;
+      }
       return data;
     } finally { clearTimeout(timer); }
   }
@@ -112,6 +120,7 @@
 
     adminUsers: () => jfetch('/api/admin/users', {}, 15000),
     checkAdminPath: (p) => jfetch('/api/admin-path?p=' + encodeURIComponent(p || ''), {}, 8000),
+    guestStatus: () => jfetch('/api/guest/status', {}, 8000),
     adminBackup: () => jfetch('/api/admin/backup', {}, 30000),
     adminRestore: (mode, kvData) =>
       jfetch('/api/admin/restore', {
