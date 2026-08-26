@@ -5,6 +5,32 @@
 (function () {
   'use strict';
 
+  /* --------------------- 老电视盒子 WebView 兼容垫片 ---------------------
+     部分盒子的 Android System WebView 较旧, 缺 Promise.allSettled 等新 API,
+     会导致「登录加载失败: promise.allSettled is not a function」 */
+  if (typeof Promise !== 'undefined' && !Promise.allSettled) {
+    Object.defineProperty(Promise, 'allSettled', {
+      value: function (list) {
+        return Promise.all([...list].map((p) =>
+          Promise.resolve(p).then(
+            (v) => ({ status: 'fulfilled', value: v }),
+            (e) => ({ status: 'rejected', reason: e })
+          )
+        ));
+      },
+      writable: true, configurable: true,
+    });
+  }
+  if (typeof Object.fromEntries !== 'function') {
+    Object.defineProperty(Object, 'fromEntries', {
+      value: function (entries) {
+        const o = {};
+        for (const [k, v] of entries) o[k] = v;
+        return o;
+      }, writable: true, configurable: true,
+    });
+  }
+
   /* ------------------------------ 工具 ------------------------------ */
   const $ = (s, p = document) => p.querySelector(s);
   const $$ = (s, p = document) => [...p.querySelectorAll(s)];
@@ -12,6 +38,57 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const stripTags = (s) => String(s || '').replace(/<[^>]*>/g, '').trim();
+
+  /* ---------- 电视/盒子识别(WebView 无触摸屏) + 标题首字母索引 ---------- */
+  function isTvDevice() {
+    try {
+      const ua = navigator.userAgent || '';
+      const noTouch = !('ontouchstart' in window) && (navigator.maxTouchPoints || 0) === 0;
+      return /Android/i.test(ua) && noTouch;
+    } catch (e) { return false; }
+  }
+  // 拼音首字母(近似): 用 ICU 中文拼音排序在 23 个声母边界字中二分定位。
+  // 老设备无拼音 Collator 时结果可能不准, 仅影响「首字母快搜」命中率, 不影响其他功能。
+  const PY_LETTERS = 'ABCDEFGHJKLMNPQRSTWXYZ';
+  const PY_BOUNDS = ['阿', '八', '嚓', '咑', '妸', '发', '噶', '哈', '丌', '咔', '垃', '呣', '拿', '噢', '啪', '七', '呥', '仨', '牠', '挖', '希', '压', '匝'];
+  let pyCmp = null;
+  try {
+    if (typeof Intl !== 'undefined' && Intl.Collator) pyCmp = new Intl.Collator(['zh-Hans-CN', 'zh'], { sensitivity: 'base' });
+  } catch (e) { pyCmp = null; }
+  function pyInitial(ch) {
+    if (!ch) return '';
+    if (/[a-zA-Z]/.test(ch)) return ch.toUpperCase();
+    const cmp = (a, b) => (pyCmp ? pyCmp.compare(a, b) : (a < b ? -1 : a > b ? 1 : 0));
+    // 找到最后一个 <= ch 的边界字
+    let lo = 0, hi = PY_BOUNDS.length - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (cmp(PY_BOUNDS[mid], ch) <= 0) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    return ans >= 0 ? PY_LETTERS[ans] : '';
+  }
+  function titleInitials(name) {
+    let out = '';
+    for (const ch of String(name || '')) {
+      const c = pyInitial(ch);
+      if (c) out += c;
+      if (out.length >= 8) break;
+    }
+    return out;
+  }
+  // 全站标题索引(cardHtml 渲染时自动登记), 供「首字母搜索」本地快查
+  const TitleIdx = new Map();
+  function indexTitle(item) {
+    try {
+      if (!item || !item.title || TitleIdx.has(item.title)) return;
+      if (TitleIdx.size > 800) return;
+      TitleIdx.set(item.title, {
+        title: item.title, pic: item.pic || '', remarks: item.remarks || '',
+        sourceKey: item.sourceKey || '', id: item.id || '',
+      });
+    } catch (e) { /* ignore */ }
+  }
 
   function fmtDateTime(ts) {
     if (!ts) return '—';
@@ -34,6 +111,93 @@
     $('#toastWrap').appendChild(el);
     setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .4s'; }, 2600);
     setTimeout(() => el.remove(), 3100);
+  }
+
+  /* ---------- TV 虚拟键盘: 盒子 WebView 弹不出系统输入法时的兜底 ----------
+     全部为真实 <button>, 遥控器方向键可直接移动焦点 + OK 键输入 */
+  const VKB = {
+    el: null, target: null, shift: false, sym: false,
+    ensure() {
+      if (this.el) return this.el;
+      const box = document.createElement('div');
+      box.className = 'vkb hidden';
+      box.id = 'vkbBox';
+      box.addEventListener('click', (e) => e.stopPropagation());
+      document.body.appendChild(box);
+      this.el = box;
+      document.addEventListener('click', (e) => {
+        if (!box.classList.contains('hidden') && !e.target.closest('.vkb') && e.target !== this.target) {
+          if (!/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) this.hide();
+        }
+      });
+      return box;
+    },
+    render() {
+      const rows = this.sym
+        ? ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '@', '#']
+        : (this.shift ? 'QWERTYUIOPASDFGHJKLZXCVBNM' : 'qwertyuiopasdfghjklzxcvbnm').split('');
+      const extra = this.sym ? ['.', '_', '-', '+'] : ['清空'];
+      const keys = [
+        ...rows.map((c) => ({ t: c, k: c })),
+        { t: '⇧', k: '__shift' }, { t: '123/abc', k: '__sym' },
+        { t: '⌫ 删除', k: '__del' }, ...extra.map((c) => ({ t: c, k: c === '清空' ? '__clear' : c })),
+        { t: '完成', k: '__done' },
+      ];
+      this.el.innerHTML = `<div class="vkb-title">${esc(this.target ? (this.target.placeholder || '输入') : '输入')} <small>遥控器方向键选择 · OK 输入</small></div>
+        <div class="vkb-keys">${keys.map((x) => `<button type="button" class="vkb-key${String(x.k).startsWith('__') ? ' fn' : ''}" data-k="${esc(x.k)}">${esc(x.t)}</button>`).join('')}</div>`;
+      $$('.vkb-key', this.el).forEach((b) => b.addEventListener('click', () => this.press(b.dataset.k)));
+    },
+    press(k) {
+      const t = this.target;
+      if (!t) return this.hide();
+      if (k === '__shift') { this.shift = !this.shift; return this.render(); }
+      if (k === '__sym') { this.sym = !this.sym; return this.render(); }
+      if (k === '__del') { t.value = t.value.slice(0, -1); }
+      else if (k === '__clear') { t.value = ''; }
+      else if (k === '__done') { return this.hide(); }
+      else { t.value += (this.shift && !this.sym) ? k.toUpperCase() : k; }
+      t.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+    attach(input) {
+      if (!input || input.dataset.vkbBound) return;
+      input.dataset.vkbBound = '1';
+      input.readOnly = true; // 阻止唤起(弹不出的)系统输入法, 编辑全部走虚拟键盘
+      input.addEventListener('click', () => this.open(input));
+      input.addEventListener('focus', () => this.open(input));
+    },
+    open(input) {
+      this.ensure();
+      this.target = input;
+      this.render();
+      this.el.classList.remove('hidden');
+      const first = $('.vkb-key', this.el);
+      first && first.focus();
+    },
+    hide() { if (this.el) { this.el.classList.add('hidden'); this.target = null; } },
+  };
+
+  /* ---------- 语音搜索: Web Speech API(Chromium 内核可用时) ---------- */
+  function startVoice(cb) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return toast('当前设备不支持语音识别（电视盒子可安装 Google 语音服务后重试）', 'err');
+    try {
+      const r = new SR();
+      r.lang = 'zh-CN';
+      r.interimResults = false;
+      r.maxAlternatives = 1;
+      toast('🎙 请说出影片名…');
+      let got = false;
+      r.onresult = (e) => {
+        got = true;
+        const t = String((e.results && e.results[0] && e.results[0][0] && e.results[0][0].transcript) || '').trim();
+        if (t) cb(t); else toast('没听清，请再试一次', 'err');
+      };
+      r.onerror = (e) => {
+        if (got) return;
+        toast(e.error === 'not-allowed' ? '麦克风权限被拒绝' : e.error === 'no-speech' ? '没有听到声音' : '语音识别失败：' + e.error, 'err');
+      };
+      r.start();
+    } catch (e) { toast('语音识别启动失败', 'err'); }
   }
 
   const store = {
@@ -173,6 +337,7 @@
   /* ------------------------------ 卡片渲染 ------------------------------ */
   /** 卡片为真实链接, 新标签页打开详情, 不丢失当前搜索/浏览页 */
   function cardHtml(item) {
+    indexTitle(item); // 登记到全站标题索引(供首字母快搜)
     // 海报卡片直接进播放器页面(跳过详情中间页); 详情仍可从播放页「← 详情」进入
     const href = `#/play/${esc(item.sourceKey)}/${encodeURIComponent(item.id)}?ep=0&group=0`;
     return `
@@ -285,7 +450,14 @@
       else if (parts[0] === 'user') await viewUser(alive);
       else if (parts[0] === 'live') await viewLive(query);
       else if (parts[0] === 'download') await viewDownload(alive);
-      else if (parts[0] === 'admin') await viewAdmin(query);
+      else if (parts[0] === 'admin') await viewAdmin(query, parts[0]);
+      else if (!parts[1] && /^[a-z0-9][a-z0-9-_]{1,39}$/.test(parts[0] || '')) {
+        // 未知路径: 探测是否为自定义后台入口(是→进后台, 否→回首页)
+        let ok = false;
+        try { ok = (await API.checkAdminPath(parts[0])).ok; } catch (e) { /* 网络/离线 */ }
+        if (ok) await viewAdmin(query, parts[0]);
+        else await viewHome(alive);
+      }
       else await viewHome(alive);
     } catch (err) {
       if (!alive()) return;
@@ -595,10 +767,27 @@
       <div class="container page-wrap">
         <div class="page-head"><div class="page-title">搜索：${esc(q)}</div><div id="srcStat" style="color:var(--dim);font-size:13px"></div></div>
         <div class="search-progress"><i id="progBar"></i></div>
+        <div id="srLocal"></div>
         <div class="grid" id="srGrid"></div>
         <div class="scroll-sentinel hidden" id="srSentinel"><span class="spin"></span></div>
         <div class="empty hidden" id="srEmpty"><div class="big">🙈</div><p>没有找到相关内容</p></div>
       </div>`;
+    // 🔤 纯字母关键词 → 本地首字母快搜(浏览/收藏过的片名, 秒出结果)
+    if (/^[a-zA-Z]{1,8}$/.test(q)) {
+      try {
+        store.get('favs', []).forEach((f) => indexTitle({ title: f.title, pic: f.pic, remarks: f.remarks, sourceKey: f.key, id: f.id }));
+      } catch (e) { /* ignore */ }
+      const want = q.toUpperCase();
+      const hits = [...TitleIdx.values()]
+        .filter((it) => { const ini = titleInitials(it.title); return ini === want || ini.startsWith(want); })
+        .slice(0, 24);
+      const localBox = $('#srLocal');
+      if (localBox) localBox.innerHTML = hits.length ? `
+        <div style="margin:2px 0 14px">
+          <div style="font-size:15px;font-weight:700;margin-bottom:10px">🔤 首字母「${esc(want)}」本地匹配 <small style="color:var(--dim);font-weight:400;font-size:12px">· 来自你浏览/收藏过的内容</small></div>
+          <div class="grid">${hits.map(cardHtml).join('')}</div>
+        </div>` : '';
+    }
     if (!alive()) return;
     logSearch(q); // 搜索记录上报(登录用户)
 
@@ -1399,6 +1588,8 @@
       $$('.chips .chip', v).forEach((c) => c.addEventListener('click', () => { mode = c.dataset.m; render(); }));
       $('#authBtn').addEventListener('click', doAuth);
       $('#authPwd').addEventListener('keydown', (e) => e.key === 'Enter' && doAuth());
+      // 电视/盒子: 系统输入法弹不出, 挂虚拟键盘
+      if (isTvDevice()) { ['#authUser', '#authPwd', '#authPwd2'].forEach((sel) => { const i = $(sel, v); i && VKB.attach(i); }); }
     };
     async function doAuth() {
       const username = $('#authUser').value.trim();
@@ -1641,7 +1832,7 @@
     restoreSpeeds(); // 先恢复测速缓存, 便于默认选中快速源
     const list = visibleSources();
     if (!list.length) {
-      v.innerHTML = '<div class="container empty"><div class="big">📭</div>没有可用影视源，请检查后台设置<br><br><a class="btn ghost small" href="#/admin">前往后台</a></div>';
+      v.innerHTML = '<div class="container empty"><div class="big">📭</div>没有可用影视源，请检查后台设置<br><br><a class="btn ghost small" href="#/' + esc(store.get('adminPathLive', 'admin')) + '">前往后台</a></div>';
       return;
     }
     if (!selKey || !list.some((s) => s.key === selKey)) {
@@ -2092,39 +2283,74 @@
   /* ============================================================
      视图：后台管理
      ============================================================ */
-  async function viewAdmin() {
+  async function viewAdmin(query, seg) {
     const v = $('#view');
-    v.innerHTML = `<div class="login-box admin-card"><div class="login-logo">
+    const usedSeg = seg || (parseHash().parts[0] || 'admin');
+
+    /* ---- 入口守卫: 已有会话任意入口直达; 未登录时路径必须与服务端配置一致 ---- */
+    let hasSession = false;
+    try { await API.adminSession(); hasSession = true; } catch (e) { /* 未登录 */ }
+    if (!hasSession) {
+      const okPath = await API.checkAdminPath(usedSeg).then((r) => !!r.ok).catch(() => usedSeg === 'admin');
+      if (!okPath) {
+        v.innerHTML = `<div class="container empty"><div class="big">🕳️</div>页面不存在或已迁移<br>
+          <small class="hint" style="margin-top:6px">后台入口可能已被管理员自定义，请使用正确入口地址</small></div>`;
+        return;
+      }
+    }
+
+    /* 未登录 → 登录卡片 */
+    if (!hasSession) {
+      v.innerHTML = `<div class="login-box admin-card"><div class="login-logo">
         <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="none" stroke="var(--acc)" stroke-width="3"/><path d="M19 15.5v17l14-8.5z" fill="var(--acc)"/></svg>
       </div><h3 style="text-align:center;margin-bottom:18px">管理员登录</h3>
       <input class="field-input" id="pwdInput" type="password" placeholder="请输入管理密码">
       <button class="btn primary" id="loginBtn" style="width:100%;justify-content:center;margin-top:14px">登 录</button>
       <p class="hint" style="text-align:center">初始密码 admin123 · 部署时通过环境变量 ADMIN_PASSWORD 修改</p></div>`;
-
-    const doLogin = async () => {
-      const pwd = $('#pwdInput').value;
-      if (!pwd) return toast('请输入密码', 'err');
-      try {
-        await API.adminLogin(pwd);
-        toast('登录成功', 'ok');
-        renderPanel();
-      } catch (e) {
-        if (/Failed to fetch|NetworkError|Load failed/i.test(e.message)) {
-          toast('无法连接后端：本地请先运行 npm run dev 并访问 http://127.0.0.1:8787', 'err');
-        } else {
-          toast(e.message === 'unauthorized' ? '密码错误' : e.message, 'err');
+      const doLogin = async () => {
+        const pwd = $('#pwdInput').value;
+        if (!pwd) return toast('请输入密码', 'err');
+        try {
+          await API.adminLogin(pwd);
+          store.set('adminPathLive', usedSeg); // 记住可用入口, 站内「前往后台」链接跟随
+          toast('登录成功', 'ok');
+          renderPanel();
+        } catch (e) {
+          if (/Failed to fetch|NetworkError|Load failed/i.test(e.message)) {
+            toast('无法连接后端：本地请先运行 npm run dev 并访问 http://127.0.0.1:8787', 'err');
+          } else {
+            toast(e.message === 'unauthorized' ? '密码错误' : e.message, 'err');
+          }
         }
-      }
-    };
-    $('#loginBtn').addEventListener('click', doLogin);
-    $('#pwdInput').addEventListener('keydown', (e) => e.key === 'Enter' && doLogin());
+      };
+      $('#loginBtn').addEventListener('click', doLogin);
+      $('#pwdInput').addEventListener('keydown', (e) => e.key === 'Enter' && doLogin());
+      return;
+    }
 
-    // 若已有会话直接进面板
-    try { await API.adminSession(); renderPanel(); } catch (e) { /* 未登录 */ }
+    /* 已登录 → 记住入口并渲染面板 */
+    store.set('adminPathLive', usedSeg);
+    renderPanel();
+
+    /* ============================ 后台面板(侧边栏多标签) ============================ */
+    const ADM_TABS = [
+      ['stats', '📊 流量统计'],
+      ['users', '👥 用户管理'],
+      ['cfg', '📡 采集源配置'],
+      ['sources', '🧩 影视源管理'],
+      ['site', '⚙️ 站点设置'],
+      ['app', '📲 APP推广'],
+      ['backup', '🗄️ 数据备份'],
+      ['sec', '🔐 安全中心'],
+      ['sys', 'ℹ️ 系统信息'],
+    ];
+    let admTab = 'stats';
+    let lastSettings = null;
 
     async function renderPanel() {
       let s;
-      try { s = await API.adminGetSettings(); } catch (e) { toast('会话过期，请重新登录', 'err'); return; }
+      try { s = await API.adminGetSettings(); } catch (e) { toast('会话过期，请重新登录', 'err'); location.hash = '#/'; return; }
+      lastSettings = s;
       const v2 = $('#view');
       v2.innerHTML = `
         <div class="admin-layout">
@@ -2135,7 +2361,30 @@
               <button class="btn ghost small" id="logoutBtn">退出登录</button>
             </div>
           </div>
+          <div class="adm-shell">
+            <aside class="adm-side" id="admSide">
+              ${ADM_TABS.map(([k, label]) => `<button type="button" class="adm-nav-item${k === admTab ? ' on' : ''}" data-tab="${k}">${label}</button>`).join('')}
+            </aside>
+            <div class="adm-main" id="admMain"></div>
+          </div>
+        </div>`;
+      $('#logoutBtn').addEventListener('click', async () => { try { await API.adminLogout(); } catch (e) {} toast('已退出'); viewAdmin(null, usedSeg); });
+      $$('#admSide .adm-nav-item').forEach((b) => b.addEventListener('click', () => {
+        admTab = b.dataset.tab;
+        $$('#admSide .adm-nav-item').forEach((x) => x.classList.toggle('on', x.dataset.tab === admTab));
+        renderAdmTab(lastSettings);
+      }));
+      renderAdmTab(s);
+    }
 
+    function renderAdmTab(s) {
+      const main = $('#admMain');
+      if (!main || !s) return;
+      main.scrollTop = 0;
+
+      /* ---------------- 📊 流量统计 ---------------- */
+      if (admTab === 'stats') {
+        main.innerHTML = `
           <div class="admin-card">
             <h3>📊 流量统计</h3>
             <div class="stat-chips">
@@ -2150,59 +2399,241 @@
               <button class="btn danger small" id="clearStatsBtn">🗑 清空统计数据</button>
             </div>
             <div id="statRecent" style="margin-top:14px;overflow-x:auto"></div>
-          </div>
+          </div>`;
+        let statRows = [], statPg = 0;
+        const STAT_PER = 10;
+        function renderStatPage() {
+          const box = $('#statRecent');
+          if (!box) return;
+          const pages = Math.max(1, Math.ceil(statRows.length / STAT_PER));
+          if (statPg > pages - 1) statPg = pages - 1;
+          const rowsHtml = statRows.slice(statPg * STAT_PER, (statPg + 1) * STAT_PER).map((it) => `
+            <tr>
+              <td>${fmtDateTime(it.ts)}</td>
+              <td>${it.kind === 'search' ? '🔍' : '📄'}</td>
+              <td class="ulog-title" title="${esc(it.kind === 'search' ? it.q : it.path)}">${esc(it.kind === 'search' ? it.q : it.path)}</td>
+              <td>${esc(it.u || '—')}</td>
+              <td>${esc(it.ip)}${it.geo ? '<br><small style="color:var(--dim)">' + esc(it.geo) + '</small>' : ''}</td>
+            </tr>`).join('');
+          box.innerHTML = rowsHtml
+            ? `<table class="adm-table"><thead><tr><th>时间</th><th>类型</th><th>内容</th><th>用户</th><th>IP / 归属地</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+               ${statRows.length > STAT_PER ? `
+                 <div class="pager" style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px">
+                   <button class="btn ghost small" id="stPrev" ${statPg <= 0 ? 'disabled' : ''}>‹ 上一页</button>
+                   <span style="color:var(--dim);font-size:12px">第 ${statPg + 1} / ${pages} 页 · 共 ${statRows.length} 条</span>
+                   <button class="btn ghost small" id="stNext" ${statPg >= pages - 1 ? 'disabled' : ''}>下一页 ›</button>
+                 </div>` : ''}`
+            : '<p class="hint" style="margin-top:8px">暂无明细（访客进入站点后开始累计）</p>';
+          $('#stPrev') && $('#stPrev').addEventListener('click', () => { statPg--; renderStatPage(); });
+          $('#stNext') && $('#stNext').addEventListener('click', () => { statPg++; renderStatPage(); });
+        }
+        async function loadStats() {
+          try {
+            const d = await API.adminStats();
+            $('#stPvToday').textContent = d.pvToday;
+            $('#stPvTotal').textContent = d.pvTotal;
+            $('#stUniq').textContent = d.uniqIp;
+            $('#stSearch').textContent = d.searches;
+            const maxN = Math.max(1, ...(d.byPath || []).map((x) => x.n));
+            $('#statPaths').innerHTML = (d.byPath || []).map((p) => `
+              <div class="stat-path-row">
+                <span class="sp-k" title="${esc(p.k)}">${esc(p.k)}</span>
+                <div class="sp-bar"><i style="width:${Math.round((p.n / maxN) * 100)}%"></i></div>
+                <b>${p.n}</b>
+              </div>`).join('') || '<p class="hint" style="margin-top:8px">暂无页面访问数据</p>';
+            statRows = d.recent || [];
+            renderStatPage();
+          } catch (e) { /* ignore */ }
+        }
+        $('#refreshStatsBtn').addEventListener('click', loadStats);
+        $('#clearStatsBtn').addEventListener('click', async () => {
+          if (!confirm('确定清空全部统计数据？不可恢复。')) return;
+          await API.adminClearStats();
+          toast('统计数据已清空', 'ok');
+          loadStats();
+        });
+        loadStats();
+      }
 
-          <div class="admin-card adult-toggle-card ${s.adultEnabled ? 'on' : ''}" id="adultCard">
+      /* ---------------- 👥 用户管理 ---------------- */
+      else if (admTab === 'users') {
+        main.innerHTML = `
+          <div class="admin-card">
+            <h3>👥 用户管理</h3>
             <div class="admin-row">
-              <div class="admin-label">🔞 成人内容
-                <small>关闭后，服务器将在源头剔除所有成人采集源（🔞），全站不可见、接口不可达。当前状态：
-                  <b id="adultState" style="color:${s.adultEnabled ? 'var(--danger)' : 'var(--ok)'}">${s.adultEnabled ? '已开启' : '已关闭'}</b></small>
-              </div>
-              <label class="switch red"><input type="checkbox" id="adultSwitch" ${s.adultEnabled ? 'checked' : ''}><span class="track"></span></label>
+              <div class="admin-label">强制登录观看<small>开启后未登录用户无法获取影片数据（接口层拦截）</small></div>
+              <label class="switch"><input type="checkbox" id="requireLoginSwitch" ${s.requireLogin !== false ? 'checked' : ''}><span class="track"></span></label>
             </div>
-            <p class="hint">⚠️ 本站不生产任何内容。请遵守所在地区法律法规；未满 18 岁请勿开启。</p>
-          </div>
+            <div class="admin-row">
+              <div class="admin-label">开放前台注册<small>关闭后新用户无法自行注册</small></div>
+              <label class="switch"><input type="checkbox" id="allowRegisterSwitch" ${s.allowRegister !== false ? 'checked' : ''}><span class="track"></span></label>
+            </div>
+            <p class="hint">查看每个用户的注册时间、最近登录 IP、搜索与观看记录（<b>包含用户已删除的记录</b>，灰色标记）。</p>
+            <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <button class="btn primary small" id="loadUsersBtn">🔄 刷新用户列表</button>
+              <span style="color:var(--dim);font-size:12px" id="usersStat"></span>
+            </div>
+            <div id="usersTable" style="margin-top:10px;overflow-x:auto"></div>
+            <div id="userLogDetail" style="margin-top:14px"></div>
+          </div>`;
+        $('#requireLoginSwitch').addEventListener('change', async (e) => {
+          const on = e.target.checked;
+          try {
+            await API.adminSaveSettings({ requireLogin: on });
+            State.settings = { ...State.settings, requireLogin: on };
+            toast(on ? '已开启：未登录用户无法观看' : '已关闭：游客可直接观看', on ? 'ok' : 'err');
+          } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
+        });
+        $('#allowRegisterSwitch').addEventListener('change', async (e) => {
+          const on = e.target.checked;
+          try {
+            await API.adminSaveSettings({ allowRegister: on });
+            State.settings = { ...State.settings, allowRegister: on };
+            toast(on ? '已开放注册' : '已关闭注册', 'ok');
+          } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
+        });
+        async function showUserLog(u) {
+          const box = $('#userLogDetail');
+          box.innerHTML = '<p class="hint">加载中…</p>';
+          try {
+            const d = await API.adminUserLog(u);
+            const rows = d.items.map((it) => `
+              <div class="ulog-row ${it.delUser ? 'del' : ''}">
+                <span class="ulog-kind">${it.kind === 'search' ? '🔍' : '▶️'}</span>
+                <span class="ulog-title" title="${esc(it.title)}">${esc(it.title)}${it.kind === 'watch' && it.ep ? ' <small>· ' + esc(it.ep) + '</small>' : ''}</span>
+                ${it.kind === 'watch' ? `<span class="ulog-meta">${fmtWatchSec(it.t)}</span>` : ''}
+                <span class="ulog-meta">${fmtDateTime(it.ts)}</span>
+                <span class="ulog-meta">${esc(it.ip || '—')}${it.geo ? '<br>' + esc(it.geo) : ''}</span>
+                ${it.delUser ? '<span class="ulog-tag">用户已删</span>' : ''}
+                <button class="hist-del row-del" data-id="${esc(it.id)}" title="彻底删除">×</button>
+              </div>`).join('');
+            box.innerHTML = `
+              <div class="userlog-box">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+                  <h4 style="font-size:14.5px">📋 「${esc(d.username)}」的完整记录（${d.items.length} 条 · 累计观看 ${fmtWatchSec(d.watchSec)}）</h4>
+                  <div style="display:flex;gap:8px">
+                    <button class="btn danger small" id="hardClearAll">🗑 彻底清空全部记录</button>
+                    <button class="btn ghost small" id="closeUserLog">收起</button>
+                  </div>
+                </div>
+                <p class="hint">注册 ${fmtDateTime(d.createdAt)} · 最近登录 ${fmtDateTime(d.lastLoginAt)} · IP ${esc(d.lastLoginIp || '—')}${d.lastLoginIpGeo ? '（' + esc(d.lastLoginIpGeo) + '）' : ''} · 灰色行 = 用户已自行删除</p>
+                <div style="margin-top:8px">${rows || '<p class="hint">暂无记录</p>'}</div>
+              </div>`;
+            $('#closeUserLog').addEventListener('click', () => { box.innerHTML = ''; });
+            $('#hardClearAll').addEventListener('click', async () => {
+              if (!confirm(`彻底删除「${u}」的全部记录？不可恢复！`)) return;
+              await API.adminDeleteUserLog(u, null, true);
+              toast('已彻底清空', 'ok');
+              showUserLog(u);
+            });
+            $$('#userLogDetail .row-del').forEach((b) => b.addEventListener('click', async () => {
+              if (!confirm('彻底删除该条记录？')) return;
+              await API.adminDeleteUserLog(u, [b.dataset.id], false);
+              toast('已删除', 'ok');
+              showUserLog(u);
+            }));
+          } catch (e) { box.innerHTML = `<p class="hint">加载失败：${esc(e.message)}</p>`; }
+        }
+        async function loadUsers() {
+          const table = $('#usersTable'), stat = $('#usersStat');
+          try {
+            const r = await API.adminUsers();
+            stat.textContent = `共 ${r.users.length} 个注册用户`;
+            table.innerHTML = r.users.length ? `
+              <table class="adm-table">
+                <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP / 归属地</th><th>成人源</th><th>累计观看</th><th>有效/总记录</th><th></th></tr></thead>
+                <tbody>${r.users.map((u) => `
+                  <tr>
+                    <td>${esc(u.username)}</td>
+                    <td>${fmtDateTime(u.createdAt)}</td>
+                    <td>${fmtDateTime(u.lastLoginAt)}</td>
+                    <td>${esc(u.lastLoginIp || '—')}${u.lastLoginIpGeo ? '<br><small style="color:var(--dim)">' + esc(u.lastLoginIpGeo) + '</small>' : ''}</td>
+                    <td title="需全局「成人内容」开关开启后生效；绿色=允许观看，灰色=已隐藏"><button type="button" class="u-adult-tag ${u.adultAllowed ? 'on' : 'off'}" data-u="${esc(u.username)}">${u.adultAllowed ? '开' : '关'}</button></td>
+                    <td>${fmtWatchSec(u.watchSec)}</td>
+                    <td>${u.activeItems}/${u.totalItems}</td>
+                    <td style="white-space:nowrap;display:flex;gap:6px">
+                      <button class="btn ghost small u-log" data-u="${esc(u.username)}">记录</button>
+                      <button class="btn danger small u-del" data-u="${esc(u.username)}">删户</button>
+                    </td>
+                  </tr>`).join('')}</tbody>
+              </table>` : '<p class="hint">暂无注册用户（开放注册后，前台 #/login 可注册）</p>';
+            $$('#usersTable .u-log').forEach((b) => b.addEventListener('click', () => showUserLog(b.dataset.u)));
+            $$('#usersTable .u-adult-tag').forEach((el) => el.addEventListener('click', async () => {
+              const to = el.classList.contains('off');
+              el.disabled = true;
+              try {
+                await API.adminUserAdult(el.dataset.u, to);
+                el.classList.toggle('on', to);
+                el.classList.toggle('off', !to);
+                el.textContent = to ? '开' : '关';
+                toast(to ? `已允许「${el.dataset.u}」观看成人源` : `已对「${el.dataset.u}」隐藏成人源`, 'ok');
+              } catch (e) { toast('操作失败：' + e.message, 'err'); }
+              el.disabled = false;
+            }));
+            $$('#usersTable .u-del').forEach((b) => b.addEventListener('click', async () => {
+              if (!confirm(`确定删除用户「${b.dataset.u}」及其全部数据？不可恢复！`)) return;
+              await API.adminDeleteUser(b.dataset.u);
+              toast('用户已删除', 'ok');
+              loadUsers();
+            }));
+          } catch (e) {
+            stat.textContent = '';
+            table.innerHTML = `<p class="hint">用户列表加载失败：${esc(e.message)}（本地需绑定 KV 才能使用用户系统）</p>`;
+          }
+        }
+        $('#loadUsersBtn').addEventListener('click', loadUsers);
+        loadUsers();
+      }
 
+      /* ---------------- 📡 采集源配置 ---------------- */
+      else if (admTab === 'cfg') {
+        main.innerHTML = `
           <div class="admin-card">
             <h3>📡 采集源配置（支持多个）</h3>
-            <p class="hint">每行一个配置地址，可添加多个，<b>按行顺序合并</b>（前面的源优先、后面的只补缺）。留空恢复默认 LunaTV-config。也可以在下方粘贴 <code>{</code> 开头的 JSON 直接作为唯一来源。</p>
+            <p class="hint">每行一个配置地址，可添加多个，<b>按行顺序合并</b>（前面的源优先、后面的只补缺）。留空恢复默认 LunaTV-config。也可以粘贴 <code>{</code> 开头的 JSON 直接作为唯一来源。</p>
             <label class="field-label">当前生效：${s.configFrom === 'inline-json' ? '后台内联 JSON' : s.configFrom === 'multi-url' ? `多地址合并（${(s.effectiveConfigUrls || []).length} 个）` : '默认 LunaTV-config'}</label>
-            <textarea class="field-input" id="cfgUrlsInput" rows="4" placeholder="https://config1.example/xxx.json&#10;https://config2.example/yyy.json">${esc((s.effectiveConfigUrls || []).join('\n'))}</textarea>
+            <textarea class="field-input" id="cfgUrlsInput" rows="7" placeholder="https://config1.example/xxx.json&#10;https://config2.example/yyy.json">${esc((s.effectiveConfigUrls || []).join('\n'))}</textarea>
             <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
               <button class="btn primary" id="saveCfgBtn">保存采集源配置</button>
               <button class="btn ghost" id="resetCfgBtn">清空并恢复默认(LunaTV-config)</button>
             </div>
-          </div>
+          </div>`;
+        $('#saveCfgBtn').addEventListener('click', async () => {
+          const raw = $('#cfgUrlsInput').value.trim();
+          if (raw.startsWith('{')) {
+            try { JSON.parse(raw); } catch (e) { return toast('JSON 格式有误：' + e.message, 'err'); }
+            try {
+              await API.adminSaveSettings({ configUrl: raw });
+              State.config = await API.getConfig();
+              toast(`内联 JSON 已保存：当前 ${State.config.count} 个源可用`, 'ok');
+              renderPanel();
+            } catch (err) { toast('保存失败：' + err.message, 'err'); }
+            return;
+          }
+          const lines = raw.split(/\r?\n/).map((x) => x.trim()).filter((x) => /^https?:\/\//i.test(x));
+          if (raw && !lines.length) return toast('每行需为 http(s) 配置地址', 'err');
+          try {
+            await API.adminSaveSettings({ configUrls: lines });
+            State.config = await API.getConfig();
+            toast(`已保存 ${lines.length} 个采集源：合并后 ${State.config.count} 个源可用`, 'ok');
+            renderPanel();
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+        $('#resetCfgBtn').addEventListener('click', async () => {
+          try {
+            await API.adminSaveSettings({ configUrl: '' });
+            State.config = await API.getConfig();
+            toast('已清空并恢复默认采集源配置', 'ok');
+            renderPanel();
+          } catch (err) { toast('操作失败：' + err.message, 'err'); }
+        });
+      }
 
+      /* ---------------- 🧩 影视源管理 ---------------- */
+      else if (admTab === 'sources') {
+        main.innerHTML = `
           <div class="admin-card">
-            <h3>📲 APP下载弹窗</h3>
-            <p class="hint">手机用户首次访问弹出下载引导；点 × 后 <b>10 天内不再打扰</b>，点「不再提示」则永久关闭。若体验不佳可在此一键总关闭。</p>
-            <label style="display:flex;align-items:center;gap:10px;margin:10px 0;cursor:pointer">
-              <span class="switch"><input type="checkbox" id="promoSw" ${s.appPromoEnabled !== false ? 'checked' : ''}><span class="track"></span></span>
-              <b>启用下载引导弹窗</b>
-            </label>
-            <label class="field-label">APK 下载地址（GitHub Releases 直链或页面，留空则弹窗/下载页仅显示教程）</label>
-            <input class="field-input" id="dlUrlInput" value="${esc(s.downloadUrl || '')}" placeholder="https://github.com/你的用户名/仓库名/releases/latest/download/xiaolintv-phone-latest.apk">
-            <button class="btn primary" id="savePromoBtn" style="margin-top:12px">保存弹窗设置</button>
-          </div>
-
-          <details class="admin-card adm-details">
-            <summary>🗄️ 数据备份 / 迁移 <small style="color:var(--dim);font-weight:400;font-size:12px">（Cloudflare ↔ VPS/Docker 互通）</small></summary>
-            <p class="hint">导出内容：<b>站点设置 · 注册用户 · 观看历史 · 收藏 · 流量统计</b>。迁移到自托管服务器时：旧环境导出 JSON → 新环境后台「恢复备份」即可无缝搬家（详见 docs/DEPLOY-VPS.md）。</p>
-            <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
-              <button class="btn primary" id="bkExpBtn">⬇️ 导出备份(JSON)</button>
-              <input type="file" id="bkImpFile" accept=".json,application/json" style="display:none">
-              <button class="btn ghost" id="bkImpBtn">⬆️ 恢复备份</button>
-              <select class="field-input" id="bkMode" style="width:auto;padding:8px 10px">
-                <option value="merge" selected>合并模式(保留现有,推荐)</option>
-                <option value="replace">覆盖模式(完全以备份为准)</option>
-              </select>
-              <span id="bkStat" style="color:var(--dim);font-size:12px"></span>
-            </div>
-          </details>
-
-          <details class="admin-card adm-details">
-            <summary>🧩 影视源管理 <small style="color:var(--dim);font-weight:400;font-size:12px">（点击展开 · 内置 ${(s.allSources || []).filter((x) => !x.custom).length} 个 · 自定义 ${(s.customSources || []).length} 个）</small></summary>
+            <h3>🧩 影视源管理 <small style="color:var(--dim);font-weight:400;font-size:12px">内置 ${(s.allSources || []).filter((x) => !x.custom).length} 个 · 自定义 ${(s.customSources || []).length} 个</small></h3>
             <p class="hint">内置源每日同步自 LunaTV-config，可临时<b>停用/启用</b>；自定义源可自由添加（填苹果CMS V10 的 <code>api.php/provide/vod</code> 接口地址），保存后立即全站生效。</p>
             <div style="display:flex;gap:10px;margin:12px 0">
               <button class="btn primary small" id="addSrcBtn">＋ 添加影视源</button>
@@ -2218,8 +2649,127 @@
             </div>
             <div id="srcEditor"></div>
             <div class="pager" id="srcPager" style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px"></div>
-          </details>
+          </div>`;
+        const customRows = (s.customSources || []).map((x) => ({ ...x }));
+        const disabledSet = new Set(s.disabledSources || []);
+        const builtins = (s.allSources || []).filter((x) => !x.custom);
+        const editor = $('#srcEditor');
+        function updateCountInfo() {
+          const info = $('#srcCountInfo');
+          if (info) info.textContent = `内置 ${builtins.length} 个（停用 ${[...disabledSet].filter((k) => !customRows.some((c) => c.key === k)).length}） · 自定义 ${customRows.length} 个`;
+        }
+        let bpg = 1;
+        const BPER = 8;
+        function renderEditor() {
+          const rowHtml = [];
+          const bTotal = Math.max(1, Math.ceil(builtins.length / BPER));
+          if (bpg > bTotal) bpg = bTotal;
+          for (const b of builtins.slice((bpg - 1) * BPER, bpg * BPER)) {
+            const off = disabledSet.has(b.key);
+            rowHtml.push(`
+              <div class="src-edit-row builtin" data-bk="${esc(b.key)}">
+                <input type="checkbox" class="src-en" ${off ? '' : 'checked'} title="启用/停用">
+                <span class="ro" title="${esc(cleanSrcName(b))}${b.adult ? ' · 成人源' : ''}">${srcIconHtml(b)} ${esc(cleanSrcName(b))}</span>
+                <span class="ro" title="${esc(b.api)}">${esc(b.api)}</span>
+                <span class="ro src-edit-col-detail">—</span>
+                <span style="font-size:11px;color:var(--dim)">${b.adult ? '🔞内置' : '内置'}</span>
+              </div>`);
+          }
+          customRows.forEach((row, ri) => {
+            rowHtml.push(`
+              <div class="src-edit-row" data-ri="${ri}">
+                <input type="checkbox" class="src-en" ${disabledSet.has(row.key) ? '' : 'checked'}>
+                <input type="text" class="src-name" value="${esc(row.name || '')}" placeholder="名称">
+                <input type="text" class="src-api" value="${esc(row.api || '')}" placeholder="https://xxx/api.php/provide/vod">
+                <input type="text" class="src-detail src-edit-col-detail" value="${esc(row.detail || '')}" placeholder="选填">
+                <button class="btn danger small src-del" type="button">删除</button>
+              </div>`);
+          });
+          editor.innerHTML = rowHtml.join('');
+          const pager = $('#srcPager');
+          if (pager) {
+            pager.innerHTML = builtins.length > BPER ? `
+              <button class="btn ghost small" id="bPrev" ${bpg <= 1 ? 'disabled' : ''}>‹ 上一页</button>
+              <span style="color:var(--dim);font-size:12px">内置源第 ${bpg}/${bTotal} 页 · 共 ${builtins.length} 个</span>
+              <button class="btn ghost small" id="bNext" ${bpg >= bTotal ? 'disabled' : ''}>下一页 ›</button>` : '';
+            const pv = $('#bPrev'), nx = $('#bNext');
+            pv && pv.addEventListener('click', () => { bpg--; renderEditor(); });
+            nx && nx.addEventListener('click', () => { bpg++; renderEditor(); });
+          }
+          $$('.src-edit-row', editor).forEach((tr) => {
+            const en = $('.src-en', tr);
+            en.addEventListener('change', () => {
+              const bk = tr.dataset.bk;
+              if (bk != null) { off2set(disabledSet, bk, !en.checked); }
+              else {
+                const row = customRows[Number(tr.dataset.ri)];
+                row._enabled = en.checked;
+              }
+              updateCountInfo();
+            });
+            const del = $('.src-del', tr);
+            del && del.addEventListener('click', () => {
+              const row = customRows[Number(tr.dataset.ri)];
+              if (row.key) disabledSet.delete(row.key);
+              customRows.splice(Number(tr.dataset.ri), 1);
+              renderEditor();
+              updateCountInfo();
+            });
+          });
+        }
+        function off2set(set, key, off) { if (off) set.add(key); else set.delete(key); }
+        $('#addSrcBtn').addEventListener('click', () => {
+          customRows.push({ key: '', name: '', api: '', detail: '', _enabled: true });
+          renderEditor();
+          updateCountInfo();
+          editor.lastElementChild && editor.lastElementChild.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+        $('#saveSourcesBtn').addEventListener('click', async () => {
+          const rows = $$('.src-edit-row:not(.builtin)', editor);
+          const cleaned = [];
+          for (const tr of rows) {
+            const name = $('.src-name', tr).value.trim();
+            const api = $('.src-api', tr).value.trim();
+            const detail = $('.src-detail', tr).value.trim();
+            const enabled = $('.src-en', tr).checked;
+            if (!api) continue;
+            let host = '';
+            try { host = new URL(api).hostname.toLowerCase(); } catch (e) { toast('接口地址无效：' + name, 'err'); return; }
+            cleaned.push({ key: host, name: name || host, api, detail, _enabled: enabled });
+          }
+          const seenKeys = new Set();
+          const finalCustom = [];
+          for (const c of cleaned) {
+            let k = c.key; let n = 1;
+            while (seenKeys.has(k)) k = c.key + '-' + (++n);
+            seenKeys.add(k);
+            finalCustom.push({ key: k, name: c.name, api: c.api, detail: c.detail });
+            if (!c._enabled) disabledSet.add(k); else disabledSet.delete(k);
+          }
+          try {
+            await API.adminSaveSources(finalCustom, [...disabledSet]);
+            State.config = await API.getConfig();
+            toast(`影视源设置已保存：${finalCustom.length} 个自定义源生效`, 'ok');
+            renderPanel();
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+        renderEditor();
+        updateCountInfo();
+      }
 
+      /* ---------------- ⚙️ 站点设置 ---------------- */
+      else if (admTab === 'site') {
+        main.innerHTML = `
+          <div class="admin-card adult-toggle-card ${s.adultEnabled ? 'on' : ''}" id="adultCard">
+            <div class="admin-row">
+              <div class="admin-label">🔞 成人内容
+                <small>关闭后，服务器将在源头剔除所有成人采集源（🔞），全站不可见、接口不可达。当前状态：
+                  <b id="adultState" style="color:${s.adultEnabled ? 'var(--danger)' : 'var(--ok)'}">${s.adultEnabled ? '已开启' : '已关闭'}</b></small>
+              </div>
+              <label class="switch red"><input type="checkbox" id="adultSwitch" ${s.adultEnabled ? 'checked' : ''}><span class="track"></span></label>
+            </div>
+            <p class="hint">⚠️ 本站不生产任何内容。请遵守所在地区法律法规；未满 18 岁请勿开启。</p>
+          </div>
           <div class="admin-card">
             <h3>🎨 站点设置</h3>
             <label class="field-label">站点名称</label>
@@ -2235,7 +2785,6 @@
             <textarea class="field-area" id="homeSrcInput" style="min-height:96px;font-family:monospace;font-size:12px">${esc((s.homeSources || []).join('\n'))}</textarea>
             <button class="btn primary" id="saveSiteBtn" style="margin-top:14px">保存站点设置</button>
           </div>
-
           <div class="admin-card">
             <h3>📺 电视直播源</h3>
             <p class="hint">每行一个 m3u 直播源地址，保存后全站生效（缓存约 30 分钟）。推荐：<br>
@@ -2243,474 +2792,186 @@
               <code>https://live.fanmingming.com/tv/m3u/ipv6.m3u</code></p>
             <textarea class="field-area" id="liveInput" style="min-height:110px;font-family:monospace;font-size:12px">${esc((s.liveSources || []).join('\n'))}</textarea>
             <button class="btn primary" id="saveLiveBtn" style="margin-top:14px">保存直播源</button>
-          </div>
+          </div>`;
+        $('#adultSwitch').addEventListener('change', async (e) => {
+          const on = e.target.checked;
+          try {
+            const res = await API.adminSaveSettings({ adultEnabled: on });
+            State.config = await API.getConfig();
+            $('#adultState').textContent = on ? '已开启' : '已关闭';
+            $('#adultState').style.color = on ? 'var(--danger)' : 'var(--ok)';
+            $('#adultCard').classList.toggle('on', on);
+            toast(on ? '⚠️ 成人内容已全站开启' : '✅ 成人内容已全站关闭', on ? 'err' : 'ok');
+          } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
+        });
+        $('#saveSiteBtn').addEventListener('click', async () => {
+          try {
+            const homeLines = $('#homeSrcInput').value.split('\n').map((x) => x.trim()).filter(Boolean);
+            const res = await API.adminSaveSettings({
+              siteName: $('#siteNameInput').value,
+              defaultTheme: $('#themeSelect').value,
+              announcement: $('#annInput').value,
+              homeSources: homeLines,
+            });
+            State.settings = { ...State.settings, siteName: res.settings.siteName, announcement: res.settings.announcement, homeSources: res.settings.homeSources || [] };
+            $('#brandName').textContent = res.settings.siteName;
+            document.title = res.settings.siteName;
+            applyAnnouncement(res.settings.announcement);
+            toast(`站点设置已保存（首页源 ${homeLines.length} 个）`, 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+        $('#saveLiveBtn').addEventListener('click', async () => {
+          try {
+            const urls = $('#liveInput').value.split('\n').map((x) => x.trim()).filter(Boolean);
+            await API.adminSaveSettings({ liveSources: urls, liveSourcesAllowEmpty: false });
+            State.liveCache = null;
+            toast('直播源已保存，缓存将在约30分钟后刷新（重新部署可立即生效）', 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+      }
 
+      /* ---------------- 📲 APP推广 ---------------- */
+      else if (admTab === 'app') {
+        main.innerHTML = `
           <div class="admin-card">
-            <h3>👥 用户管理</h3>
-            <p class="hint">查看每个用户的注册时间、最近登录 IP、搜索与观看记录（<b>包含用户已删除的记录</b>，灰色标记）。用户只能对自己隐藏记录；彻底删除只有这里可以。</p>
-            <div class="admin-row">
-              <div class="admin-label">强制登录观看<small>开启后未登录用户无法获取影片数据（接口层拦截）</small></div>
-              <label class="switch"><input type="checkbox" id="requireLoginSwitch" ${s.requireLogin !== false ? 'checked' : ''}><span class="track"></span></label>
-            </div>
-            <div class="admin-row">
-              <div class="admin-label">开放前台注册<small>关闭后新用户无法自行注册</small></div>
-              <label class="switch"><input type="checkbox" id="allowRegisterSwitch" ${s.allowRegister !== false ? 'checked' : ''}><span class="track"></span></label>
-            </div>
-            <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-              <button class="btn primary small" id="loadUsersBtn">🔄 刷新用户列表</button>
-              <span style="color:var(--dim);font-size:12px" id="usersStat"></span>
-            </div>
-            <div id="usersTable" style="margin-top:10px;overflow-x:auto"></div>
-            <div id="userLogDetail" style="margin-top:14px"></div>
-          </div>
+            <h3>📲 APP下载弹窗</h3>
+            <p class="hint">手机端<b>已注册且注册满 2 小时</b>的用户会弹出下载引导（游客不弹）；点 × 后 <b>10 天内不再打扰</b>，「不再提示」永久关闭。已在 App 内的用户自动隐藏全部入口。</p>
+            <label style="display:flex;align-items:center;gap:10px;margin:10px 0;cursor:pointer">
+              <span class="switch"><input type="checkbox" id="promoSw" ${s.appPromoEnabled !== false ? 'checked' : ''}><span class="track"></span></span>
+              <b>启用下载引导弹窗</b>
+            </label>
+            <label class="field-label">APK 下载地址（GitHub Releases 直链或页面，留空则弹窗/下载页仅显示教程）</label>
+            <input class="field-input" id="dlUrlInput" value="${esc(s.downloadUrl || '')}" placeholder="https://github.com/你的用户名/仓库名/releases/latest/download/xiaolintv-phone-latest.apk">
+            <button class="btn primary" id="savePromoBtn" style="margin-top:12px">保存弹窗设置</button>
+          </div>`;
+        $('#savePromoBtn').addEventListener('click', async () => {
+          const url = $('#dlUrlInput').value.trim();
+          if (url && !/^https?:\/\//i.test(url)) return toast('下载地址需为 http(s) 链接', 'err');
+          try {
+            await API.adminSaveSettings({ appPromoEnabled: $('#promoSw').checked, downloadUrl: url });
+            State.settings = { ...State.settings, appPromoEnabled: $('#promoSw').checked, downloadUrl: url };
+            toast('弹窗设置已保存', 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+      }
 
+      /* ---------------- 🗄️ 数据备份 ---------------- */
+      else if (admTab === 'backup') {
+        main.innerHTML = `
+          <div class="admin-card">
+            <h3>🗄️ 数据备份 / 迁移 <small style="color:var(--dim);font-weight:400;font-size:12px">（Cloudflare ↔ VPS/Docker 互通）</small></h3>
+            <p class="hint">导出内容：<b>站点设置 · 注册用户 · 观看历史 · 收藏 · 流量统计</b>。迁移到自托管服务器：旧环境导出 JSON → 新环境后台「恢复备份」即可无缝搬家（详见 docs/DEPLOY-VPS.md、docs/DEPLOY-BT.md）。</p>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+              <button class="btn primary" id="bkExpBtn">⬇️ 导出备份(JSON)</button>
+              <input type="file" id="bkImpFile" accept=".json,application/json" style="display:none">
+              <button class="btn ghost" id="bkImpBtn">⬆️ 恢复备份</button>
+              <select class="field-input" id="bkMode" style="width:auto;padding:8px 10px">
+                <option value="merge" selected>合并模式(保留现有,推荐)</option>
+                <option value="replace">覆盖模式(完全以备份为准)</option>
+              </select>
+              <span id="bkStat" style="color:var(--dim);font-size:12px"></span>
+            </div>
+            <p class="hint" style="margin-top:10px">💡 自托管(Docker/宝塔)用户也可直接备份数据目录里的 <code>kv.json</code> 文件，效果等同。</p>
+          </div>`;
+        $('#bkExpBtn').addEventListener('click', async () => {
+          const btn = $('#bkExpBtn');
+          btn.disabled = true; btn.textContent = '⏳ 导出中…';
+          try {
+            const data = await API.adminBackup();
+            const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `xiaolintv-backup-${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+            $('#bkStat').textContent = `已导出 ${Object.keys(data.kv || {}).length} 个键`;
+            toast('备份已导出，请妥善保管该文件', 'ok');
+          } catch (e) { toast('导出失败：' + e.message, 'err'); }
+          btn.disabled = false; btn.textContent = '⬇️ 导出备份(JSON)';
+        });
+        $('#bkImpBtn').addEventListener('click', () => $('#bkImpFile').click());
+        $('#bkImpFile').addEventListener('change', async () => {
+          const f = $('#bkImpFile').files[0];
+          if (!f) return;
+          const mode = $('#bkMode').value;
+          let data;
+          try { data = JSON.parse(await f.text()); } catch (e) { return toast('文件不是有效 JSON', 'err'); }
+          if (!data.kv) return toast('不是本系统的备份文件(缺少 kv 字段)', 'err');
+          if (!confirm(`将按「${mode === 'merge' ? '合并' : '覆盖'}」模式恢复 ${Object.keys(data.kv).length} 个键${mode === 'replace' ? '，现有数据会被覆盖！' : ''}，继续？`)) {
+            $('#bkImpFile').value = '';
+            return;
+          }
+          try {
+            const r = await API.adminRestore(mode, data.kv);
+            toast(`已恢复 ${r.restored} 个键(${r.mode})`, 'ok');
+            State.config = await API.getConfig();
+            renderPanel();
+          } catch (e) { toast('恢复失败：' + e.message, 'err'); }
+          $('#bkImpFile').value = '';
+        });
+      }
+
+      /* ---------------- 🔐 安全中心 ---------------- */
+      else if (admTab === 'sec') {
+        main.innerHTML = `
           <div class="admin-card">
             <h3>🔑 修改管理密码</h3>
             <p class="hint">修改后立即生效，旧会话全部失效，需用新密码重新登录。无需进 Cloudflare 改环境变量。</p>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:10px">
               <input class="field-input" id="oldPwd" type="password" placeholder="当前密码">
               <input class="field-input" id="newPwd" type="password" placeholder="新密码(至少6位)">
               <input class="field-input" id="newPwd2" type="password" placeholder="确认新密码">
             </div>
             <button class="btn primary" id="savePwdBtn" style="margin-top:14px">确认修改密码</button>
           </div>
+          <div class="admin-card">
+            <h3>🚪 后台入口路径</h3>
+            <p class="hint">自定义后台访问地址：<b>留空/填 admin</b> 使用默认 <code>#/admin</code>；例如填 <code>my-panel</code> 后，只有 <code>#/my-panel</code> 能进入后台，旧地址对外显示「页面不存在」。<br>当前完整入口：<code>${esc(location.origin + '/#/' + (s.adminPath || 'admin'))}</code>（建议收藏到书签）</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">
+              <input class="field-input" id="admPathInput" style="max-width:260px" value="${esc(s.adminPath || '')}" placeholder="admin（留空=默认）" maxlength="40">
+              <button class="btn primary" id="saveAdmPathBtn">保存入口路径</button>
+            </div>
+          </div>`;
+        $('#savePwdBtn').addEventListener('click', async () => {
+          const o = $('#oldPwd').value, n1 = $('#newPwd').value, n2 = $('#newPwd2').value;
+          if (!o) return toast('请输入当前密码', 'err');
+          if (n1.length < 6) return toast('新密码至少 6 位', 'err');
+          if (n1 !== n2) return toast('两次输入的新密码不一致', 'err');
+          try {
+            await API.adminChangePassword(o, n1);
+            toast('密码已修改，请用新密码重新登录', 'ok');
+            try { await API.adminLogout(); } catch (e) {}
+            viewAdmin(null, usedSeg);
+          } catch (err) { toast('修改失败：' + err.message, 'err'); }
+        });
+        $('#saveAdmPathBtn').addEventListener('click', async () => {
+          const np = $('#admPathInput').value.trim().toLowerCase();
+          if (np && !/^[a-z0-9][a-z0-9-_]{1,39}$/.test(np)) return toast('仅支持 2-40 位小写字母/数字/短横线', 'err');
+          try {
+            const res = await API.adminSaveSettings({ adminPath: np });
+            const eff = (res.settings && res.settings.adminPath) || 'admin';
+            store.set('adminPathLive', eff);
+            toast(`入口路径已保存：今后请从 #/${eff} 进入后台`, 'ok');
+            setTimeout(() => { location.hash = '#/' + eff; }, 900);
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+      }
 
+      /* ---------------- ℹ️ 系统信息 ---------------- */
+      else if (admTab === 'sys') {
+        main.innerHTML = `
           <div class="admin-card">
             <h3>🧾 系统信息</h3>
             <div class="admin-row"><div class="admin-label">设置存储<small>${s.storage === 'kv' ? '已绑定 Cloudflare KV(CONFIG_KV)，重启不丢失' : '未绑定 KV，当前保存在实例内存，重部署后恢复默认。绑定方法见 README'}</small></div>
               <span class="status-pill ${s.storage === 'kv' ? 'ok' : 'warn'}">${s.storage === 'kv' ? 'KV' : 'Memory'}</span></div>
-            <div class="admin-row"><div class="admin-label">管理密码<small>${s.hasCustomPassword ? '后台已自定义 ✔（修改请用上方「修改管理密码」）' : s.passwordFromEnv ? '来自环境变量 ADMIN_PASSWORD ✔' : '使用默认密码 admin123，建议在上方直接修改'}</small></div>
+            <div class="admin-row"><div class="admin-label">管理密码<small>${s.hasCustomPassword ? '后台已自定义 ✔（修改请用「安全中心」）' : s.passwordFromEnv ? '来自环境变量 ADMIN_PASSWORD ✔' : '使用默认密码 admin123，建议尽快修改'}</small></div>
               <span class="status-pill ${s.hasCustomPassword || s.passwordFromEnv ? 'ok' : 'warn'}">${s.hasCustomPassword ? '后台自定义' : s.passwordFromEnv ? '环境变量' : '默认'}</span></div>
             <div class="admin-row"><div class="admin-label">影视源配置<small>${(s.customSources || []).length} 个自定义源 · ${(s.disabledSources || []).length} 个停用中 · 内置源每日同步自 LunaTV-config</small></div>
               <span class="status-pill ok">${State.config.count}/${State.config.total} 源可用</span></div>
-          </div>
-        </div>`;
-
-      $('#logoutBtn').addEventListener('click', async () => { try { await API.adminLogout(); } catch (e) {} toast('已退出'); viewAdmin(); });
-
-      /* ---- 流量统计 ---- */
-      let statRows = [], statPg = 0;
-      const STAT_PER = 10; // 明细每页条数, 避免后台被撑长
-      function renderStatPage() {
-        const box = $('#statRecent');
-        if (!box) return;
-        const pages = Math.max(1, Math.ceil(statRows.length / STAT_PER));
-        if (statPg > pages - 1) statPg = pages - 1;
-        const seg = statRows.slice(statPg * STAT_PER, (statPg + 1) * STAT_PER);
-        const rows = seg.map((it) => `
-          <tr>
-            <td>${fmtDateTime(it.ts)}</td>
-            <td>${it.kind === 'search' ? '🔍' : '📄'}</td>
-            <td class="ulog-title" title="${esc(it.kind === 'search' ? it.q : it.path)}">${esc(it.kind === 'search' ? it.q : it.path)}</td>
-            <td>${esc(it.u || '—')}</td>
-            <td>${esc(it.ip)}${it.geo ? '<br><small style="color:var(--dim)">' + esc(it.geo) + '</small>' : ''}</td>
-          </tr>`).join('');
-        box.innerHTML = rows
-          ? `<table class="adm-table"><thead><tr><th>时间</th><th>类型</th><th>内容</th><th>用户</th><th>IP / 归属地</th></tr></thead><tbody>${rows}</tbody></table>
-             ${statRows.length > STAT_PER ? `
-               <div class="pager" style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px">
-                 <button class="btn ghost small" id="stPrev" ${statPg <= 0 ? 'disabled' : ''}>‹ 上一页</button>
-                 <span style="color:var(--dim);font-size:12px">第 ${statPg + 1} / ${pages} 页 · 共 ${statRows.length} 条</span>
-                 <button class="btn ghost small" id="stNext" ${statPg >= pages - 1 ? 'disabled' : ''}>下一页 ›</button>
-               </div>` : ''}`
-          : '<p class="hint" style="margin-top:8px">暂无明细（访客进入站点后开始累计）</p>';
-        $('#stPrev') && $('#stPrev').addEventListener('click', () => { statPg--; renderStatPage(); });
-        $('#stNext') && $('#stNext').addEventListener('click', () => { statPg++; renderStatPage(); });
+            <div class="admin-row"><div class="admin-label">后台入口<small>${s.adminPath ? `已自定义：#/${esc(s.adminPath)}` : '默认：#/admin（可在安全中心自定义）'}</small></div>
+              <span class="status-pill ${s.adminPath ? 'ok' : 'warn'}">${s.adminPath ? '自定义' : '默认'}</span></div>
+          </div>`;
       }
-      async function loadStats() {
-        try {
-          const d = await API.adminStats();
-          $('#stPvToday').textContent = d.pvToday;
-          $('#stPvTotal').textContent = d.pvTotal;
-          $('#stUniq').textContent = d.uniqIp;
-          $('#stSearch').textContent = d.searches;
-          const maxN = Math.max(1, ...(d.byPath || []).map((x) => x.n));
-          $('#statPaths').innerHTML = (d.byPath || []).map((p) => `
-            <div class="stat-path-row">
-              <span class="sp-k" title="${esc(p.k)}">${esc(p.k)}</span>
-              <div class="sp-bar"><i style="width:${Math.round((p.n / maxN) * 100)}%"></i></div>
-              <b>${p.n}</b>
-            </div>`).join('') || '<p class="hint" style="margin-top:8px">暂无页面访问数据</p>';
-          statRows = d.recent || [];
-          renderStatPage();
-        } catch (e) { /* ignore */ }
-      }
-      $('#refreshStatsBtn').addEventListener('click', loadStats);
-      $('#clearStatsBtn').addEventListener('click', async () => {
-        if (!confirm('确定清空全部统计数据？不可恢复。')) return;
-        await API.adminClearStats();
-        toast('统计数据已清空', 'ok');
-        loadStats();
-      });
-      loadStats();
-
-      $('#adultSwitch').addEventListener('change', async (e) => {
-        const on = e.target.checked;
-        try {
-          const res = await API.adminSaveSettings({ adultEnabled: on });
-          State.config = await API.getConfig();
-          $('#adultState').textContent = on ? '已开启' : '已关闭';
-          $('#adultState').style.color = on ? 'var(--danger)' : 'var(--ok)';
-          $('#adultCard').classList.toggle('on', on);
-          toast(on ? '⚠️ 成人内容已全站开启' : '✅ 成人内容已全站关闭', on ? 'err' : 'ok');
-        } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
-      });
-
-      $('#saveSiteBtn').addEventListener('click', async () => {
-        try {
-          const homeLines = $('#homeSrcInput').value.split('\n').map((x) => x.trim()).filter(Boolean);
-          const res = await API.adminSaveSettings({
-            siteName: $('#siteNameInput').value,
-            defaultTheme: $('#themeSelect').value,
-            announcement: $('#annInput').value,
-            homeSources: homeLines,
-          });
-          State.settings = { ...State.settings, siteName: res.settings.siteName, announcement: res.settings.announcement, homeSources: res.settings.homeSources || [] };
-          $('#brandName').textContent = res.settings.siteName;
-          document.title = res.settings.siteName;
-          applyAnnouncement(res.settings.announcement);
-          toast(`站点设置已保存（首页源 ${homeLines.length} 个）`, 'ok');
-        } catch (err) { toast('保存失败：' + err.message, 'err'); }
-      });
-
-      $('#saveLiveBtn').addEventListener('click', async () => {
-        try {
-          const urls = $('#liveInput').value.split('\n').map((x) => x.trim()).filter(Boolean);
-          await API.adminSaveSettings({ liveSources: urls, liveSourcesAllowEmpty: false });
-          State.liveCache = null;
-          toast('直播源已保存，缓存将在约30分钟后刷新（重新部署可立即生效）', 'ok');
-        } catch (err) { toast('保存失败：' + err.message, 'err'); }
-      });
-
-      /* ---- 影视源管理 ---- */
-      const customRows = (s.customSources || []).map((x) => ({ ...x }));
-      const disabledSet = new Set(s.disabledSources || []);
-      const builtins = (s.allSources || []).filter((x) => !x.custom);
-      const editor = $('#srcEditor');
-
-      function updateCountInfo() {
-        const info = $('#srcCountInfo');
-        if (info) info.textContent = `内置 ${builtins.length} 个（停用 ${[...disabledSet].filter((k) => !customRows.some((c) => c.key === k)).length}） · 自定义 ${customRows.length} 个`;
-      }
-
-      let bpg = 1;
-      const BPER = 8; // 内置源每页条数
-      function renderEditor() {
-        const rowHtml = [];
-        const bTotal = Math.max(1, Math.ceil(builtins.length / BPER));
-        if (bpg > bTotal) bpg = bTotal;
-        for (const b of builtins.slice((bpg - 1) * BPER, bpg * BPER)) {
-          const off = disabledSet.has(b.key);
-          rowHtml.push(`
-            <div class="src-edit-row builtin" data-bk="${esc(b.key)}">
-              <input type="checkbox" class="src-en" ${off ? '' : 'checked'} title="启用/停用">
-              <span class="ro" title="${esc(cleanSrcName(b))}${b.adult ? ' · 成人源' : ''}">${srcIconHtml(b)} ${esc(cleanSrcName(b))}</span>
-              <span class="ro" title="${esc(b.api)}">${esc(b.api)}</span>
-              <span class="ro src-edit-col-detail">—</span>
-              <span style="font-size:11px;color:var(--dim)">${b.adult ? '🔞内置' : '内置'}</span>
-            </div>`);
-        }
-        customRows.forEach((row, ri) => {
-          rowHtml.push(`
-            <div class="src-edit-row" data-ri="${ri}">
-              <input type="checkbox" class="src-en" ${disabledSet.has(row.key) ? '' : 'checked'}>
-              <input type="text" class="src-name" value="${esc(row.name || '')}" placeholder="名称">
-              <input type="text" class="src-api" value="${esc(row.api || '')}" placeholder="https://xxx/api.php/provide/vod">
-              <input type="text" class="src-detail src-edit-col-detail" value="${esc(row.detail || '')}" placeholder="选填">
-              <button class="btn danger small src-del" type="button">删除</button>
-            </div>`);
-        });
-        editor.innerHTML = rowHtml.join('');
-
-        // 内置源翻页
-        const pager = $('#srcPager');
-        if (pager) {
-          pager.innerHTML = builtins.length > BPER ? `
-            <button class="btn ghost small" id="bPrev" ${bpg <= 1 ? 'disabled' : ''}>‹ 上一页</button>
-            <span style="color:var(--dim);font-size:12px">内置源第 ${bpg}/${bTotal} 页 · 共 ${builtins.length} 个</span>
-            <button class="btn ghost small" id="bNext" ${bpg >= bTotal ? 'disabled' : ''}>下一页 ›</button>` : '';
-          const pv = $('#bPrev'), nx = $('#bNext');
-          pv && pv.addEventListener('click', () => { bpg--; renderEditor(); });
-          nx && nx.addEventListener('click', () => { bpg++; renderEditor(); });
-        }
-
-        $$('.src-edit-row', editor).forEach((tr) => {
-          const en = $('.src-en', tr);
-          en.addEventListener('change', () => {
-            const bk = tr.dataset.bk;
-            if (bk != null) { off2set(disabledSet, bk, !en.checked); }
-            else {
-              const row = customRows[Number(tr.dataset.ri)];
-              row._enabled = en.checked;
-            }
-            updateCountInfo();
-          });
-          const del = $('.src-del', tr);
-          del && del.addEventListener('click', () => {
-            const row = customRows[Number(tr.dataset.ri)];
-            if (row.key) disabledSet.delete(row.key);
-            customRows.splice(Number(tr.dataset.ri), 1);
-            renderEditor();
-            updateCountInfo();
-          });
-        });
-      }
-      function off2set(set, key, off) { if (off) set.add(key); else set.delete(key); }
-
-      $('#addSrcBtn').addEventListener('click', () => {
-        customRows.push({ key: '', name: '', api: '', detail: '', _enabled: true });
-        renderEditor();
-        updateCountInfo();
-        editor.lastElementChild && editor.lastElementChild.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      });
-
-      $('#saveSourcesBtn').addEventListener('click', async () => {
-        // 收集自定义行
-        const rows = $$('.src-edit-row:not(.builtin)', editor);
-        const cleaned = [];
-        for (const tr of rows) {
-          const name = $('.src-name', tr).value.trim();
-          const api = $('.src-api', tr).value.trim();
-          const detail = $('.src-detail', tr).value.trim();
-          const enabled = $('.src-en', tr).checked;
-          if (!api) continue;
-          let host = '';
-          try { host = new URL(api).hostname.toLowerCase(); } catch (e) { toast('接口地址无效：' + name, 'err'); return; }
-          cleaned.push({
-            key: host,
-            name: name || host,
-            api,
-            detail,
-            _enabled,
-          });
-        }
-        // 去重 key
-        const seenKeys = new Set();
-        const finalCustom = [];
-        for (const c of cleaned) {
-          let k = c.key; let n = 1;
-          while (seenKeys.has(k)) k = c.key + '-' + (++n);
-          seenKeys.add(k);
-          finalCustom.push({ key: k, name: c.name, api: c.api, detail: c.detail });
-          if (!c._enabled) disabledSet.add(k); else disabledSet.delete(k);
-        }
-        try {
-          await API.adminSaveSources(finalCustom, [...disabledSet]);
-          State.config = await API.getConfig();
-          toast(`影视源设置已保存：${finalCustom.length} 个自定义源生效`, 'ok');
-          renderPanel();
-        } catch (err) { toast('保存失败：' + err.message, 'err'); }
-      });
-
-      /* ---- 修改密码 ---- */
-      $('#savePwdBtn').addEventListener('click', async () => {
-        const o = $('#oldPwd').value, n1 = $('#newPwd').value, n2 = $('#newPwd2').value;
-        if (!o) return toast('请输入当前密码', 'err');
-        if (n1.length < 6) return toast('新密码至少 6 位', 'err');
-        if (n1 !== n2) return toast('两次输入的新密码不一致', 'err');
-        try {
-          await API.adminChangePassword(o, n1);
-          toast('密码已修改，请用新密码重新登录', 'ok');
-          try { await API.adminLogout(); } catch (e) {}
-          viewAdmin();
-        } catch (err) { toast('修改失败：' + err.message, 'err'); }
-      });
-
-      /* ---- 用户管理 ---- */
-      $('#requireLoginSwitch').addEventListener('change', async (e) => {
-        const on = e.target.checked;
-        try {
-          await API.adminSaveSettings({ requireLogin: on });
-          State.settings = { ...State.settings, requireLogin: on };
-          toast(on ? '已开启：未登录用户无法观看' : '已关闭：游客可直接观看', on ? 'ok' : 'err');
-        } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
-      });
-      $('#allowRegisterSwitch').addEventListener('change', async (e) => {
-        const on = e.target.checked;
-        try {
-          await API.adminSaveSettings({ allowRegister: on });
-          State.settings = { ...State.settings, allowRegister: on };
-          toast(on ? '已开放注册' : '已关闭注册', 'ok');
-        } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
-      });
-
-      async function showUserLog(u) {
-        const box = $('#userLogDetail');
-        box.innerHTML = '<p class="hint">加载中…</p>';
-        try {
-          const d = await API.adminUserLog(u);
-          const rows = d.items.map((it) => `
-            <div class="ulog-row ${it.delUser ? 'del' : ''}">
-              <span class="ulog-kind">${it.kind === 'search' ? '🔍' : '▶️'}</span>
-              <span class="ulog-title" title="${esc(it.title)}">${esc(it.title)}${it.kind === 'watch' && it.ep ? ' <small>· ' + esc(it.ep) + '</small>' : ''}</span>
-              ${it.kind === 'watch' ? `<span class="ulog-meta">${fmtWatchSec(it.t)}</span>` : ''}
-              <span class="ulog-meta">${fmtDateTime(it.ts)}</span>
-              <span class="ulog-meta">${esc(it.ip || '—')}${it.geo ? '<br>' + esc(it.geo) : ''}</span>
-              ${it.delUser ? '<span class="ulog-tag">用户已删</span>' : ''}
-              <button class="hist-del row-del" data-id="${esc(it.id)}" title="彻底删除">×</button>
-            </div>`).join('');
-          box.innerHTML = `
-            <div class="userlog-box">
-              <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-                <h4 style="font-size:14.5px">📋 「${esc(d.username)}」的完整记录（${d.items.length} 条 · 累计观看 ${fmtWatchSec(d.watchSec)}）</h4>
-                <div style="display:flex;gap:8px">
-                  <button class="btn danger small" id="hardClearAll">🗑 彻底清空全部记录</button>
-                  <button class="btn ghost small" id="closeUserLog">收起</button>
-                </div>
-              </div>
-              <p class="hint">注册 ${fmtDateTime(d.createdAt)} · 最近登录 ${fmtDateTime(d.lastLoginAt)} · IP ${esc(d.lastLoginIp || '—')}${d.lastLoginIpGeo ? '（' + esc(d.lastLoginIpGeo) + '）' : ''} · 灰色行 = 用户已自行删除</p>
-              <div style="margin-top:8px">${rows || '<p class="hint">暂无记录</p>'}</div>
-            </div>`;
-          $('#closeUserLog').addEventListener('click', () => { box.innerHTML = ''; });
-          $('#hardClearAll').addEventListener('click', async () => {
-            if (!confirm(`彻底删除「${u}」的全部记录？不可恢复！`)) return;
-            await API.adminDeleteUserLog(u, null, true);
-            toast('已彻底清空', 'ok');
-            showUserLog(u);
-          });
-          $$('#userLogDetail .row-del').forEach((b) => b.addEventListener('click', async () => {
-            if (!confirm('彻底删除该条记录？')) return;
-            await API.adminDeleteUserLog(u, [b.dataset.id], false);
-            toast('已删除', 'ok');
-            showUserLog(u);
-          }));
-        } catch (e) { box.innerHTML = `<p class="hint">加载失败：${esc(e.message)}</p>`; }
-      }
-
-      async function loadUsers() {
-        const table = $('#usersTable'), stat = $('#usersStat');
-        try {
-          const r = await API.adminUsers();
-          stat.textContent = `共 ${r.users.length} 个注册用户`;
-          table.innerHTML = r.users.length ? `
-            <table class="adm-table">
-              <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP / 归属地</th><th>成人源</th><th>累计观看</th><th>有效/总记录</th><th></th></tr></thead>
-              <tbody>${r.users.map((u) => `
-                <tr>
-                  <td>${esc(u.username)}</td>
-                  <td>${fmtDateTime(u.createdAt)}</td>
-                  <td>${fmtDateTime(u.lastLoginAt)}</td>
-                  <td>${esc(u.lastLoginIp || '—')}${u.lastLoginIpGeo ? '<br><small style="color:var(--dim)">' + esc(u.lastLoginIpGeo) + '</small>' : ''}</td>
-                  <td title="需全局「成人内容」开关开启后生效；绿色=允许观看，灰色=已隐藏"><button type="button" class="u-adult-tag ${u.adultAllowed ? 'on' : 'off'}" data-u="${esc(u.username)}">${u.adultAllowed ? '开' : '关'}</button></td>
-                  <td>${fmtWatchSec(u.watchSec)}</td>
-                  <td>${u.activeItems}/${u.totalItems}</td>
-                  <td style="white-space:nowrap;display:flex;gap:6px">
-                    <button class="btn ghost small u-log" data-u="${esc(u.username)}">记录</button>
-                    <button class="btn danger small u-del" data-u="${esc(u.username)}">删户</button>
-                  </td>
-                </tr>`).join('')}</tbody>
-            </table>` : '<p class="hint">暂无注册用户（开放注册后，前台 #/login 可注册）</p>';
-          $$('#usersTable .u-log').forEach((b) => b.addEventListener('click', () => showUserLog(b.dataset.u)));
-          $$('#usersTable .u-adult-tag').forEach((el) => el.addEventListener('click', async () => {
-            const to = el.classList.contains('off'); // 当前关 → 点击变开
-            el.disabled = true;
-            try {
-              await API.adminUserAdult(el.dataset.u, to);
-              el.classList.toggle('on', to);
-              el.classList.toggle('off', !to);
-              el.textContent = to ? '开' : '关';
-              toast(to ? `已允许「${el.dataset.u}」观看成人源` : `已对「${el.dataset.u}」隐藏成人源`, 'ok');
-            } catch (e) { toast('操作失败：' + e.message, 'err'); }
-            el.disabled = false;
-          }));
-          $$('#usersTable .u-del').forEach((b) => b.addEventListener('click', async () => {
-            if (!confirm(`确定删除用户「${b.dataset.u}」及其全部数据？不可恢复！`)) return;
-            await API.adminDeleteUser(b.dataset.u);
-            toast('用户已删除', 'ok');
-            loadUsers();
-          }));
-        } catch (e) {
-          stat.textContent = '';
-          table.innerHTML = `<p class="hint">用户列表加载失败：${esc(e.message)}（本地需绑定 KV 才能使用用户系统）</p>`;
-        }
-      }
-      $('#loadUsersBtn').addEventListener('click', loadUsers);
-      loadUsers();
-
-      /* ---- 采集源配置 ---- */
-      $('#saveCfgBtn').addEventListener('click', async () => {
-        const raw = $('#cfgUrlsInput').value.trim();
-        if (raw.startsWith('{')) {
-          // 整段 JSON 直接作为唯一来源(优先级最高)
-          try { JSON.parse(raw); } catch (e) { return toast('JSON 格式有误：' + e.message, 'err'); }
-          try {
-            await API.adminSaveSettings({ configUrl: raw });
-            State.config = await API.getConfig();
-            toast(`内联 JSON 已保存：当前 ${State.config.count} 个源可用`, 'ok');
-            renderPanel();
-          } catch (err) { toast('保存失败：' + err.message, 'err'); }
-          return;
-        }
-        const lines = raw.split(/\r?\n/).map((x) => x.trim()).filter((x) => /^https?:\/\//i.test(x));
-        if (raw && !lines.length) return toast('每行需为 http(s) 配置地址', 'err');
-        try {
-          await API.adminSaveSettings({ configUrls: lines });
-          State.config = await API.getConfig();
-          toast(`已保存 ${lines.length} 个采集源：合并后 ${State.config.count} 个源可用`, 'ok');
-          renderPanel();
-        } catch (err) { toast('保存失败：' + err.message, 'err'); }
-      });
-      $('#resetCfgBtn').addEventListener('click', async () => {
-        try {
-          await API.adminSaveSettings({ configUrl: '' });
-          State.config = await API.getConfig();
-          toast('已清空并恢复默认采集源配置', 'ok');
-          renderPanel();
-        } catch (err) { toast('操作失败：' + err.message, 'err'); }
-      });
-
-      /* ---- APP下载弹窗设置 ---- */
-      $('#savePromoBtn').addEventListener('click', async () => {
-        const url = $('#dlUrlInput').value.trim();
-        if (url && !/^https?:\/\//i.test(url)) return toast('下载地址需为 http(s) 链接', 'err');
-        try {
-          await API.adminSaveSettings({ appPromoEnabled: $('#promoSw').checked, downloadUrl: url });
-          State.settings = { ...State.settings, appPromoEnabled: $('#promoSw').checked, downloadUrl: url };
-          toast('弹窗设置已保存', 'ok');
-        } catch (err) { toast('保存失败：' + err.message, 'err'); }
-      });
-
-      /* ---- 数据备份/恢复 ---- */
-      $('#bkExpBtn').addEventListener('click', async () => {
-        const btn = $('#bkExpBtn');
-        btn.disabled = true; btn.textContent = '⏳ 导出中…';
-        try {
-          const data = await API.adminBackup();
-          const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = `xiaolintv-backup-${new Date().toISOString().slice(0, 10)}.json`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-          $('#bkStat').textContent = `已导出 ${Object.keys(data.kv || {}).length} 个键`;
-          toast('备份已导出，请妥善保管该文件', 'ok');
-        } catch (e) { toast('导出失败：' + e.message, 'err'); }
-        btn.disabled = false; btn.textContent = '⬇️ 导出备份(JSON)';
-      });
-      $('#bkImpBtn').addEventListener('click', () => $('#bkImpFile').click());
-      $('#bkImpFile').addEventListener('change', async () => {
-        const f = $('#bkImpFile').files[0];
-        if (!f) return;
-        const mode = $('#bkMode').value;
-        let data;
-        try { data = JSON.parse(await f.text()); } catch (e) { return toast('文件不是有效 JSON', 'err'); }
-        if (!data.kv) return toast('不是本系统的备份文件(缺少 kv 字段)', 'err');
-        if (!confirm(`将按「${mode === 'merge' ? '合并' : '覆盖'}」模式恢复 ${Object.keys(data.kv).length} 个键${mode === 'replace' ? '，现有数据会被覆盖！' : ''}，继续？`)) {
-          $('#bkImpFile').value = '';
-          return;
-        }
-        try {
-          const r = await API.adminRestore(mode, data.kv);
-          toast(`已恢复 ${r.restored} 个键(${r.mode})`, 'ok');
-          State.config = await API.getConfig();
-          renderPanel();
-        } catch (e) { toast('恢复失败：' + e.message, 'err'); }
-        $('#bkImpFile').value = '';
-      });
-
-      /* 初始渲染源编辑器 */
-      renderEditor();
-      updateCountInfo();
     }
   }
 
@@ -2772,6 +3033,11 @@
       if (!e.target.closest('#searchPop') && !e.target.closest('.searchbox')) searchPop && searchPop.classList.add('hidden');
     });
     $('#searchInput').addEventListener('keydown', (e) => e.key === 'Enter' && doSearch());
+    // 🎙 语音搜索(桌面/手机/支持的电视盒子): 识别中文后直接搜索
+    const vBtn = $('#voiceBtn');
+    if (vBtn) vBtn.addEventListener('click', () => startVoice((t) => { searchInput.value = t; doSearch(); }));
+    // 电视/盒子: 顶栏输入框挂虚拟键盘
+    if (isTvDevice()) VKB.attach(searchInput);
 
     // 手机端: 放大镜按钮 → 搜索弹窗(输入/历史 → 确认立即跳转并关闭)
     const mBtn = $('#searchMBtn');
@@ -2784,6 +3050,7 @@
             <h3 style="margin-bottom:12px">🔍 搜索影视</h3>
             <div style="display:flex;gap:8px">
               <input id="mSearchInput" class="field-input" style="flex:1;min-width:0;font-size:16px" type="search" placeholder="电影 / 剧集 / 综艺…" autocomplete="off">
+              <button class="btn ghost" id="mVoice" style="flex-shrink:0;padding:0 13px" title="语音搜索">🎙</button>
               <button class="btn primary" id="mSearchGo" style="flex-shrink:0">搜索</button>
             </div>
             ${hist.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">${hist.map((k) =>
@@ -2797,6 +3064,9 @@
           location.hash = '#/search?q=' + encodeURIComponent(q);
         };
         $('#mSearchGo', box).addEventListener('click', go);
+        const mVoice = $('#mVoice', box);
+        if (mVoice) mVoice.addEventListener('click', () => startVoice((t) => { const i = $('#mSearchInput', box); i.value = t; go(); }));
+        if (isTvDevice()) { const mi = $('#mSearchInput', box); if (mi) VKB.attach(mi); }
         $('#mSearchInput', box).addEventListener('keydown', (e) => e.key === 'Enter' && go());
         $$('.m-sh', box).forEach((el) => el.addEventListener('click', () => {
           pushSearchHist(el.dataset.q);

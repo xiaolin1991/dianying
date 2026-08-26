@@ -50,6 +50,7 @@ const DEFAULT_SETTINGS = {
   homeSources: [],      // 首页默认加载的影视源 key 顺序列表(空=内置精选)
   appPromoEnabled: true, // 手机访问弹「下载APP」引导弹窗(后台可关)
   downloadUrl: '',      // APK 下载地址(GitHub Releases 直链或页面), 空则只显示教程
+  adminPath: '',        // 后台入口自定义路径段(#/<adminPath>), 空则默认 'admin'
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -149,6 +150,14 @@ async function saveSettings(env, patch) {
   if (typeof patch.allowRegister === 'boolean') next.allowRegister = patch.allowRegister;
   if (typeof patch.appPromoEnabled === 'boolean') next.appPromoEnabled = patch.appPromoEnabled;
   if (typeof patch.downloadUrl === 'string') next.downloadUrl = patch.downloadUrl.trim().slice(0, 300);
+  if (typeof patch.adminPath === 'string') {
+    const ap = patch.adminPath.trim().toLowerCase();
+    if (ap && !/^[a-z0-9][a-z0-9-_]{1,39}$/.test(ap)) {
+      throw new Error('后台入口路径仅支持 2-40 位小写字母/数字/短横线');
+    }
+    if (['api','assets','icons','js','css'].includes(ap)) throw new Error('该路径为系统保留，请换一个');
+    next.adminPath = ap;
+  }
   if (Array.isArray(patch.homeSources)) {
     next.homeSources = [...new Set(patch.homeSources.filter((k) => typeof k === 'string' && k.trim()).map((k) => k.trim()))].slice(0, 12);
   }
@@ -595,6 +604,12 @@ export default {
           downloadUrl: s.downloadUrl || '',
         });
       }
+      /* ---- 后台入口路径探测(只返回 是/否, 不泄露配置值; 用于自定义入口路由) ---- */
+      if (path === '/api/admin-path' && request.method === 'GET') {
+        const p = String(url.searchParams.get('p') || '').trim().toLowerCase();
+        const s = await getSettings(env);
+        return json({ ok: p === (s.adminPath || 'admin') });
+      }
 
       /* ---- 源列表(远程源 + 后台自定义源, 按停用/成人开关 + 观看者成人权限过滤) ---- */
       if (path === '/api/config' && request.method === 'GET') {
@@ -892,6 +907,7 @@ export default {
             allowRegister: s.allowRegister !== false,
             appPromoEnabled: s.appPromoEnabled !== false,
             downloadUrl: s.downloadUrl || '',
+            adminPath: s.adminPath || '',
             homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });

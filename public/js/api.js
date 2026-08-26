@@ -111,6 +111,7 @@
       }, 8000).catch(() => {}),
 
     adminUsers: () => jfetch('/api/admin/users', {}, 15000),
+    checkAdminPath: (p) => jfetch('/api/admin-path?p=' + encodeURIComponent(p || ''), {}, 8000),
     adminBackup: () => jfetch('/api/admin/backup', {}, 30000),
     adminRestore: (mode, kvData) =>
       jfetch('/api/admin/restore', {
