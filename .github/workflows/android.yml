@@ -17,7 +17,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # 完整历史+标签: 用于生成版本号与「距上一版」的更新日志
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-java@v4
         with:
@@ -73,20 +77,46 @@ jobs:
           path: out/*.apk
           if-no-files-found: error
 
-      # 发布/更新 latest Release(每次构建覆盖附件), 手机/电视直接从 Releases 下载安装
-      - name: Publish to GitHub Releases
+      # 每次构建发布为独立版本号 Release(v1.0.<构建号>) —— 历史版本全部保留可回滚;
+      # GitHub 会自动把最新创建的 Release 标记为 Latest 置顶展示。
+      # 固定文件名副本(xiaolintv-*-latest.apk)保证网站下载直链永远指向当前最新版。
+      - name: Collect changelog since previous release
+        id: notes
+        run: |
+          PREV=$(git describe --tags --abbrev=0 --match 'v1.0.*' 2>/dev/null || echo "")
+          if [ -n "$PREV" ]; then
+            LOG=$(git log --pretty=format:'- %s (%h)' "${PREV}..HEAD" | head -20)
+          else
+            LOG=$(git log --pretty=format:'- %s (%h)' -8)
+          fi
+          {
+            echo 'LOG<<CHANGELOG_EOF'
+            echo "${LOG:-（首次发布）}"
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish versioned Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: 晓林影视 最新版 (v1.0.${{ github.run_number }})
+          tag_name: v1.0.${{ github.run_number }}
+          name: 晓林影视 v1.0.${{ github.run_number }}
           body: |
-            自动构建 · commit ${{ github.sha }} · build #${{ github.run_number }}
+            ## 📦 晓林影视 v1.0.${{ github.run_number }}
+
+            自动构建 · commit [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) · 构建 #${{ github.run_number }}
+
+            ### 📥 安装说明
 
             📱 **安卓手机**: 下载 `xiaolintv-phone-v*.apk` 安装（首次允许「未知来源」）
-            📺 **电视/盒子**: 下载 `xiaolintv-tv-v*.apk`（同一通用包, 已带 TV 启动器, 遥控器可操作）
-            🍎 **iPhone/iPad**: 无需下载! 用 Safari 打开网站 → 分享 → **添加到主屏幕**, 即得全屏 App 图标(PWA)
-            🐳 **Docker**: `docker pull ghcr.io/${{ github.repository }}:latest`（部署教程见仓库 docs/DEPLOY-VPS.md，宝塔面板看 docs/DEPLOY-BT.md）
-            当前版本 **v1.0.${{ github.run_number }}**
+            📺 **电视/盒子**: 下载 `xiaolintv-tv-v*.apk`（同一通用包，已带 TV 启动器，遥控器可操作）
+            🍎 **iPhone/iPad**: 无需下载！Safari 打开网站 → 分享 → **添加到主屏幕**(PWA)
+            🐳 **Docker**: `docker pull ghcr.io/${{ github.repository }}:latest`
+
+            > 🔗 永久最新直链：`https://github.com/${{ github.repository }}/releases/latest/download/xiaolintv-phone-latest.apk`
+            > 🕘 历史版本：本页下方或 [Releases 列表](https://github.com/${{ github.repository }}/releases) 随时回滚下载
+
+            ### 📝 本次更新内容
+            ${{ steps.notes.outputs.LOG }}
           files: out/*.apk
           make_latest: true
 
