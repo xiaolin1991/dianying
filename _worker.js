@@ -933,6 +933,41 @@ export default {
             storage: kv(env) ? 'kv' : 'memory',
           });
         }
+        /* ---- 数据备份: 导出全部业务 KV(settings/用户/历史/收藏/统计) ---- */
+        if (path === '/api/admin/backup' && request.method === 'GET') {
+          if (!kv(env)) return json({ error: '未绑定 KV 存储，无可备份数据' }, 500);
+          const out = { version: 1, exportedAt: new Date().toISOString(), kv: {} };
+          const grab = async (k) => { const v = await env.CONFIG_KV.get(k); if (v != null) out.kv[k] = v; };
+          await grab('settings');
+          await grab('users:index');
+          let idx = [];
+          try { idx = JSON.parse(out.kv['users:index'] || '[]'); } catch (e) { idx = []; }
+          for (const u of idx) {
+            await grab('user:' + u);
+            await grab('uhist:' + u);
+            await grab('favs:' + u);
+          }
+          await grab(STATS_LOG_KEY);
+          await grab(STATS_AGG_KEY);
+          return json(out);
+        }
+        /* ---- 数据恢复: mode=merge(跳过空值,推荐) | replace(逐键覆盖) ---- */
+        if (path === '/api/admin/restore' && request.method === 'POST') {
+          if (!kv(env)) return json({ error: '未绑定 KV 存储' }, 500);
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const data = body && body.kv && typeof body.kv === 'object' ? body.kv : null;
+          if (!data || !Object.keys(data).length) return json({ error: '备份文件无效：缺少 kv 字段' }, 400);
+          const merge = body.mode !== 'replace';
+          let n = 0;
+          for (const [k, v] of Object.entries(data)) {
+            if (typeof v !== 'string') continue;
+            if (merge && v === '') continue;
+            await env.CONFIG_KV.put(String(k).slice(0, 120), String(v).slice(0, 900000));
+            n++;
+          }
+          return json({ ok: true, restored: n, mode: merge ? 'merge' : 'replace' });
+        }
         /* ---- 流量统计 ---- */
         if (path === '/api/admin/stats' && request.method === 'GET') {
           let log = [];

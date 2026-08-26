@@ -111,6 +111,13 @@
       }, 8000).catch(() => {}),
 
     adminUsers: () => jfetch('/api/admin/users', {}, 15000),
+    adminBackup: () => jfetch('/api/admin/backup', {}, 30000),
+    adminRestore: (mode, kvData) =>
+      jfetch('/api/admin/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, kv: kvData }),
+      }, 60000),
     adminUserAdult: (u, allowed) =>
       jfetch('/api/admin/user-adult', {
         method: 'POST',

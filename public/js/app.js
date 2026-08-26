@@ -1413,6 +1413,7 @@
         }
         State.me = username;
         updateUserBox();
+        try { const mm = await API.userMe(); if (mm && mm.me) State.meCreated = Number(mm.me.createdAt || 0); } catch (e) {}
         pullFavsMerge(); // 登录/注册成功: 拉取云端收藏并合并
         toast((mode === 'login' ? '欢迎回来，' : '注册成功，') + username, 'ok');
         // 关键: 若当前哈希已等于目标(如一直停在 #/home), 赋值不会触发路由, 必须手动调用
@@ -1987,6 +1988,11 @@
       if (!State.settings || State.settings.appPromoEnabled === false) return; // 后台总开关
       if (inApp()) return;                                                    // 已安装: 安卓壳/PWA 一律不弹
       if (!isMobileUA()) return;
+      // 只对「已注册登录」的用户弹: 未登录/纯游客永远安静
+      if (!State.me || State.me === '管理员') return;
+      // 注册满 2 小时才出现(账号创建时间由服务端下发, 换设备同样准确)
+      const created = Number(State.meCreated || 0);
+      if (!created || Date.now() - created < 2 * 3600 * 1000) return;
       if ((location.hash || '').startsWith('#/download')) return;
       const st = store.get('appPromoState', {});
       if (st.forever) return;                                                  // 用户永久关闭
@@ -2179,6 +2185,21 @@
             <input class="field-input" id="dlUrlInput" value="${esc(s.downloadUrl || '')}" placeholder="https://github.com/你的用户名/仓库名/releases/latest/download/xiaolintv-phone-latest.apk">
             <button class="btn primary" id="savePromoBtn" style="margin-top:12px">保存弹窗设置</button>
           </div>
+
+          <details class="admin-card adm-details">
+            <summary>🗄️ 数据备份 / 迁移 <small style="color:var(--dim);font-weight:400;font-size:12px">（Cloudflare ↔ VPS/Docker 互通）</small></summary>
+            <p class="hint">导出内容：<b>站点设置 · 注册用户 · 观看历史 · 收藏 · 流量统计</b>。迁移到自托管服务器时：旧环境导出 JSON → 新环境后台「恢复备份」即可无缝搬家（详见 docs/DEPLOY-VPS.md）。</p>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+              <button class="btn primary" id="bkExpBtn">⬇️ 导出备份(JSON)</button>
+              <input type="file" id="bkImpFile" accept=".json,application/json" style="display:none">
+              <button class="btn ghost" id="bkImpBtn">⬆️ 恢复备份</button>
+              <select class="field-input" id="bkMode" style="width:auto;padding:8px 10px">
+                <option value="merge" selected>合并模式(保留现有,推荐)</option>
+                <option value="replace">覆盖模式(完全以备份为准)</option>
+              </select>
+              <span id="bkStat" style="color:var(--dim);font-size:12px"></span>
+            </div>
+          </details>
 
           <details class="admin-card adm-details">
             <summary>🧩 影视源管理 <small style="color:var(--dim);font-weight:400;font-size:12px">（点击展开 · 内置 ${(s.allSources || []).filter((x) => !x.custom).length} 个 · 自定义 ${(s.customSources || []).length} 个）</small></summary>
@@ -2649,6 +2670,44 @@
         } catch (err) { toast('保存失败：' + err.message, 'err'); }
       });
 
+      /* ---- 数据备份/恢复 ---- */
+      $('#bkExpBtn').addEventListener('click', async () => {
+        const btn = $('#bkExpBtn');
+        btn.disabled = true; btn.textContent = '⏳ 导出中…';
+        try {
+          const data = await API.adminBackup();
+          const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `xiaolintv-backup-${new Date().toISOString().slice(0, 10)}.json`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+          $('#bkStat').textContent = `已导出 ${Object.keys(data.kv || {}).length} 个键`;
+          toast('备份已导出，请妥善保管该文件', 'ok');
+        } catch (e) { toast('导出失败：' + e.message, 'err'); }
+        btn.disabled = false; btn.textContent = '⬇️ 导出备份(JSON)';
+      });
+      $('#bkImpBtn').addEventListener('click', () => $('#bkImpFile').click());
+      $('#bkImpFile').addEventListener('change', async () => {
+        const f = $('#bkImpFile').files[0];
+        if (!f) return;
+        const mode = $('#bkMode').value;
+        let data;
+        try { data = JSON.parse(await f.text()); } catch (e) { return toast('文件不是有效 JSON', 'err'); }
+        if (!data.kv) return toast('不是本系统的备份文件(缺少 kv 字段)', 'err');
+        if (!confirm(`将按「${mode === 'merge' ? '合并' : '覆盖'}」模式恢复 ${Object.keys(data.kv).length} 个键${mode === 'replace' ? '，现有数据会被覆盖！' : ''}，继续？`)) {
+          $('#bkImpFile').value = '';
+          return;
+        }
+        try {
+          const r = await API.adminRestore(mode, data.kv);
+          toast(`已恢复 ${r.restored} 个键(${r.mode})`, 'ok');
+          State.config = await API.getConfig();
+          renderPanel();
+        } catch (e) { toast('恢复失败：' + e.message, 'err'); }
+        $('#bkImpFile').value = '';
+      });
+
       /* 初始渲染源编辑器 */
       renderEditor();
       updateCountInfo();
@@ -2784,7 +2843,11 @@
     }
 
     // 登录态(用户优先; 管理员会话也可浏览前台)
-    try { const m = await API.userMe(); State.me = m.me ? m.me.username : null; if (State.me) pullFavsMerge(); }
+    try {
+      const m = await API.userMe();
+      State.me = m.me ? m.me.username : null;
+      if (m.me) { State.meCreated = Number(m.me.createdAt || 0); pullFavsMerge(); }
+    }
     catch (e) { State.me = null; }
     if (!State.me) {
       try { await API.adminSession(); State.me = '管理员'; } catch (e2) { /* 未登录管理员 */ }
