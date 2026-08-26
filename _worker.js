@@ -659,13 +659,16 @@ export default {
         const settings = await getSettings(env);
         const { sources: remote } = await loadSources(env, ctx, settings);
         const { all } = mergeSources(remote, settings);
-        // 成人源可见性: 全局开关开 且 (管理员 或 已获成人授权的登录用户)
+        // 成人源可见性: 全局开关开 → 默认人人可见(含游客/试看中);
+        // 已登录用户仍可被后台单独关闭(adultAllowed=false 时隐藏)
         let allowAdult = false;
         if (settings.adultEnabled) {
-          if (await verifyToken(env, readToken(request, url))) allowAdult = true;
+          if (await verifyToken(env, readToken(request, url))) allowAdult = true; // 管理员
           else {
             const uname = await currentUser(request, env, url);
-            if (uname) {
+            if (!uname) {
+              allowAdult = true; // 游客(含试看期): 跟随全局开关
+            } else {
               const rec = await getUserRecord(env, uname);
               // 默认开通: 仅当明确存了 false 才关闭(旧用户无字段视为开通)
               allowAdult = Boolean(rec && rec.adultAllowed !== false);

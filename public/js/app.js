@@ -2550,8 +2550,8 @@
               <div class="admin-label">开放前台注册<small>关闭后新用户无法自行注册</small></div>
               <label class="switch"><input type="checkbox" id="allowRegisterSwitch" ${s.allowRegister !== false ? 'checked' : ''}><span class="track"></span></label>
             </div>
-            <div class="admin-row">
-              <div class="admin-label">游客试看时长<small>新 IP / 新设备 / 新访客无需注册即可试看 <b id="trialHintMin">${Number(s.trialMinutes === undefined ? 20 : s.trialMinutes)}</b> 分钟，到期自动弹出注册框；填 <b>0</b> = 不提供试看（立即要求登录）。需配合上方「强制登录观看」开启</small></div>
+            <div class="admin-row" id="trialRow">
+              <div class="admin-label">游客试看时长<small>新 IP / 新设备 / 新访客无需注册即可试看 <b id="trialHintMin">${Number(s.trialMinutes === undefined ? 20 : s.trialMinutes)}</b> 分钟，到期自动弹出注册框；填 <b>0</b> = 不提供试看（立即要求登录）。<b id="trialDepHint" style="color:${s.requireLogin !== false ? 'var(--ok)' : 'var(--danger)'}">${s.requireLogin !== false ? '✔ 已生效（强制登录观看开启中）' : '⚠ 未生效：请先开启上方「强制登录观看」'}</b></small></div>
               <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
                 <input class="field-input" id="trialMinInput" type="number" min="0" max="2880" step="1" style="width:92px;text-align:center" value="${Number(s.trialMinutes === undefined ? 20 : s.trialMinutes)}">
                 <span style="color:var(--dim);font-size:12.5px">分钟</span>
@@ -2571,9 +2571,20 @@
           try {
             await API.adminSaveSettings({ requireLogin: on });
             State.settings = { ...State.settings, requireLogin: on };
-            toast(on ? '已开启：未登录用户无法观看' : '已关闭：游客可直接观看', on ? 'ok' : 'err');
+            syncTrialDep(on);
+            toast(on ? '已开启：游客试看后需注册' : '已关闭：所有人免登录自由观看（试看机制停用）', on ? 'ok' : 'err');
           } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
         });
+        function syncTrialDep(on) {
+          const row = $('#trialRow');
+          const dep = $('#trialDepHint');
+          if (!row) return;
+          row.style.opacity = on ? '' : '.55';
+          if (dep) {
+            dep.textContent = on ? '✔ 已生效（强制登录观看开启中）' : '⚠ 未生效：请先开启上方「强制登录观看」';
+            dep.style.color = on ? 'var(--ok)' : 'var(--danger)';
+          }
+        }
         $('#allowRegisterSwitch').addEventListener('change', async (e) => {
           const on = e.target.checked;
           try {
