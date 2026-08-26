@@ -1071,8 +1071,6 @@
     const allProg = store.get(progKey, {});
 
     const isFav = store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id));
-    // 该采集源的网页版地址(详情页优先, 否则取接口域名)
-    const srcSite = (() => { try { return src.detail || new URL(src.api).origin; } catch (e) { return ''; } })();
     v.innerHTML = `
       <div class="container page-wrap play-head">
         <div class="pb-title">${esc(vod.vod_name)}<span id="curEpName">${esc(groups[gi].eps[ei].name)}</span></div>
@@ -1080,20 +1078,22 @@
       <div class="container page-wrap">
         <div class="play-top-row">
           <div class="play-col">
-            <div class="play-stage">
-              <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
-                <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
-                <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
-                <div class="video-tip hidden" id="videoTip"></div>
-                <div class="gest-hud" id="gestHud"></div>
+            <div class="play-inner">
+              <div class="play-stage">
+                <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
+                  <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
+                  <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
+                  <div class="video-tip hidden" id="videoTip"></div>
+                  <div class="gest-hud" id="gestHud"></div>
+                </div>
               </div>
-            </div>
-            <div class="play-actions">
-              <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
-              <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
-              <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
-              <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
-              ${srcSite ? `<a class="btn ghost small" href="${esc(srcSite)}" target="_blank" rel="noopener" title="打开该采集源的网页版">🌐 源站</a>` : ''}
+              <div class="play-side-btns">
+                <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
+                <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
+                <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
+                <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
+                <button class="chip" id="m3uBtn" title="复制本集 M3U8 播放地址">🔗 直链</button>
+              </div>
             </div>
           </div>
           <aside class="rel-rail" id="relRail">
@@ -1168,6 +1168,8 @@
 
     function playCurrent(resume) {
       const ep = groups[gi].eps[ei];
+      const m3uBtn = $('#m3uBtn');
+      if (m3uBtn) m3uBtn.title = ep.url ? 'M3U8：' + ep.url : '本集暂无播放地址';
       Player.play(video, ep.url, tip);
       tip.classList.remove('hidden');
       tip.textContent = '正在加载…';
@@ -1227,6 +1229,27 @@
       store.set('autoNext', nv);
       e.target.textContent = '连播: ' + (nv ? '开' : '关');
       e.target.classList.toggle('on', nv);
+    });
+
+    // 🔗 直链: 仅复制当前正在播放剧集的 M3U8 地址(不打开原始链接); 切集后点击始终取当前集
+    $('#m3uBtn').addEventListener('click', async () => {
+      const u = (groups[gi].eps[ei] || {}).url || '';
+      if (!u) return toast('当前剧集没有可用的播放地址', 'err');
+      const doCopy = async () => {
+        try { await navigator.clipboard.writeText(u); return true; } catch (e) { /* 老内核走降级 */ }
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = u;
+          ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+          document.body.appendChild(ta);
+          ta.select();
+          const r = document.execCommand('copy');
+          ta.remove();
+          return !!r;
+        } catch (e) { return false; }
+      };
+      if (await doCopy()) toast('已复制本集 M3U8 地址', 'ok');
+      else toast('复制失败，可长按按钮查看完整地址', 'err');
     });
 
     // ⛶ 全屏: 优先「容器级」元素全屏 —— 亮度滤镜/手势/进度滑动在全屏内依然生效;
@@ -1522,15 +1545,16 @@
     let relItems = [];
     let renderTimer = null;
     // 右侧竖排小卡(播放器旁)
+    let railExtra = []; // 阶段D兜底: 当前源其他影片(非关键词命中)
     const railCardHtml = (it) => `
       <a class="rcard" href="#/play/${esc(it.sourceKey)}/${encodeURIComponent(it.id)}?ep=0&group=0" title="${esc(it.title)}">
         <div class="rcard-pic"><img loading="lazy" referrerpolicy="no-referrer" src="${esc(it.pic)}" alt="" onerror="this.style.visibility='hidden'"><span class="card-badge">${esc(it.remarks || '')}</span></div>
-        <div class="rcard-name">${esc(it.title)}</div>
+        <div class="rcard-name">${esc(it.title)}${it.sameSrc ? ' <i class="rail-tag">同源</i>' : ''}</div>
       </a>`;
     const renderRail = () => {
       if (!alive()) return;
       const r = $('#relRailList');
-      if (r) r.innerHTML = relItems.slice(0, 12).map(railCardHtml).join('') || '<p class="hint" style="font-size:12.5px">暂无同类推荐</p>';
+      if (r) r.innerHTML = relItems.concat(railExtra).slice(0, 12).map(railCardHtml).join('') || '<p class="hint" style="font-size:12.5px">暂无同类推荐</p>';
     };
     const renderGrid = () => {
       if (!alive()) return;
@@ -1602,8 +1626,35 @@
         await Promise.allSettled(Array.from({ length: Math.min(6, batch.length) }, worker));
       }
 
+      /* 阶段D: 右侧栏兜底 —— 关键词没找到相似影片时, 直接推荐当前源的其他影片 */
+      if (alive() && relItems.length + railExtra.length < 6 && curSrc) {
+        setStatus('⏳ 正在补充本源其他影片…');
+        const curId = String(vod.vod_id || '');
+        for (let pg = 1; pg <= 2 && railExtra.length < 12 && alive(); pg++) {
+          try {
+            const r = await API.list(curSrc, pg);
+            for (const v2 of (r.list || [])) {
+              if (railExtra.length >= 12) break;
+              if (String(v2.vod_id) === curId) continue; // 排除正在看的这部
+              const t = String(v2.vod_name || '').trim();
+              if (!t || !v2.vod_pic) continue;
+              const kk = t.replace(/\s/g, '') + '|' + (v2.vod_year || '');
+              if (seenR.has(kk)) continue;
+              seenR.add(kk);
+              railExtra.push({
+                sourceKey: curSrc.key, sourceName: curSrc.name, id: v2.vod_id, title: t,
+                pic: v2.vod_pic, remarks: v2.vod_remarks, year: v2.vod_year, typeName: v2.type_name,
+                sameSrc: true,
+              });
+            }
+          } catch (e) { break; }
+          renderRail();
+        }
+      }
+
       if (!alive()) return;
       if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      renderRail();
       relItems = relItems.slice(0, REL_COUNT);
       if (!relItems.length) { sec.innerHTML = ''; return; }
       sec.innerHTML = `
