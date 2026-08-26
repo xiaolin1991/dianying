@@ -1075,12 +1075,20 @@
       <div class="container page-wrap play-head">
         <div class="pb-title">${esc(vod.vod_name)}<span id="curEpName">${esc(groups[gi].eps[ei].name)}</span></div>
       </div>
-      <div class="play-stage">
-        <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
+      <div class="container page-wrap">
+        <div class="play-top-row">
+          <div class="play-stage">
+            <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
           <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
           <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
           <div class="video-tip hidden" id="videoTip"></div>
           <div class="gest-hud" id="gestHud"></div>
+        </div>
+          </div>
+          <aside class="rel-rail" id="relRail">
+            <div class="rail-head">📺 同类推荐 <small>同关键词 · 换源也能看</small></div>
+            <div class="rail-list" id="relRailList">${skeletons(4)}</div>
+          </aside>
         </div>
       </div>
       <div class="container page-wrap play-below">
@@ -1508,10 +1516,22 @@
     const seenR = new Set([String(vod.vod_name || '').replace(/\s/g, '')]);
     let relItems = [];
     let renderTimer = null;
+    // 右侧竖排小卡(播放器旁)
+    const railCardHtml = (it) => `
+      <a class="rcard" href="#/play/${esc(it.sourceKey)}/${encodeURIComponent(it.id)}?ep=0&group=0" title="${esc(it.title)}">
+        <div class="rcard-pic"><img loading="lazy" referrerpolicy="no-referrer" src="${esc(it.pic)}" alt="" onerror="this.style.visibility='hidden'"><span class="card-badge">${esc(it.remarks || '')}</span></div>
+        <div class="rcard-name">${esc(it.title)}</div>
+      </a>`;
+    const renderRail = () => {
+      if (!alive()) return;
+      const r = $('#relRailList');
+      if (r) r.innerHTML = relItems.slice(0, 12).map(railCardHtml).join('') || '<p class="hint" style="font-size:12.5px">暂无同类推荐</p>';
+    };
     const renderGrid = () => {
       if (!alive()) return;
       const g = gridEl();
       if (g) g.innerHTML = relItems.slice(0, REL_COUNT).map(cardHtml).join('');
+      renderRail();
     };
     const scheduleRender = () => {
       if (renderTimer) return;
