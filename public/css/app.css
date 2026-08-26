@@ -440,6 +440,35 @@ html, body { overflow-x: hidden; }
 
 /* 原生全屏兜底: 确保视频铺满真全屏 */
 video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 100vh !important; max-height: none !important; object-fit: contain; background: #000; }
+/* 容器级全屏(亮度滤镜/手势/进度滑动全屏内继续生效) */
+.video-wrap:fullscreen, .video-wrap:-webkit-full-screen {
+  width: 100vw; height: 100vh; border-radius: 0; background: #000;
+}
+.video-wrap:fullscreen video, .video-wrap:-webkit-full-screen video,
+.video-wrap.fake-fs video { width: 100%; height: 100%; }
+/* 自绘假全屏兜底(旧 iPhone Safari 等不支持元素全屏的浏览器) */
+.video-wrap.fake-fs {
+  position: fixed; inset: 0; z-index: 2147483000;
+  width: 100vw !important; height: 100vh !important;
+  border-radius: 0;
+}
+.fs-exit-btn {
+  display: none; position: absolute; left: 10px; top: 10px; z-index: 6;
+  background: rgba(0,0,0,.5); color: #fff; border: 1px solid rgba(255,255,255,.35);
+  border-radius: 999px; padding: 5px 13px; font-size: 12.5px; cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.video-wrap.fake-fs .fs-exit-btn { display: block; }
+/* 当前播放源角标 */
+.src-badge {
+  position: absolute; right: 10px; top: 10px; z-index: 4;
+  display: inline-flex; align-items: center; gap: 5px; pointer-events: none;
+  background: rgba(0,0,0,.45); backdrop-filter: blur(6px); color: rgba(255,255,255,.92);
+  font-size: 11.5px; padding: 4px 11px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
+  max-width: 55%; overflow: hidden;
+}
+.src-badge span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-badge svg { width: 13px; height: 13px; flex-shrink: 0; }
 
 /* 选集面板(翻页 + 折叠) */
 #epsBody.hidden { display: none; }

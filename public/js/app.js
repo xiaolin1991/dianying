@@ -872,7 +872,9 @@
         <div class="pb-title">${esc(vod.vod_name)}<span id="curEpName">${esc(groups[gi].eps[ei].name)}</span></div>
       </div>
       <div class="play-stage">
-        <div class="video-wrap"><video id="videoEl" controls playsinline autoplay></video>
+        <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
+          <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
+          <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
           <div class="video-tip hidden" id="videoTip"></div>
           <div class="gest-hud" id="gestHud"></div>
         </div>
@@ -1010,16 +1012,42 @@
       e.target.classList.toggle('on', nv);
     });
 
-    // ⛶ 真全屏: 标准 Fullscreen API 优先, iOS 走视频自带的系统播放器全屏
+    // ⛶ 全屏: 优先「容器级」元素全屏 —— 亮度滤镜/手势/进度滑动在全屏内依然生效;
+    // 浏览器不支持元素全屏(旧 iPhone Safari)时启用自绘假全屏兜底, 手势照常可用
     $('#fsBtn').addEventListener('click', () => {
+      const wrap = $('#videoWrap');
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      if (fsEl) {
-        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-        return;
+      if (fsEl) { (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document); return; }
+      if (wrap.classList.contains('fake-fs')) { exitFakeFs(); return; }
+      const legacyFs = () => {
+        if (video.webkitEnterFullscreen) { try { video.webkitEnterFullscreen(); return; } catch (e) {} }
+        if (wrap.requestFullscreen) wrap.requestFullscreen().catch(() => enterFakeFs());
+        else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen();
+        else enterFakeFs();
+      };
+      if (wrap.requestFullscreen) wrap.requestFullscreen().catch(legacyFs);
+      else if (wrap.webkitRequestFullscreen) { try { wrap.webkitRequestFullscreen(); } catch (e) { legacyFs(); } }
+      else legacyFs();
+    });
+    function enterFakeFs() {
+      const wrap = $('#videoWrap');
+      wrap.classList.add('fake-fs');
+      document.body.style.overflow = 'hidden';
+      screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {});
+    }
+    function exitFakeFs() {
+      const wrap = $('#videoWrap');
+      wrap.classList.remove('fake-fs');
+      document.body.style.overflow = '';
+      try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
+    }
+    $('#fsExit').addEventListener('click', exitFakeFs);
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        // 从系统全屏退出后恢复滚动锁与假全屏状态
+        const wrap = $('#videoWrap');
+        if (wrap && !wrap.classList.contains('fake-fs')) document.body.style.overflow = '';
       }
-      if (video.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; } // iPhone/iPad
-      if (video.requestFullscreen) video.requestFullscreen();
-      else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
     });
 
     // 收藏(与详情页同一份本地收藏夹)
@@ -1038,40 +1066,77 @@
       btn.classList.toggle('on', idx < 0);
     });
 
-    // ---- 触屏手势: 直接绑在视频画面上, 不加任何遮挡层(原生按钮全部可点) ----
-    // 播放器左半边上下滑=亮度, 右半边上下滑=音量; 轻点仍是原生播放/暂停
+    // ---- 触屏手势: 绑定在整个播放器容器(含全屏状态), preventDefault 阻止页面滚动 ----
+    // 左半边上下滑=亮度(滤镜作用于容器, 全屏不丢) | 右半边上下滑=音量 | 左右横滑=快进快退
     if (('ontouchstart' in window) || (navigator.maxTouchPoints > 0)) {
+      const wrap = $('#videoWrap');
       const hud = $('#gestHud');
+      const fmtT = (sec) => {
+        sec = Math.max(0, Math.floor(sec || 0));
+        const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s2 = sec % 60;
+        return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s2).padStart(2, '0');
+      };
       let bright = Number(store.get('vidBright', 1)) || 1;
-      try { video.style.filter = `brightness(${bright})`; } catch (e) {}
-      let startY = 0, startVal = 0, mode = '', hudTimer = null;
+      // 亮度作用于容器: 进入容器级/假全屏后依旧生效, 与手机屏幕外亮度互不影响
+      try { wrap.style.filter = `brightness(${bright})`; } catch (e) {}
+      let sx = 0, sy = 0, mode = '', startVal = 0, halfW = 200;
+      let seekBase = 0, seekTarget = -1, lastSeekApply = 0, hudTimer = null;
       const showHud = (t) => {
         hud.textContent = t;
         hud.classList.add('show');
         clearTimeout(hudTimer);
-        hudTimer = setTimeout(() => hud.classList.remove('show'), 500);
+        hudTimer = setTimeout(() => hud.classList.remove('show'), 550);
       };
-      video.addEventListener('touchstart', (e) => {
+
+      wrap.addEventListener('touchstart', (e) => {
         const t = e.touches[0];
-        const r = video.getBoundingClientRect();
-        startY = t.clientY;
-        mode = t.clientX < r.left + r.width / 2 ? 'b' : 'v';
-        startVal = mode === 'b' ? bright : video.volume;
+        sx = t.clientX; sy = t.clientY; mode = ''; seekTarget = -1;
+        halfW = wrap.getBoundingClientRect().width / 2 || 200;
       }, { passive: true });
-      video.addEventListener('touchmove', (e) => {
+
+      wrap.addEventListener('touchmove', (e) => {
         const t = e.touches[0];
-        const delta = (startY - t.clientY) / 180; // 上滑增大
+        const dx = t.clientX - sx, dyUp = sy - t.clientY;
+        if (!mode) {
+          if (Math.abs(dx) < 14 && Math.abs(dyUp) < 14) return;
+          // 主轴判定: 横向=进度; 纵向按触点左/右半区=亮度/音量
+          mode = Math.abs(dx) > Math.abs(dyUp)
+            ? 'seek'
+            : (sx - (wrap.getBoundingClientRect().left || 0) < halfW ? 'b' : 'v');
+          startVal = mode === 'b' ? bright : mode === 'v' ? video.volume : (video.currentTime || 0);
+          if (mode === 'seek') seekBase = video.currentTime || 0;
+        }
+        e.preventDefault(); // 手势期间锁定页面滚动(全屏内同样有效)
+
         if (mode === 'b') {
-          bright = Math.min(2.2, Math.max(0.25, startVal + delta));
-          try { video.style.filter = `brightness(${bright})`; } catch (err) {}
+          bright = Math.min(2.2, Math.max(0.25, startVal + dyUp / 180));
+          try { wrap.style.filter = `brightness(${bright})`; } catch (err) {}
           store.set('vidBright', Number(bright.toFixed(2)));
           showHud('☀️ 亮度 ' + Math.round(bright * 100) + '%');
-        } else {
-          const nv = Math.min(1, Math.max(0, startVal + delta));
+        } else if (mode === 'v') {
+          const nv = Math.min(1, Math.max(0, startVal + dyUp / 180));
           try { video.volume = nv; video.muted = false; } catch (err) { /* iOS 系统限制 */ }
-          showHud(nv === 0 ? '🔇 静音' : '🔊 音量 ' + Math.round(nv * 100) + '%');
+          showHud(nv <= 0 ? '🔇 静音' : '🔊 音量 ' + Math.round(nv * 100) + '%');
+        } else if (mode === 'seek' && video.duration) {
+          // 整屏宽度 ≈ 快进/快退 90 秒
+          seekTarget = Math.min(video.duration - 0.5, Math.max(0, seekBase + dx * (90 / halfW)));
+          const fwd = seekTarget >= seekBase;
+          showHud(`${fwd ? '⏩' : '⏪'} ${fmtT(seekTarget)} / ${fmtT(video.duration)}`);
+          const now = Date.now();
+          if (now - lastSeekApply > 300 && video.readyState >= 2) {
+            try { video.currentTime = seekTarget; lastSeekApply = now; } catch (err) {}
+          }
         }
-      }, { passive: true });
+      }, { passive: false }); // 必须 false 才能 preventDefault 阻止页面滚动
+
+      wrap.addEventListener('touchend', () => {
+        // 结束时把最终目标时间精确落位(节流期间可能未应用到最后值)
+        if (mode === 'seek' && seekTarget >= 0 && video.duration) {
+          try { video.currentTime = seekTarget; } catch (e) {}
+          showHud('⏱ 已跳到 ' + fmtT(video.currentTime));
+        }
+        mode = ''; seekTarget = -1;
+      });
     }
 
     // ⚡ 快速换源: 并发探测全部其他源
