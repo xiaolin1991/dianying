@@ -430,6 +430,20 @@
     Player.destroy();
     markNav('#/' + (parts[0] || 'home'));
     window.scrollTo({ top: 0 });
+    // TV: 路由完成后把焦点放到当前导航项, 遥控器开机即用, 无需先"盲按"
+    if (document.body.classList.contains('tv')) {
+      setTimeout(() => {
+        const el = $('#mainNav a.active') || $('#mainNav a');
+        const ae = document.activeElement;
+        const inField = ae && ae.tagName && /^(INPUT|TEXTAREA)$/.test(ae.tagName);
+        if (el && !inField) { try { el.focus(); } catch (e) {} }
+      }, 80);
+    }
+    // 播放页: <video autoplay> 获得焦点时部分浏览器会把页面滚到播放器位置(表现为自动下滑约20%)
+    if (parts[0] === 'play') {
+      let n = 0;
+      const g = setInterval(() => { window.scrollTo(0, 0); if (++n >= 15) clearInterval(g); }, 100);
+    }
     const alive = makeAlive(); // 页面切换后旧异步任务自动失效
     const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
     if (State.config) trackVisit('#/' + parts.join('/')); // 页面访问统计
@@ -2045,47 +2059,54 @@
       if (busy || exhausted || !alive()) return;
       busy = true;
       setStatus('⏳ 正在加载…');
-      // 每波并发抓2页: 谁先回来谁先显示; 失败的页自动跳过不挡路
-      const batch = [page, page + 1];
-      const results = await Promise.allSettled(batch.map((p) => fetchPage(p, 12000)));
-      if (!alive()) return;
-      let addedAny = false;
-      for (let i = 0; i < results.length; i++) {
-        const g = $('#srcGrid');
-        if (!g) return;
-        if (results[i].status !== 'fulfilled') { consecFails++; continue; }
-        const items = (results[i].value.list || [])
-          .filter((vod) => String(vod.vod_name || '').trim())
-          .filter((vod, idx, arr) => arr.findIndex((x) => x.vod_id === vod.vod_id) === idx); // 波内去重
-        if (!items.length) { consecFails++; continue; }
-        consecFails = 0;
-        addedAny = true;
-        // 首批到达立即清掉骨架屏(修复"前两行一直空白")
-        if (g.querySelector('.skl-card')) g.innerHTML = '';
-        g.insertAdjacentHTML('beforeend', items.map((vod) => cardHtml({
-          sourceKey: src.key, sourceName: src.name, id: vod.vod_id,
-          title: String(vod.vod_name).trim(), pic: vod.vod_pic,
-          remarks: vod.vod_remarks, year: vod.vod_year, typeName: vod.type_name,
-        })).join(''));
-      }
-      const prevPage = page;
-      page += batch.length;
-      const shown = $$('#srcGrid .card').length;
-      if (addedAny) {
-        setStatus(prevPage === 1 ? `已显示 ${shown} 部 · 下滑自动加载` : `已显示 ${shown} 部`);
-      } else if ((consecFails >= 4 && !addedAny) || (prevPage === 1 && !$('#srcGrid .card'))) {
-        // 整个源都失败/无数据
-        if (!$('#srcGrid .card')) {
-          showLoadError(q ? '没有找到相关内容，换个关键词或分类试试' : '该源暂时无法访问或没有内容');
-        } else { exhausted = true; setStatus(`✅ 已加载全部（${shown} 部）`); }
-      } else {
-        exhausted = true;
-        setStatus(shown ? `✅ 已加载全部（${shown} 部）` : '');
-      }
-      busy = false;
-      if (addedAny && shown < HOME_ROW_COUNT * 3 && !exhausted && alive()) {
-        // 第一屏还没填满就继续补(递归受 busy 守护)
-        loadPage().catch(() => {});
+      try {
+        // 每波并发抓2页: 谁先回来谁先显示; 失败的页自动跳过不挡路
+        const batch = [page, page + 1];
+        const results = await Promise.allSettled(batch.map((p) => fetchPage(p, 12000)));
+        if (!alive()) return;
+        let addedAny = false;
+        for (let i = 0; i < results.length; i++) {
+          const g = $('#srcGrid');
+          if (!g) return;
+          if (results[i].status !== 'fulfilled') { consecFails++; continue; }
+          const items = ((results[i].value && results[i].value.list) || [])
+            .filter((vod) => String(vod.vod_name || '').trim())
+            .filter((vod, idx, arr) => arr.findIndex((x) => x.vod_id === vod.vod_id) === idx); // 波内去重
+          if (!items.length) { consecFails++; continue; }
+          consecFails = 0;
+          addedAny = true;
+          // 首批到达立即清掉骨架屏(修复"前两行一直空白")
+          if (g.querySelector('.skl-card')) g.innerHTML = '';
+          g.insertAdjacentHTML('beforeend', items.map((vod) => cardHtml({
+            sourceKey: src.key, sourceName: src.name, id: vod.vod_id,
+            title: String(vod.vod_name).trim(), pic: vod.vod_pic,
+            remarks: vod.vod_remarks, year: vod.vod_year, typeName: vod.type_name,
+          })).join(''));
+        }
+        const prevPage = page;
+        page += batch.length;
+        const shown = $$('#srcGrid .card').length;
+        if (addedAny) {
+          setStatus(prevPage === 1 ? `已显示 ${shown} 部 · 下滑自动加载` : `已显示 ${shown} 部`);
+        } else if ((consecFails >= 4 && !addedAny) || (prevPage === 1 && !$('#srcGrid .card'))) {
+          // 整个源都失败/无数据
+          if (!$('#srcGrid .card')) {
+            showLoadError(q ? '没有找到相关内容，换个关键词或分类试试' : '该源暂时无法访问或没有内容');
+          } else { exhausted = true; setStatus(`✅ 已加载全部（${shown} 部）`); }
+        } else {
+          exhausted = true;
+          setStatus(shown ? `✅ 已加载全部（${shown} 部）` : '');
+        }
+        if (addedAny && shown < HOME_ROW_COUNT * 3 && !exhausted && alive()) {
+          // 第一屏还没填满就继续补(递归受 busy 守护)
+          await loadPage();
+        }
+      } catch (err) {
+        // 任何意外异常都不能卡死 busy 标志(iPad 老 WebKit 实测会因此永久停在骨架屏)
+        console.warn('[sources] loadPage error:', err);
+        if (alive()) showLoadError('加载出错：' + (err && err.message ? err.message : '未知错误'));
+      } finally {
+        busy = false; // 关键: 无论成功失败/提前return, 必须解锁
       }
     }
 
@@ -3097,6 +3118,8 @@
 
   /* ------------------------------ 启动 ------------------------------ */
   async function boot() {
+    // 电视/盒子(无触摸屏): 启用 10-foot 大屏遥控器 UI
+    if (isTvDevice()) document.body.classList.add('tv');
     // 静态事件
     $('#themeBtn').addEventListener('click', (e) => { e.stopPropagation(); $('#themePop').classList.toggle('hidden'); });
     $('#announceClose').addEventListener('click', () => {

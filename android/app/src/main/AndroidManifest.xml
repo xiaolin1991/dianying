@@ -7,11 +7,12 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
+    <!-- 允许 http 明文: 大量苹果CMS接口与视频CDN仍是http, 禁止会导致TV盒子全程无网络 -->
     <application
         android:label="晓林影院"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/banner"
-        android:usesCleartextTraffic="false"
+        android:usesCleartextTraffic="true"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 

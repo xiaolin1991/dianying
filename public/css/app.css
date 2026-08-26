@@ -235,10 +235,10 @@ img { display: block; }
 
 /* ---- 播放页布局: 标题/按钮在播放器上方, 换源/选集在下方 ---- */
 html, body { overflow-x: hidden; }
-.play-stage { width: min(100vw, calc((100vh - 150px) * 1.7778)); margin: 0 auto; background: #000; }
-.play-stage .video-wrap { border-radius: 0; height: min(56.25vw, calc(100vh - 150px)); }
+.play-stage { width: min(100vw, 1152px); margin: 0 auto; background: #000; }
+.play-stage .video-wrap { border-radius: 0; aspect-ratio: 16/9; height: auto; }
 .play-head { padding-bottom: 10px; } /* 标题与导航栏、播放器之间的呼吸空间 */
-.play-below { margin-top: 14px; }
+.play-below { margin-top: 14px; max-width: 1196px; } /* 与播放器同列对齐(1152+两侧padding) */
 .play-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 /* 换源弹窗: 一行 3 个, 手机上也能看清名字 */
 .swap-open { display: none; margin-top: 4px; }
@@ -527,6 +527,50 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
 .vkb-key.fn { background: linear-gradient(135deg, var(--acc), var(--acc2)); color: #fff; border: none; font-size: 12.5px; }
 .vkb-key:focus-visible, .vkb-key:focus { outline: 3px solid #fff; outline-offset: 1px; box-shadow: 0 0 12px rgba(255,255,255,.35); }
 @media (max-width: 520px) { .vkb-keys { grid-template-columns: repeat(6, 1fr); } }
+
+/* ---- TV 大屏模式(遥控器 10-foot UI): body.tv 由 JS 按设备自动挂载 ---- */
+body.tv { font-size: 17px; }
+body.tv .topbar-inner { padding: 14px 28px; }
+body.tv .brand-name, body.tv #brandName { font-size: 24px; }
+/* 遥控器焦点必须一眼可见: 白色粗框 + 光晕 + 轻微放大 */
+body.tv :focus {
+  outline: 3.5px solid #fff; outline-offset: 3px;
+  box-shadow: 0 0 0 7px rgba(255, 255, 255, .18), var(--glow);
+  border-radius: 12px;
+}
+body.tv a, body.tv button { transition: transform .12s, box-shadow .12s; }
+body.tv a:focus, body.tv button:focus { transform: scale(1.05); }
+/* 导航: 更大颗粒, 横向滚动时聚焦项自动滚入 */
+body.tv .nav { gap: 8px; }
+body.tv .nav a { padding: 13px 26px; font-size: 20px; border-radius: 13px; }
+body.tv .searchbox { width: 340px; padding: 10px 16px; }
+body.tv .searchbox input { font-size: 18px; }
+body.tv .icon-btn { width: 46px; height: 46px; border-radius: 13px; }
+body.tv .user-chip { padding: 8px 16px 8px 8px; font-size: 15px; }
+/* 海报网格: 单元更大更疏朗, 焦点海报放大 */
+body.tv .grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 20px; }
+body.tv .card { border-radius: 16px; }
+body.tv .card-poster { border-radius: 16px; }
+body.tv .card:focus-within .card-poster img,
+body.tv .card:focus img { transform: scale(1.06); }
+body.tv .card:focus-within, body.tv .card:focus { z-index: 2; }
+body.tv .card-name { font-size: 16.5px; margin-top: 9px; }
+body.tv .card-sub { font-size: 13.5px; }
+body.tv .page-title { font-size: 25px; }
+/* 按钮与胶囊 */
+body.tv .btn { padding: 12px 24px; font-size: 16.5px; border-radius: 13px; }
+body.tv .chip { padding: 10px 18px; font-size: 15.5px; }
+body.tv .field-input, body.tv .field-area { font-size: 17px; padding: 13px 15px; }
+/* 影视源列表 / 选集 / 弹窗 */
+body.tv .src-row { padding: 13px 15px; font-size: 16px; }
+body.tv .eps-flow { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 10px; }
+body.tv .eps-flow button { padding: 12px 4px; font-size: 16px; }
+body.tv .swap-modal-list .src-item { font-size: 15.5px; padding: 14px 15px; }
+body.tv .play-actions { gap: 12px; }
+/* 弱盒子性能: 关闭毛玻璃类重效果 */
+body.tv .src-badge, body.tv .fs-exit-btn, body.tv .gest-hud { backdrop-filter: none !important; }
+/* TV 上没有触屏手势/下载推广, 相关提示隐藏 */
+body.tv .dl-hero-cta .btn.ghost { display: none; }
 
 /* 触屏手势 HUD(手势直接绑在 video 上, 无遮挡层, 原生按钮全部可点) */
 .gest-hud {

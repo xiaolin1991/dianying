@@ -1,27 +1,27 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN" data-theme="midnight">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<title>晓林影视 XIAOLIN-TV</title>
+<title>鏅撴灄褰辫 XIAOLIN-TV</title>
 <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-<!-- PWA / iOS 添加到主屏幕 -->
+<!-- PWA / iOS 娣诲姞鍒颁富灞忓箷 -->
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="晓林影院">
+<meta name="apple-mobile-web-app-title" content="鏅撴灄褰遍櫌">
 <meta name="theme-color" content="#0b1020">
 <link rel="stylesheet" href="./css/themes.css">
-<!-- 改动 js/css 后必须递增 v= 版本号, 否则手机浏览器/APK WebView 会一直用旧缓存 -->
-<link rel="stylesheet" href="./css/app.css?v=20260826c">
+<!-- 鏀瑰姩 js/css 鍚庡繀椤婚€掑 v= 鐗堟湰鍙? 鍚﹀垯鎵嬫満娴忚鍣?APK WebView 浼氫竴鐩寸敤鏃х紦瀛?-->
+<link rel="stylesheet" href="./css/app.css?v=20260826e">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
 </head>
 <body>
 <div id="app">
-  <!-- 顶栏 -->
+  <!-- 椤舵爮 -->
   <header class="topbar" id="topbar">
     <div class="topbar-inner">
       <a class="brand" href="#/home" id="brandLink">
@@ -32,25 +32,25 @@
           <circle cx="24" cy="24" r="21" fill="none" stroke="url(#lg)" stroke-width="3"/>
           <path d="M19 15.5v17l14-8.5z" fill="url(#lg)"/>
         </svg>
-        <span class="brand-name" id="brandName">晓林影视</span>
+        <span class="brand-name" id="brandName">鏅撴灄褰辫</span>
       </a>
       <nav class="nav" id="mainNav"></nav>
       <div class="topbar-right">
         <div class="searchbox">
           <svg viewBox="0 0 24 24" class="ico"><path d="M10 2a8 8 0 105.3 14l4.4 4.4 1.4-1.4-4.4-4.4A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>
-          <input id="searchInput" type="search" placeholder="搜索 电影 / 剧集 / 综艺…" autocomplete="off">
-          <button class="search-btn" id="searchBtn" title="搜索" type="button">
+          <input id="searchInput" type="search" placeholder="鎼滅储 鐢靛奖 / 鍓ч泦 / 缁艰壓鈥? autocomplete="off">
+          <button class="search-btn" id="searchBtn" title="鎼滅储" type="button">
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.3"/><path d="M15.8 15.8l4.7 4.7"/></svg>
           </button>
         </div>
-        <button class="icon-btn" id="voiceBtn" title="语音搜索" aria-label="语音搜索">
+        <button class="icon-btn" id="voiceBtn" title="璇煶鎼滅储" aria-label="璇煶鎼滅储">
           <svg viewBox="0 0 24 24" class="ico"><path d="M12 14a3 3 0 003-3V6a3 3 0 10-6 0v5a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 006 6.92V21h2v-3.08A7 7 0 0019 11h-2z"/></svg>
         </button>
-        <button class="icon-btn search-m-btn" id="searchMBtn" title="搜索" aria-label="搜索">
+        <button class="icon-btn search-m-btn" id="searchMBtn" title="鎼滅储" aria-label="鎼滅储">
           <svg viewBox="0 0 24 24" class="ico"><path d="M10 2a8 8 0 105.3 14l4.4 4.4 1.4-1.4-4.4-4.4A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>
         </button>
         <div id="userBox" class="user-box"></div>
-        <button class="icon-btn" id="themeBtn" title="配色主题">
+        <button class="icon-btn" id="themeBtn" title="閰嶈壊涓婚">
           <svg viewBox="0 0 24 24" class="ico"><path d="M12 3a9 9 0 100 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01a1.5 1.5 0 011.13-2.49H16a5 5 0 005-5c0-4.42-4.03-8-9-8zm-5.5 9a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm3-4a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm5 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm3.5 4a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/></svg>
         </button>
       </div>
@@ -59,23 +59,23 @@
     <div class="search-pop hidden" id="searchPop"></div>
   </header>
 
-  <!-- 公告 -->
-  <div class="announce hidden" id="announceBar"><span id="announceText"></span><button id="announceClose">×</button></div>
+  <!-- 鍏憡 -->
+  <div class="announce hidden" id="announceBar"><span id="announceText"></span><button id="announceClose">脳</button></div>
 
-  <!-- 主内容 -->
+  <!-- 涓诲唴瀹?-->
   <main id="view"></main>
 
   <footer class="footer">
-    <p>本站为影视聚合导航，所有内容均来自互联网公开采集接口，与本站技术无关。</p>
-    <p>Powered by xiaolin cao,投诉举报:曹晓林 13575948278</p>
+    <p>鏈珯涓哄奖瑙嗚仛鍚堝鑸紝鎵€鏈夊唴瀹瑰潎鏉ヨ嚜浜掕仈缃戝叕寮€閲囬泦鎺ュ彛锛屼笌鏈珯鎶€鏈棤鍏炽€?/p>
+    <p>Powered by xiaolin cao,鎶曡瘔涓炬姤:鏇规檽鏋?13575948278</p>
   </footer>
 </div>
 
 <div id="toastWrap"></div>
-<button id="backTop" title="回到顶部">↑</button>
+<button id="backTop" title="鍥炲埌椤堕儴">鈫?/button>
 
 <script src="./js/api.js"></script>
 <script src="./js/player.js"></script>
-<script src="./js/app.js?v=20260826c"></script>
+<script src="./js/app.js?v=20260826e"></script>
 </body>
 </html>
