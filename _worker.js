@@ -50,7 +50,8 @@ const DEFAULT_SETTINGS = {
   allowRegister: true,  // 开放前台注册
   homeSources: [],      // 首页默认加载的影视源 key 顺序列表(空=内置精选)
   appPromoEnabled: true, // 手机访问弹「下载APP」引导弹窗(后台可关)
-  downloadUrl: '',      // APK 下载地址(GitHub Releases 直链或页面), 空则只显示教程
+  downloadUrl: '',      // 手机版 APK 下载地址(GitHub Releases 直链), 空则只显示教程
+  downloadUrlTv: '',    // 电视/机顶盒版 APK 下载地址, 空则下载页 TV 卡片显示占位
   adminPath: '',        // 后台入口自定义路径段(#/<adminPath>), 空则默认 'admin'
 };
 
@@ -156,6 +157,7 @@ async function saveSettings(env, patch) {
   if (typeof patch.allowRegister === 'boolean') next.allowRegister = patch.allowRegister;
   if (typeof patch.appPromoEnabled === 'boolean') next.appPromoEnabled = patch.appPromoEnabled;
   if (typeof patch.downloadUrl === 'string') next.downloadUrl = patch.downloadUrl.trim().slice(0, 300);
+  if (typeof patch.downloadUrlTv === 'string') next.downloadUrlTv = patch.downloadUrlTv.trim().slice(0, 300);
   if (typeof patch.adminPath === 'string') {
     const ap = patch.adminPath.trim().toLowerCase();
     if (ap && !/^[a-z0-9][a-z0-9-_]{1,39}$/.test(ap)) {
@@ -715,6 +717,7 @@ export default {
           homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
           appPromoEnabled: s.appPromoEnabled !== false,
           downloadUrl: s.downloadUrl || '',
+          downloadUrlTv: s.downloadUrlTv || '',
         });
       }
       /* ---- 后台入口路径探测(只返回 是/否, 不泄露配置值; 用于自定义入口路由) ---- */
@@ -1049,6 +1052,7 @@ export default {
             allowRegister: s.allowRegister !== false,
             appPromoEnabled: s.appPromoEnabled !== false,
             downloadUrl: s.downloadUrl || '',
+            downloadUrlTv: s.downloadUrlTv || '',
             adminPath: s.adminPath || '',
             homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),

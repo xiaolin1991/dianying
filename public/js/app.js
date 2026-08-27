@@ -2463,6 +2463,7 @@
   async function viewDownload(alive) {
     const v = $('#view');
     const dlUrl = (State.settings && State.settings.downloadUrl) || '';
+    const dlUrlTv = (State.settings && State.settings.downloadUrlTv) || '';
     const isAndroid = /Android/i.test(navigator.userAgent);
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (inApp()) {
@@ -2481,8 +2482,8 @@
     const apkBtn = dlUrl
       ? `<a class="btn primary" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 ${isAndroid ? '立即安装到本机' : '下载安卓 APK'}</a>`
       : `<span class="dl-soon">安装包整备中 · 可先看下方教程</span>`;
-    const tvBtn = dlUrl
-      ? `<a class="btn ghost" href="${esc(dlUrl).replace('xiaolintv-phone-', 'xiaolintv-tv-')}" target="_blank" rel="noopener">获取 TV 版</a>`
+    const tvBtn = dlUrlTv
+      ? `<a class="btn primary" href="${esc(dlUrlTv)}" target="_blank" rel="noopener">📥 下载 TV / 盒子版</a>`
       : '';
     const siteName = esc((State.settings && State.settings.siteName) || '晓林影院');
     v.innerHTML = `
@@ -3337,17 +3338,21 @@
               <span class="switch"><input type="checkbox" id="promoSw" ${s.appPromoEnabled !== false ? 'checked' : ''}><span class="track"></span></span>
               <b>启用下载引导弹窗</b>
             </label>
-            <label class="field-label">APK 下载地址（GitHub Releases 直链或页面，留空则弹窗/下载页仅显示教程）</label>
+            <label class="field-label">📱 手机版 APK 下载地址（留空则下载页仅显示教程）</label>
             <input class="field-input" id="dlUrlInput" value="${esc(s.downloadUrl || '')}" placeholder="https://github.com/你的用户名/仓库名/releases/latest/download/xiaolintv-phone-latest.apk">
+            <label class="field-label" style="margin-top:14px">📺 TV / 机顶盒版 APK 下载地址</label>
+            <input class="field-input" id="dlUrlTvInput" value="${esc(s.downloadUrlTv || '')}" placeholder="https://github.com/你的用户名/仓库名/releases/latest/download/xiaolintv-tv-latest.apk">
             <button class="btn primary" id="savePromoBtn" style="margin-top:12px">保存弹窗设置</button>
           </div>`;
         $('#savePromoBtn').addEventListener('click', async () => {
           const url = $('#dlUrlInput').value.trim();
-          if (url && !/^https?:\/\//i.test(url)) return toast('下载地址需为 http(s) 链接', 'err');
+          const urlTv = $('#dlUrlTvInput').value.trim();
+          if (url && !/^https?:\/\//i.test(url)) return toast('手机版地址需为 http(s) 链接', 'err');
+          if (urlTv && !/^https?:\/\//i.test(urlTv)) return toast('TV 版地址需为 http(s) 链接', 'err');
           try {
-            await API.adminSaveSettings({ appPromoEnabled: $('#promoSw').checked, downloadUrl: url });
-            State.settings = { ...State.settings, appPromoEnabled: $('#promoSw').checked, downloadUrl: url };
-            toast('弹窗设置已保存', 'ok');
+            await API.adminSaveSettings({ appPromoEnabled: $('#promoSw').checked, downloadUrl: url, downloadUrlTv: urlTv });
+            State.settings = { ...State.settings, appPromoEnabled: $('#promoSw').checked, downloadUrl: url, downloadUrlTv: urlTv };
+            toast('弹窗与下载链接已保存', 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
       }
