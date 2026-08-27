@@ -247,12 +247,113 @@ async function getExportSources(env, ctx, settings) {
   return settings.adultEnabled ? all.filter((s) => !s.disabled) : all.filter((s) => !s.disabled && !s.adult);
 }
 
+/* ---- TVBox 专用: 过滤 + 探测, 只导出 TVBox 能拉到分类和影片的源 ---- */
+const TVBOX_PROBE_UA = 'Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36 Chrome/94.0.4606.61 Mobile Safari/537.36';
+const TVBOX_API_STD = /\/api\.php\/provide\/vod|provide\/vod\/from\/[^/]+\/at\/json/i;
+const TVBOX_API_SKIP = /\?url=|apijson\.php|\/json\.php|\/feifei|pz\.v88\.|\/\/[^/]*qzz\.io/i;
+const TVBOX_FEATURED = ['dbzy.tv', 'mtzy.me', 'iqiyizyapi.com', 'ruyizy.cn', 'tyyszy.com', 'bfzy.tv', 'wolongzyw.com'];
+
+function cleanTvboxName(name) {
+  return String(name || '')
+    .replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/gu, '')
+    .replace(/🔞/g, '')
+    .replace(/\s+/g, ' ')
+    .trim() || '影视源';
+}
+
+function isTvboxApiCandidate(s) {
+  const api = String(s.api || '').trim();
+  if (!/^https?:\/\//i.test(api)) return false;
+  if (TVBOX_API_SKIP.test(api)) return false;
+  return TVBOX_API_STD.test(api);
+}
+
+function sortTvboxSources(sources, settings) {
+  const featured = Array.isArray(settings.homeSources) && settings.homeSources.length
+    ? settings.homeSources
+    : TVBOX_FEATURED;
+  const rank = new Map(featured.map((k, i) => [k, i]));
+  return [...sources].sort((a, b) => {
+    const ra = rank.has(a.key) ? rank.get(a.key) : 999;
+    const rb = rank.has(b.key) ? rank.get(b.key) : 999;
+    if (ra !== rb) return ra - rb;
+    return cleanTvboxName(a.name).localeCompare(cleanTvboxName(b.name), 'zh');
+  });
+}
+
+async function probeTvboxSource(s) {
+  try {
+    const base = String(s.api || '').replace(/\/+$/, '');
+    const sep = base.includes('?') ? '&' : '?';
+    const hdrs = { 'User-Agent': TVBOX_PROBE_UA, Accept: '*/*' };
+    const [lr, vr] = await Promise.all([
+      fetch(base + sep + 'ac=list', { headers: hdrs, signal: AbortSignal.timeout(9000) }),
+      fetch(base + sep + 'ac=videolist&pg=1', { headers: hdrs, signal: AbortSignal.timeout(9000) }),
+    ]);
+    const [lt, vt] = await Promise.all([lr.text(), vr.text()]);
+    if (!lr.ok || !vr.ok || lt.length < 80 || vt.length < 120) return false;
+    if (!/type_id|"class"|<class\b/i.test(lt)) return false;
+    if (!/vod_id|"list"|<list\b/i.test(vt)) return false;
+    try {
+      const vj = JSON.parse(vt);
+      const arr = vj.list || vj.data || [];
+      if (Array.isArray(arr) && arr.length < 2) return false;
+    } catch (e) { /* XML 等格式, 上面正则已兜底 */ }
+    return true;
+  } catch (e) { return false; }
+}
+
+/** 并发探测 + 缓存 1h, 仅返回 TVBox 实测可用的源(最多 24 个) */
+async function getTvboxSources(env, ctx, settings) {
+  const all = await getExportSources(env, ctx, settings);
+  const candidates = sortTvboxSources(all.filter(isTvboxApiCandidate), settings);
+  const cacheKey = new Request('https://cache.internal/xiaolintv/tvbox-probed/v2?'
+    + encodeURIComponent(candidates.map((s) => s.key).join(',') + '|' + (settings.adultEnabled ? '1' : '0')));
+  try {
+    const hit = await caches.default.match(cacheKey);
+    if (hit) {
+      const cached = await hit.json();
+      if (cached && Array.isArray(cached.sources) && cached.sources.length) return cached;
+    }
+  } catch (e) { /* ignore */ }
+
+  const ok = [];
+  for (let i = 0; i < candidates.length; i += 6) {
+    const batch = candidates.slice(i, i + 6);
+    const results = await Promise.all(batch.map(async (s) => ({ s, pass: await probeTvboxSource(s) })));
+    for (const r of results) if (r.pass) ok.push(r.s);
+    if (ok.length >= 24) break;
+  }
+  if (ok.length < 6) {
+    for (const fb of FALLBACK_SOURCES) {
+      if (ok.some((x) => x.key === fb.key)) continue;
+      if (!isTvboxApiCandidate(fb)) continue;
+      if (settings.adultEnabled === false && fb.name.includes('🔞')) continue;
+      if (await probeTvboxSource(fb)) ok.push({ ...fb, adult: fb.name.includes('🔞') });
+      if (ok.length >= 10) break;
+    }
+  }
+  const payload = {
+    sources: sortTvboxSources(ok, settings),
+    totalCandidates: candidates.length,
+    totalEnabled: all.length,
+    filteredOut: all.length - candidates.length,
+    probedAt: new Date().toISOString(),
+  };
+  try {
+    ctx.waitUntil(caches.default.put(cacheKey, new Response(JSON.stringify(payload), {
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=3600' },
+    })));
+  } catch (e) { /* ignore */ }
+  return payload;
+}
+
 /** TVBox / 影视仓 标准 sites[] 配置(type=1 苹果CMS) */
-function buildTvboxConfig(settings, sources, origin) {
+function buildTvboxConfig(settings, sources, origin, extra = {}) {
   const siteName = String(settings.siteName || '晓林影视').trim();
   const sites = sources.map((s) => ({
     key: s.key,
-    name: String(s.name || s.key).trim(),
+    name: cleanTvboxName(s.name || s.key),
     type: 1,
     api: s.api,
     searchable: 1,
@@ -284,27 +385,35 @@ function buildTvboxConfig(settings, sources, origin) {
       generatedAt: new Date().toISOString(),
       siteCount: sites.length,
       liveCount: lives.length,
+      totalEnabled: extra.totalEnabled || sites.length,
+      totalCandidates: extra.totalCandidates || sites.length,
+      filteredOut: extra.filteredOut || 0,
+      probed: true,
+      probedAt: extra.probedAt || new Date().toISOString(),
     },
   };
 }
 
 /** LunaTV / 部分 TVBox 分支使用的 api_site 格式 */
-function buildLunatvConfig(settings, sources, origin) {
+function buildLunatvConfig(settings, sources, origin, extra = {}) {
   const api_site = {};
   for (const s of sources) {
     api_site[s.key] = {
-      name: String(s.name || s.key).trim(),
+      name: cleanTvboxName(s.name || s.key),
       api: s.api,
       detail: s.detail || '',
     };
   }
   return {
-    _comment: `${String(settings.siteName || '晓林影视').trim()} · LunaTV api_site 格式`,
+    _comment: `${String(settings.siteName || '晓林影视').trim()} · LunaTV api_site 格式 · 已探测可用源`,
     api_site,
     meta: {
       origin: origin || '',
       generatedAt: new Date().toISOString(),
       siteCount: sources.length,
+      totalEnabled: extra.totalEnabled || sources.length,
+      filteredOut: extra.filteredOut || 0,
+      probedAt: extra.probedAt || new Date().toISOString(),
     },
   };
 }
@@ -758,12 +867,12 @@ export default {
       /* ---- TVBox / 影视仓 配置(JSON) ---- */
       if ((path === '/api/tvbox.json' || path === '/api/tvbox/lunatv.json') && request.method === 'GET') {
         const settings = await getSettings(env);
-        const sources = await getExportSources(env, ctx, settings);
+        const tvbox = await getTvboxSources(env, ctx, settings);
         const origin = url.origin;
         const payload = path.endsWith('/lunatv.json')
-          ? buildLunatvConfig(settings, sources, origin)
-          : buildTvboxConfig(settings, sources, origin);
-        return json(payload, 200, { 'Cache-Control': 'public, max-age=300' });
+          ? buildLunatvConfig(settings, tvbox.sources, origin, tvbox)
+          : buildTvboxConfig(settings, tvbox.sources, origin, tvbox);
+        return json(payload, 200, { 'Cache-Control': 'public, max-age=600' });
       }
 
       /* ---- 苹果CMS API 代理(白名单) ---- */
@@ -1056,38 +1165,41 @@ export default {
         }
         if (path === '/api/admin/tvbox-check' && request.method === 'GET') {
           const s = await getSettings(env);
-          const sources = await getExportSources(env, ctx, s);
-          const bad = sources.filter((x) => !x.api || !/^https?:\/\//i.test(x.api));
+          const all = await getExportSources(env, ctx, s);
+          const tvbox = await getTvboxSources(env, ctx, s);
+          const sources = tvbox.sources;
           let probe = null;
           const sample = sources[0];
           if (sample && sample.api) {
             try {
-              const testUrl = sample.api + (sample.api.includes('?') ? '&' : '?') + 'ac=list';
+              const testUrl = sample.api + (sample.api.includes('?') ? '&' : '?') + 'ac=videolist&pg=1';
               const r = await fetch(testUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0 XIAOLIN-TV/1.0', Accept: '*/*' },
+                headers: { 'User-Agent': TVBOX_PROBE_UA, Accept: '*/*' },
                 signal: AbortSignal.timeout(12000),
               });
               const d = await r.json().catch(() => ({}));
+              const cnt = Array.isArray(d.list) ? d.list.length : (Array.isArray(d.data) ? d.data.length : 0);
               probe = {
-                name: sample.name,
+                name: cleanTvboxName(sample.name),
                 api: sample.api,
-                ok: r.ok && Boolean(d.class || d.list || d.code === 1),
+                ok: r.ok && cnt >= 2,
                 status: r.status,
-                msg: d.msg || d.error || '',
+                msg: cnt >= 2 ? `影片 ${cnt} 条` : (d.msg || d.error || '无影片数据'),
               };
             } catch (e) {
-              probe = { name: sample.name, api: sample.api, ok: false, msg: e.message || String(e) };
+              probe = { name: cleanTvboxName(sample.name), api: sample.api, ok: false, msg: e.message || String(e) };
             }
           }
           return json({
-            ok: sources.length > 0 && !bad.length,
+            ok: sources.length >= 4,
             siteCount: sources.length,
+            totalEnabled: tvbox.totalEnabled || all.length,
+            skippedCount: Math.max(0, (tvbox.totalEnabled || all.length) - sources.length),
             liveCount: (Array.isArray(s.liveSources) ? s.liveSources : DEFAULT_LIVE_SOURCES).filter((u) => /^https?:\/\//i.test(String(u || ''))).length,
-            badCount: bad.length,
             probe,
             tvboxUrl: url.origin + '/api/tvbox.json',
             lunatvUrl: url.origin + '/api/tvbox/lunatv.json',
-            sample: sources.slice(0, 3).map(({ key, name, api }) => ({ key, name, type: 1, api })),
+            sample: sources.slice(0, 5).map(({ key, name, api }) => ({ key, name: cleanTvboxName(name), type: 1, api })),
           });
         }
         if (path === '/api/admin/settings' && request.method === 'POST') {

@@ -3039,7 +3039,7 @@
           </div>
           <div class="admin-card" id="tvboxCard">
             <h3>📺 TVBox / 影视仓 配置</h3>
-            <p class="hint">本站影视源均为<b>苹果CMS V10</b>接口，对应 TVBox 的 <code>type: 1</code>（不是 type 3 爬虫）。把下方地址填到 TVBox、影视仓、蜂蜜影视等 App 的「配置地址 / 接口」即可，源列表与后台「影视源管理」中<b>已启用</b>的源同步。</p>
+            <p class="hint">本站影视源均为<b>苹果CMS V10</b>接口，对应 TVBox 的 <code>type: 1</code>（不是 type 3 爬虫）。把下方地址填到 TVBox、影视仓、蜂蜜影视等 App 的「配置地址 / 接口」即可。<br>已自动<b>探测过滤</b>：只保留 TVBox 能拉到「分类+影片」的源，空源/非标准接口不会写入 JSON。TVBox 首页可能不显示海报，请用<b>搜索</b>或进入<b>分类</b>浏览。</p>
             <div class="admin-row" style="align-items:flex-start">
               <div class="admin-label">TVBox 标准格式<small>sites[] · 推荐</small></div>
               <div style="flex:1;min-width:0">
@@ -3110,8 +3110,8 @@
             const r = await API.adminTvboxCheck();
             if (stat) {
               stat.innerHTML = r.siteCount
-                ? `${r.ok ? '✅' : '⚠️'} ${r.siteCount} 个点播源 · ${r.liveCount} 个直播${r.badCount ? ' · ' + r.badCount + ' 个源 api 无效' : ''}${r.probe ? (r.probe.ok ? ' · 首个源「' + esc(r.probe.name) + '」接口正常' : ' · 首个源探测: ' + esc(r.probe.msg || '失败')) : ''}`
-                : '⚠️ 暂无可用源，请先在「影视源管理」启用源';
+                ? `${r.ok ? '✅' : '⚠️'} TVBox 可用 ${r.siteCount} 个源（全站启用 ${r.totalEnabled || r.siteCount} 个，已过滤空源 ${r.skippedCount || 0} 个） · ${r.liveCount} 个直播${r.probe ? (r.probe.ok ? ' · 首个源「' + esc(r.probe.name) + '」' + esc(r.probe.msg) : ' · 探测: ' + esc(r.probe.msg || '失败')) : ''}`
+                : '⚠️ 暂无可用源，请检查影视源或网络';
             }
             if (pre) {
               pre.style.display = 'block';
