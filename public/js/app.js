@@ -335,13 +335,13 @@
   }
 
   /* ------------------------------ 卡片渲染 ------------------------------ */
-  /** 卡片为真实链接, 新标签页打开详情, 不丢失当前搜索/浏览页 */
+  /** 卡片为真实链接; 列表页离开前会缓存 DOM+滚动, 返回时回到原位置 */
   function cardHtml(item) {
     indexTitle(item); // 登记到全站标题索引(供首字母快搜)
     // 海报卡片直接进播放器页面(跳过详情中间页); 详情仍可从播放页「← 详情」进入
     const href = `#/play/${esc(item.sourceKey)}/${encodeURIComponent(item.id)}?ep=0&group=0`;
     return `
-      <a class="card" href="${href}" target="_blank" rel="noopener">
+      <a class="card" href="${href}">
         <div class="card-poster">
           <img loading="lazy" referrerpolicy="no-referrer" src="${esc(item.pic)}" alt=""
                onerror="this.style.visibility='hidden'">
@@ -395,6 +395,56 @@
     }));
   }
 
+  /* ------------------------------ 列表页滚动记忆(搜索/影视源/分类) ------------------------------ */
+  const LIST_PAGE_CACHE = new Map(); // routeKey -> { html, scrollY, state, rebind, ts }
+  let activeListPage = null; // { key, getState, rebind }
+
+  function listRouteKey(parts, query) {
+    const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
+    if (parts[0] === 'search') return 'search|' + dec(query.q || '');
+    if (parts[0] === 'sources' || parts[0] === 'source') {
+      return 'sources|' + dec(parts[1] || '') + '|' + dec(query.q || '') + '|' + dec(query.cat || '');
+    }
+    if (parts[0] === 'browse') return 'browse|' + dec(parts[1] || '电影') + '|' + (query.year || '全部');
+    return '';
+  }
+  function isListRoute(parts) {
+    return parts[0] === 'search' || parts[0] === 'sources' || parts[0] === 'source' || parts[0] === 'browse';
+  }
+  function saveListPageCache(key) {
+    if (!key || !activeListPage || activeListPage.key !== key) return;
+    const view = $('#view');
+    if (!view || !view.innerHTML.trim()) return;
+    LIST_PAGE_CACHE.set(key, {
+      html: view.innerHTML,
+      scrollY: window.scrollY || 0,
+      state: activeListPage.getState(),
+      getState: activeListPage.getState,
+      rebind: activeListPage.rebind,
+      ts: Date.now(),
+    });
+    if (LIST_PAGE_CACHE.size > 6) {
+      let oldest = '', ot = Infinity;
+      LIST_PAGE_CACHE.forEach((v, k) => { if (v.ts < ot) { ot = v.ts; oldest = k; } });
+      if (oldest) LIST_PAGE_CACHE.delete(oldest);
+    }
+  }
+  function restoreListPageCache(key, alive) {
+    const cached = LIST_PAGE_CACHE.get(key);
+    if (!cached || Date.now() - cached.ts > 30 * 60 * 1000) return false;
+    const view = $('#view');
+    if (!view) return false;
+    view.innerHTML = cached.html;
+    try { cached.rebind(alive, cached.state); } catch (e) { console.warn('[list-cache] rebind failed', e); return false; }
+    activeListPage = { key, getState: cached.getState, rebind: cached.rebind };
+    const y = cached.scrollY;
+    requestAnimationFrame(() => {
+      window.scrollTo(0, y);
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    });
+    return true;
+  }
+
   /* ------------------------------ 导航 ------------------------------ */
   const NAVS = [
     ['#/home', '首页'], ['#/browse/电影', '电影'], ['#/browse/剧集', '剧集'],
@@ -427,8 +477,41 @@
   async function route() {
     const { parts, query } = parseHash();
     const view = $('#view');
+    const routeKey = listRouteKey(parts, query);
+    const prev = route._prev || null;
+    if (prev && prev.key && isListRoute(prev.parts)) saveListPageCache(prev.key);
+
     Player.destroy();
     markNav('#/' + (parts[0] || 'home'));
+
+    const alive = makeAlive();
+    const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
+
+    // 强制登录: 未登录只允许登录页与后台
+    if (loginRequired() && !['login', 'admin'].includes(parts[0])) {
+      markNav('');
+      if (location.hash && location.hash !== '#/login') store.set('afterLogin', location.hash);
+      activeListPage = null;
+      route._prev = { parts, query, key: routeKey };
+      return viewLogin(alive, true);
+    }
+
+    // 返回搜索/影视源/分类页: 恢复离开前的列表与滚动位置(不重新加载)
+    if (routeKey && isListRoute(parts) && restoreListPageCache(routeKey, alive)) {
+      route._prev = { parts, query, key: routeKey };
+      if (State.config) trackVisit('#/' + parts.join('/'));
+      if (document.body.classList.contains('tv')) {
+        setTimeout(() => {
+          const el = $('#mainNav a.active') || $('#mainNav a');
+          const ae = document.activeElement;
+          const inField = ae && ae.tagName && /^(INPUT|TEXTAREA)$/.test(ae.tagName);
+          if (el && !inField) { try { el.focus(); } catch (e) {} }
+        }, 80);
+      }
+      return;
+    }
+
+    activeListPage = null;
     window.scrollTo({ top: 0 });
     // TV: 路由完成后把焦点放到当前导航项, 遥控器开机即用, 无需先"盲按"
     if (document.body.classList.contains('tv')) {
@@ -444,15 +527,8 @@
       let n = 0;
       const g = setInterval(() => { window.scrollTo(0, 0); if (++n >= 15) clearInterval(g); }, 100);
     }
-    const alive = makeAlive(); // 页面切换后旧异步任务自动失效
-    const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
+    route._prev = { parts, query, key: routeKey };
     if (State.config) trackVisit('#/' + parts.join('/')); // 页面访问统计
-    // 强制登录: 未登录只允许登录页与后台
-    if (loginRequired() && !['login', 'admin'].includes(parts[0])) {
-      markNav('');
-      if (location.hash && location.hash !== '#/login') store.set('afterLogin', location.hash); // 记住来路, 登录/注册后送回
-      return viewLogin(alive, true);
-    }
     try {
       if (parts[0] === 'browse') await viewBrowse(dec(parts[1]) || '电影', query, alive);
       else if (parts[0] === 'search') await viewSearch(query.q ? dec(query.q) : '', alive);
@@ -765,6 +841,24 @@
       }, { rootMargin: '500px' });
       io.observe(sentinel);
     }
+    const browseKey = listRouteKey(['browse', cat], query);
+    activeListPage = {
+      key: browseKey,
+      getState: () => ({ cat, year: cur.year }),
+      rebind: (alive2) => {
+        if (!alive2()) return;
+        $$('#yearChips .chip').forEach((c) => c.addEventListener('click', () => {
+          location.hash = `#/browse/${encodeURIComponent(cat)}?year=${encodeURIComponent(c.dataset.y)}`;
+        }));
+        const sen = $('#browseSentinel');
+        if (sen && 'IntersectionObserver' in window) {
+          const io2 = new IntersectionObserver((es) => {
+            es.forEach((en) => { if (en.isIntersecting && !exhausted) loadNext(); });
+          }, { rootMargin: '500px' });
+          io2.observe(sen);
+        }
+      },
+    };
   }
 
   /* ============================================================
@@ -885,6 +979,42 @@
     if (!merged.size) setHtml('#srEmpty', '<div class="big">🙈</div><p>没有找到相关内容</p>');
     const emptyEl = $('#srEmpty');
     if (emptyEl && !merged.size) emptyEl.classList.remove('hidden');
+
+    const searchKey = listRouteKey(['search'], { q });
+    activeListPage = {
+      key: searchKey,
+      getState: () => ({ q, reveal, merged: [...merged.values()] }),
+      rebind: (alive2, state) => {
+        if (!alive2()) return;
+        const inp = $('#searchInput');
+        if (inp && state.q) inp.value = state.q;
+        let reveal2 = state.reveal || 48;
+        const merged2 = new Map();
+        for (const item of (state.merged || [])) {
+          const tkey = String(item.title || '').replace(/[\s·:：,，.!！?？]/g, '').toLowerCase() + '|' + (item.year || '');
+          merged2.set(tkey, item);
+        }
+        const renderGrid2 = () => {
+          if (!alive2()) return;
+          const grid = $('#srGrid');
+          if (!grid) return;
+          grid.innerHTML = [...merged2.values()]
+            .sort((a, b) => b.srcCount - a.srcCount)
+            .slice(0, reveal2).map(cardHtml).join('');
+          const sen = $('#srSentinel');
+          if (sen) sen.classList.toggle('hidden', merged2.size <= reveal2);
+        };
+        const srSen2 = $('#srSentinel');
+        if (srSen2 && 'IntersectionObserver' in window) {
+          const io2 = new IntersectionObserver((es) => {
+            es.forEach((en) => {
+              if (en.isIntersecting && reveal2 < merged2.size) { reveal2 += 48; renderGrid2(); }
+            });
+          }, { rootMargin: '400px' });
+          io2.observe(srSen2);
+        }
+      },
+    };
   }
 
   /* ============================================================
@@ -2123,43 +2253,45 @@
       </div>`;
     if (!alive()) return;
 
-    $('#sortSpeed').addEventListener('click', () => {
-      store.set('srcSortBySpeed', !store.get('srcSortBySpeed', false));
-      route();
-    });
-
-    // 手机端: 弹窗选择播放源(替代左右滑动列表, 防误碰)
-    $('#srcPickBtn').addEventListener('click', () => {
-      const box = document.createElement('div');
-      box.className = 'modal-mask';
-      box.innerHTML = `<div class="modal-box" style="width:min(92vw,540px)">
-          <h3 style="margin-bottom:6px">🔀 选择播放源</h3>
-          <p class="hint" style="margin-bottom:12px">点击任意源切换 · ⚡ 为实测响应速度</p>
-          <div class="swap-modal-list">${ordered.map((s) => `
-            <a class="src-row ${s.key === cur.key ? 'on' : ''} ${s.adult ? 'adult' : ''}" href="#/sources/${encodeURIComponent(s.key)}">
-              ${srcIconHtml(s)}
-              <span class="src-name">${esc(cleanSrcName(s))}${s.custom ? ' <i class="src-mini-tag">自</i>' : ''}</span>
-              <span class="src-speed">${speedBadge(s.key)}</span>
-            </a>`).join('')}</div>
-        </div>`;
-      // 点击任意源: 跳转的同时自动关闭弹窗, 让用户继续选片
-      box.addEventListener('click', (ev) => {
-        if (ev.target === box || ev.target.closest('a.src-row')) box.remove();
+    function bindSourcesChrome() {
+      const sortBtn = $('#sortSpeed');
+      if (sortBtn) sortBtn.addEventListener('click', () => {
+        store.set('srcSortBySpeed', !store.get('srcSortBySpeed', false));
+        route();
       });
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'modal-close';
-      closeBtn.textContent = '×';
-      closeBtn.addEventListener('click', () => box.remove());
-      const mbox1918 = box.querySelector('.modal-box');
-      if (mbox1918) mbox1918.appendChild(closeBtn);
-      document.body.appendChild(box);
-    });
+      const pickBtn = $('#srcPickBtn');
+      if (pickBtn) pickBtn.addEventListener('click', () => {
+        const box = document.createElement('div');
+        box.className = 'modal-mask';
+        box.innerHTML = `<div class="modal-box" style="width:min(92vw,540px)">
+            <h3 style="margin-bottom:6px">🔀 选择播放源</h3>
+            <p class="hint" style="margin-bottom:12px">点击任意源切换 · ⚡ 为实测响应速度</p>
+            <div class="swap-modal-list">${ordered.map((s) => `
+              <a class="src-row ${s.key === cur.key ? 'on' : ''} ${s.adult ? 'adult' : ''}" href="#/sources/${encodeURIComponent(s.key)}">
+                ${srcIconHtml(s)}
+                <span class="src-name">${esc(cleanSrcName(s))}${s.custom ? ' <i class="src-mini-tag">自</i>' : ''}</span>
+                <span class="src-speed">${speedBadge(s.key)}</span>
+              </a>`).join('')}</div>
+          </div>`;
+        box.addEventListener('click', (ev) => {
+          if (ev.target === box || ev.target.closest('a.src-row')) box.remove();
+        });
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'modal-close';
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', () => box.remove());
+        const mbox1918 = box.querySelector('.modal-box');
+        if (mbox1918) mbox1918.appendChild(closeBtn);
+        document.body.appendChild(box);
+      });
+    }
+    bindSourcesChrome();
 
-    mountSourcePanel(cur, q, cat, alive);
+    mountSourcePanel(cur, q, cat, alive, bindSourcesChrome);
     startSpeedTests(alive);
   }
 
-  async function mountSourcePanel(src, q, cat, alive) {
+  async function mountSourcePanel(src, q, cat, alive, bindSourcesChrome) {
     const main = $('#srcMain');
     if (!main) return;
     main.innerHTML = `
@@ -2252,6 +2384,46 @@
       }
     }
 
+    function attachPanelEvents() {
+      const senEl = $('#srcSentinel');
+      if (senEl && 'IntersectionObserver' in window) {
+        const io2 = new IntersectionObserver((es) => {
+          es.forEach((en) => { if (en.isIntersecting && !exhausted) loadPage(); });
+        }, { rootMargin: '500px' });
+        io2.observe(senEl);
+      }
+      const form = $('#srcPageSearch');
+      if (form) form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const nq = ($('#srcPageQ') || {}).value.trim();
+        if (nq && nq !== q) location.hash = `#/sources/${encodeURIComponent(src.key)}?q=` + encodeURIComponent(nq);
+      });
+      $$('#srcCats .chip').forEach((chipEl) => chipEl.addEventListener('click', () => {
+        const cId = chipEl.dataset.cat;
+        location.hash = `#/sources/${encodeURIComponent(src.key)}${cId ? '?cat=' + encodeURIComponent(cId) : ''}`;
+      }));
+      const retry = $('#srcRetry');
+      if (retry) retry.addEventListener('click', () => {
+        exhausted = false; consecFails = 0; page = 1;
+        setHtml(grid, skeletons(HOME_ROW_COUNT));
+        loadPage();
+      });
+    }
+
+    function registerSourceListPage() {
+      activeListPage = {
+        key: listRouteKey(['sources', src.key], { q, cat }),
+        getState: () => ({ selKey: src.key, q, cat, page, exhausted }),
+        rebind: (alive2, st) => {
+          if (!alive2()) return;
+          if (st && st.page != null) page = st.page;
+          if (st && st.exhausted != null) exhausted = st.exhausted;
+          attachPanelEvents();
+          if (bindSourcesChrome) bindSourcesChrome();
+        },
+      };
+    }
+
     // 分类节点(异步加载, 不阻塞首屏)
     loadSourceCats(src, alive).then((cats) => {
       if (!alive() || !cats.length) return;
@@ -2269,25 +2441,17 @@
 
     await loadPage();
     if (!alive()) return;
-    // 无限滚动: 滚到底自动加载下一页
-    const sen = $('#srcSentinel');
+    attachPanelEvents();
+    registerSourceListPage();
+    // 首屏未填满时继续补
     const chain = () => {
       if (exhausted || !alive()) return;
-      const r = sen.getBoundingClientRect();
+      const senEl = $('#srcSentinel');
+      if (!senEl) return;
+      const r = senEl.getBoundingClientRect();
       if (r.top < window.innerHeight + 500) loadPage().then(chain);
     };
-    if (sen && 'IntersectionObserver' in window) {
-      const io = new IntersectionObserver((es) => {
-        es.forEach((en) => { if (en.isIntersecting && !exhausted) loadPage(); });
-      }, { rootMargin: '500px' });
-      io.observe(sen);
-    }
     chain();
-    $('#srcPageSearch').addEventListener('submit', (e) => {
-      e.preventDefault();
-      const nq = $('#srcPageQ').value.trim();
-      if (nq && nq !== q) location.hash = `#/sources/${encodeURIComponent(src.key)}?q=` + encodeURIComponent(nq);
-    });
   }
 
   /* ============================================================
