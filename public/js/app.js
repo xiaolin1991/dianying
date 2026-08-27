@@ -3036,6 +3036,29 @@
               <button class="btn primary" id="saveCfgBtn">保存采集源配置</button>
               <button class="btn ghost" id="resetCfgBtn">清空并恢复默认(LunaTV-config)</button>
             </div>
+          </div>
+          <div class="admin-card" id="tvboxCard">
+            <h3>📺 TVBox / 影视仓 配置</h3>
+            <p class="hint">本站影视源均为<b>苹果CMS V10</b>接口，对应 TVBox 的 <code>type: 1</code>（不是 type 3 爬虫）。把下方地址填到 TVBox、影视仓、蜂蜜影视等 App 的「配置地址 / 接口」即可，源列表与后台「影视源管理」中<b>已启用</b>的源同步。</p>
+            <div class="admin-row" style="align-items:flex-start">
+              <div class="admin-label">TVBox 标准格式<small>sites[] · 推荐</small></div>
+              <div style="flex:1;min-width:0">
+                <input class="field-input" id="tvboxStdUrl" readonly style="font-size:12px">
+                <button class="btn ghost small" id="copyTvboxStd" type="button" style="margin-top:8px">📋 复制地址</button>
+              </div>
+            </div>
+            <div class="admin-row" style="align-items:flex-start;margin-top:12px">
+              <div class="admin-label">LunaTV 格式<small>api_site · 部分分支</small></div>
+              <div style="flex:1;min-width:0">
+                <input class="field-input" id="tvboxLunaUrl" readonly style="font-size:12px">
+                <button class="btn ghost small" id="copyTvboxLuna" type="button" style="margin-top:8px">📋 复制地址</button>
+              </div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;align-items:center">
+              <button class="btn primary small" id="testTvboxBtn" type="button">🔍 检测配置是否正常</button>
+              <span id="tvboxStat" style="color:var(--dim);font-size:12.5px"></span>
+            </div>
+            <pre id="tvboxPreview" class="hint" style="margin-top:12px;max-height:220px;overflow:auto;background:var(--card);padding:10px;border-radius:8px;font-size:11.5px;white-space:pre-wrap;display:none"></pre>
           </div>`;
         $('#saveCfgBtn').addEventListener('click', async () => {
           const raw = $('#cfgUrlsInput').value.trim();
@@ -3065,6 +3088,41 @@
             toast('已清空并恢复默认采集源配置', 'ok');
             renderPanel();
           } catch (err) { toast('操作失败：' + err.message, 'err'); }
+        });
+        const tvboxBase = location.origin + '/api/tvbox.json';
+        const lunaBase = location.origin + '/api/tvbox/lunatv.json';
+        const stdInp = $('#tvboxStdUrl');
+        const lunaInp = $('#tvboxLunaUrl');
+        if (stdInp) stdInp.value = tvboxBase;
+        if (lunaInp) lunaInp.value = lunaBase;
+        const copyUrl = async (text) => {
+          try { await navigator.clipboard.writeText(text); toast('已复制', 'ok'); }
+          catch (e) { toast('复制失败，请手动全选复制', 'err'); }
+        };
+        $('#copyTvboxStd') && $('#copyTvboxStd').addEventListener('click', () => copyUrl(tvboxBase));
+        $('#copyTvboxLuna') && $('#copyTvboxLuna').addEventListener('click', () => copyUrl(lunaBase));
+        $('#testTvboxBtn') && $('#testTvboxBtn').addEventListener('click', async () => {
+          const stat = $('#tvboxStat');
+          const pre = $('#tvboxPreview');
+          if (stat) stat.innerHTML = '<span class="spin"></span> 检测中…';
+          if (pre) { pre.style.display = 'none'; pre.textContent = ''; }
+          try {
+            const r = await API.adminTvboxCheck();
+            if (stat) {
+              stat.innerHTML = r.siteCount
+                ? `${r.ok ? '✅' : '⚠️'} ${r.siteCount} 个点播源 · ${r.liveCount} 个直播${r.badCount ? ' · ' + r.badCount + ' 个源 api 无效' : ''}${r.probe ? (r.probe.ok ? ' · 首个源「' + esc(r.probe.name) + '」接口正常' : ' · 首个源探测: ' + esc(r.probe.msg || '失败')) : ''}`
+                : '⚠️ 暂无可用源，请先在「影视源管理」启用源';
+            }
+            if (pre) {
+              pre.style.display = 'block';
+              pre.textContent = JSON.stringify({ sample: r.sample, probe: r.probe, tvboxUrl: r.tvboxUrl }, null, 2)
+                + (r.siteCount > 3 ? '\n… 共 ' + r.siteCount + ' 个源' : '');
+            }
+            toast(r.ok && (!r.probe || r.probe.ok) ? 'TVBox 配置检测通过' : '请查看检测结果', r.ok ? 'ok' : 'err');
+          } catch (err) {
+            if (stat) stat.textContent = '❌ 检测失败：' + err.message;
+            toast('检测失败：' + err.message, 'err');
+          }
         });
       }
 
