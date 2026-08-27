@@ -1122,6 +1122,20 @@
 
     const video = $('#videoEl');
     const tip = $('#videoTip');
+    const wrap = $('#videoWrap');
+    const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
+    const getSavedBright = () => Math.min(2.2, Math.max(0.25, Number(store.get('vidBright', 1)) || 1));
+    const applyPlayerPrefs = () => {
+      const vol = getSavedVol();
+      const bright = getSavedBright();
+      try { video.volume = vol; if (vol > 0) video.muted = false; } catch (e) {}
+      if (wrap) try { wrap.style.filter = `brightness(${bright})`; } catch (e) {}
+    };
+    applyPlayerPrefs();
+    ['loadedmetadata', 'canplay', 'playing'].forEach((ev) => video.addEventListener(ev, applyPlayerPrefs));
+    video.addEventListener('volumechange', () => {
+      try { if (!video.muted && video.volume >= 0) store.set('vidVol', Number(video.volume.toFixed(2))); } catch (e) {}
+    });
 
     // 右侧「同类推荐」栏高度 = 播放器实际渲染高度(含窗口缩放自适应; ≤1080px 横排模式自动解除)
     const syncRailH = () => {
@@ -1184,6 +1198,7 @@
       const m3uBtn = $('#m3uBtn');
       if (m3uBtn) m3uBtn.title = ep.url ? 'M3U8：' + ep.url : '本集暂无播放地址';
       Player.play(video, ep.url, tip);
+      applyPlayerPrefs();
       tip.classList.remove('hidden');
       tip.textContent = '正在加载…';
       const clear = () => { tip.classList.add('hidden'); };
@@ -1322,16 +1337,13 @@
     // ---- 触屏手势: 绑定在整个播放器容器(含全屏状态), preventDefault 阻止页面滚动 ----
     // 左半边上下滑=亮度(滤镜作用于容器, 全屏不丢) | 右半边上下滑=音量 | 左右横滑=快进快退
     if (('ontouchstart' in window) || (navigator.maxTouchPoints > 0)) {
-      const wrap = $('#videoWrap');
       const hud = $('#gestHud');
       const fmtT = (sec) => {
         sec = Math.max(0, Math.floor(sec || 0));
         const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s2 = sec % 60;
         return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s2).padStart(2, '0');
       };
-      let bright = Number(store.get('vidBright', 1)) || 1;
-      // 亮度作用于容器: 进入容器级/假全屏后依旧生效, 与手机屏幕外亮度互不影响
-      try { wrap.style.filter = `brightness(${bright})`; } catch (e) {}
+      let bright = getSavedBright();
       let sx = 0, sy = 0, mode = '', startVal = 0, halfW = 200;
       let seekBase = 0, seekTarget = -1, lastSeekApply = 0, hudTimer = null;
       // 竖向手势: 图标 + 竖形进度条(左=亮度 / 右=音量), 一眼可见滑动生效
@@ -1368,7 +1380,7 @@
           mode = Math.abs(dx) > Math.abs(dyUp)
             ? 'seek'
             : (sx - (wrap.getBoundingClientRect().left || 0) < halfW ? 'b' : 'v');
-          startVal = mode === 'b' ? bright : mode === 'v' ? video.volume : (video.currentTime || 0);
+          startVal = mode === 'b' ? bright : mode === 'v' ? getSavedVol() : (video.currentTime || 0);
           if (mode === 'seek') seekBase = video.currentTime || 0;
         }
         e.preventDefault(); // 手势期间锁定页面滚动(全屏内同样有效)
@@ -1380,7 +1392,8 @@
           showBarHud('☀️', ((bright - 0.25) / (2.2 - 0.25)) * 100, 'b');
         } else if (mode === 'v') {
           const nv = Math.min(1, Math.max(0, startVal + dyUp / 180));
-          try { video.volume = nv; video.muted = false; } catch (err) { /* iOS 系统限制 */ }
+          try { video.volume = nv; video.muted = nv <= 0; } catch (err) { /* iOS 系统限制 */ }
+          store.set('vidVol', Number(nv.toFixed(2)));
           showBarHud(nv <= 0 ? '🔇' : '🔊', nv * 100, 'v');
         } else if (mode === 'seek' && video.duration) {
           // 整屏宽度 ≈ 快进/快退 90 秒
@@ -1402,6 +1415,46 @@
         }
         mode = ''; seekTarget = -1;
       });
+    }
+
+    // 鼠标滚轮: 在播放器上滚轮调音量(Shift+滚轮调亮度)
+    if (wrap) {
+      let wheelHudT = null;
+      wrap.addEventListener('wheel', (e) => {
+        if (!video.isConnected) return;
+        e.preventDefault();
+        const hud = $('#gestHud');
+        const step = e.deltaY < 0 ? 0.05 : -0.05;
+        if (e.shiftKey) {
+          let bright = getSavedBright();
+          bright = Math.min(2.2, Math.max(0.25, bright + step));
+          store.set('vidBright', Number(bright.toFixed(2)));
+          try { wrap.style.filter = `brightness(${bright})`; } catch (err) {}
+          if (hud) {
+            const p = Math.round(((bright - 0.25) / (2.2 - 0.25)) * 100);
+            hud.innerHTML = `<div class="gh-ico">☀️</div><div class="gh-val">${p}%</div>`;
+            hud.style.left = '50%';
+            hud.classList.remove('bar');
+            hud.classList.add('show');
+            clearTimeout(wheelHudT);
+            wheelHudT = setTimeout(() => hud.classList.remove('show'), 800);
+          }
+        } else {
+          let vol = getSavedVol();
+          vol = Math.min(1, Math.max(0, vol + step));
+          store.set('vidVol', Number(vol.toFixed(2)));
+          try { video.volume = vol; video.muted = vol <= 0; } catch (err) {}
+          if (hud) {
+            const p = Math.round(vol * 100);
+            hud.innerHTML = `<div class="gh-ico">${vol <= 0 ? '🔇' : '🔊'}</div><div class="gh-val">${p}%</div>`;
+            hud.style.left = '50%';
+            hud.classList.remove('bar');
+            hud.classList.add('show');
+            clearTimeout(wheelHudT);
+            wheelHudT = setTimeout(() => hud.classList.remove('show'), 800);
+          }
+        }
+      }, { passive: false });
     }
 
     // ⚡ 快速换源: 并发探测全部其他源
