@@ -490,26 +490,54 @@ html, body { overflow-x: hidden; }
 video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 100vh !important; max-height: none !important; object-fit: contain; background: #000; }
 /* 容器级全屏(亮度滤镜/手势/进度滑动全屏内继续生效) */
 .video-wrap:fullscreen, .video-wrap:-webkit-full-screen {
-  width: 100vw; height: 100vh; border-radius: 0; background: #000;
+  width: 100vw !important; height: 100vh !important;
+  max-width: none !important; max-height: none !important;
+  margin: 0 !important; aspect-ratio: auto !important;
+  border-radius: 0; background: #000;
 }
 .video-wrap:fullscreen video, .video-wrap:-webkit-full-screen video,
-.video-wrap.fake-fs video { width: 100%; height: 100%; }
-/* 自绘假全屏兜底(旧 iPhone Safari 等不支持元素全屏的浏览器) */
+.video-wrap.fake-fs video { width: 100%; height: 100%; object-fit: contain; }
+/* 自绘假全屏: 挂到 body, 必须清掉播放页 max-width/aspect-ratio, 否则横屏会居中变窄条 */
 .video-wrap.fake-fs {
-  position: fixed; inset: 0; z-index: 2147483000;
+  position: fixed !important;
+  left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important;
+  inset: 0 !important;
+  z-index: 2147483000;
   width: 100vw !important; height: 100vh !important;
-  border-radius: 0;
+  max-width: none !important; max-height: none !important;
+  margin: 0 !important; padding: 0 !important;
+  aspect-ratio: auto !important;
+  border-radius: 0 !important;
+  background: #000;
   touch-action: none;
+  transform: none !important;
 }
-/* 手势层: 盖住视频接收滑动; 底部留空给原生控制条点击 */
-.gest-layer {
-  display: block;
-  position: absolute; left: 0; right: 0; top: 0; bottom: 48px;
-  z-index: 5; touch-action: none;
+html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% !important; }
+/* 左右侧条手势: 中间留给原生进度条/音量/全屏点击 */
+.gest-side {
+  position: absolute; top: 0; bottom: 52px; width: 20%;
+  z-index: 5; touch-action: none; -webkit-tap-highlight-color: transparent;
 }
-.video-wrap.fake-fs .gest-layer,
-.video-wrap:fullscreen .gest-layer,
-.video-wrap:-webkit-full-screen .gest-layer { bottom: 56px; }
+.gest-side.gest-left { left: 0; }
+.gest-side.gest-right { right: 0; }
+.video-wrap.fake-fs .gest-side,
+.video-wrap:fullscreen .gest-side,
+.video-wrap:-webkit-full-screen .gest-side { bottom: 60px; width: 18%; }
+/* 中央播放/暂停按钮(手机常显, 桌面悬停或暂停时显) */
+.pp-btn {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 7; width: 58px; height: 58px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.4);
+  background: rgba(0,0,0,.5); color: #fff; font-size: 22px; line-height: 1;
+  cursor: pointer; backdrop-filter: blur(6px);
+  display: grid; place-items: center; padding: 0;
+  opacity: 0; pointer-events: none; transition: opacity .18s;
+}
+.pp-btn.paused { opacity: 1; pointer-events: auto; }
+.video-wrap:hover .pp-btn { opacity: 1; pointer-events: auto; }
+@media (hover: none), (pointer: coarse) {
+  .pp-btn { opacity: .88; pointer-events: auto; }
+}
 .video-wrap:fullscreen .gest-hud,
 .video-wrap:-webkit-full-screen .gest-hud,
 .video-wrap.fake-fs .gest-hud { z-index: 20; }
@@ -517,7 +545,7 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
 .video-wrap:-webkit-full-screen .fs-exit-btn { display: block; z-index: 21; }
 .video-wrap.fake-fs .fs-exit-btn { z-index: 21; }
 .fs-exit-btn {
-  display: none; position: absolute; left: 10px; top: 10px; z-index: 6;
+  display: none; position: absolute; left: 10px; top: 10px; z-index: 8;
   background: rgba(0,0,0,.5); color: #fff; border: 1px solid rgba(255,255,255,.35);
   border-radius: 999px; padding: 5px 13px; font-size: 12.5px; cursor: pointer;
   backdrop-filter: blur(6px);
