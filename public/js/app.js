@@ -3032,6 +3032,7 @@
       ['stats', '📊 流量统计'],
       ['users', '👥 用户管理'],
       ['cfg', '📡 采集源配置'],
+      ['tvbox', '📺 TVBox 配置'],
       ['sources', '🧩 影视源管理'],
       ['site', '⚙️ 站点设置'],
       ['app', '📲 APP推广'],
@@ -3326,29 +3327,6 @@
               <button class="btn primary" id="saveCfgBtn">保存采集源配置</button>
               <button class="btn ghost" id="resetCfgBtn">清空并恢复默认(LunaTV-config)</button>
             </div>
-          </div>
-          <div class="admin-card" id="tvboxCard">
-            <h3>📺 TVBox / 影视仓 配置</h3>
-            <p class="hint">本站影视源均为<b>苹果CMS V10</b>接口，对应 TVBox 的 <code>type: 1</code>（不是 type 3 爬虫）。把下方地址填到 TVBox、影视仓、蜂蜜影视等 App 的「配置地址 / 接口」即可，源列表与后台「影视源管理」中<b>已启用</b>的源同步。</p>
-            <div class="admin-row" style="align-items:flex-start">
-              <div class="admin-label">TVBox 标准格式<small>sites[] · 推荐</small></div>
-              <div style="flex:1;min-width:0">
-                <input class="field-input" id="tvboxStdUrl" readonly style="font-size:12px">
-                <button class="btn ghost small" id="copyTvboxStd" type="button" style="margin-top:8px">📋 复制地址</button>
-              </div>
-            </div>
-            <div class="admin-row" style="align-items:flex-start;margin-top:12px">
-              <div class="admin-label">LunaTV 格式<small>api_site · 部分分支</small></div>
-              <div style="flex:1;min-width:0">
-                <input class="field-input" id="tvboxLunaUrl" readonly style="font-size:12px">
-                <button class="btn ghost small" id="copyTvboxLuna" type="button" style="margin-top:8px">📋 复制地址</button>
-              </div>
-            </div>
-            <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;align-items:center">
-              <button class="btn primary small" id="testTvboxBtn" type="button">🔍 检测配置是否正常</button>
-              <span id="tvboxStat" style="color:var(--dim);font-size:12.5px"></span>
-            </div>
-            <pre id="tvboxPreview" class="hint" style="margin-top:12px;max-height:220px;overflow:auto;background:var(--card);padding:10px;border-radius:8px;font-size:11.5px;white-space:pre-wrap;display:none"></pre>
           </div>`;
         $('#saveCfgBtn').addEventListener('click', async () => {
           const raw = $('#cfgUrlsInput').value.trim();
@@ -3379,12 +3357,32 @@
             renderPanel();
           } catch (err) { toast('操作失败：' + err.message, 'err'); }
         });
+      }
+
+      /* ---------------- 📺 TVBox / 影视仓（只读固定链接） ---------------- */
+      else if (admTab === 'tvbox') {
         const tvboxBase = location.origin + '/api/tvbox.json';
         const lunaBase = location.origin + '/api/tvbox/lunatv.json';
-        const stdInp = $('#tvboxStdUrl');
-        const lunaInp = $('#tvboxLunaUrl');
-        if (stdInp) stdInp.value = tvboxBase;
-        if (lunaInp) lunaInp.value = lunaBase;
+        main.innerHTML = `
+          <div class="admin-card" id="tvboxCard">
+            <h3>📺 TVBox / 影视仓 配置</h3>
+            <p class="hint">以下地址由本站<strong>自动固定生成</strong>，不可修改。填入 TVBox、影视仓、蜂蜜影视等 App 的「配置地址 / 接口」即可；源列表与「影视源管理」中已启用的源同步（苹果 CMS V10 · <code>type: 1</code>）。</p>
+            <div class="tvbox-fixed-row">
+              <div class="admin-label">TVBox 标准格式<small>sites[] · 推荐 · 只读</small></div>
+              <code class="tvbox-fixed-url" id="tvboxStdUrl">${esc(tvboxBase)}</code>
+              <button class="btn ghost small" id="copyTvboxStd" type="button">📋 复制</button>
+            </div>
+            <div class="tvbox-fixed-row" style="margin-top:14px">
+              <div class="admin-label">LunaTV 格式<small>api_site · 部分分支 · 只读</small></div>
+              <code class="tvbox-fixed-url" id="tvboxLunaUrl">${esc(lunaBase)}</code>
+              <button class="btn ghost small" id="copyTvboxLuna" type="button">📋 复制</button>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;align-items:center">
+              <button class="btn primary small" id="testTvboxBtn" type="button">🔍 检测配置是否正常</button>
+              <span id="tvboxStat" style="color:var(--dim);font-size:12.5px"></span>
+            </div>
+            <pre id="tvboxPreview" class="hint" style="margin-top:12px;max-height:220px;overflow:auto;background:var(--card);padding:10px;border-radius:8px;font-size:11.5px;white-space:pre-wrap;display:none"></pre>
+          </div>`;
         const copyUrl = async (text) => {
           try { await navigator.clipboard.writeText(text); toast('已复制', 'ok'); }
           catch (e) { toast('复制失败，请手动全选复制', 'err'); }
@@ -3436,6 +3434,14 @@
             </div>
             <div id="srcEditor"></div>
             <div class="pager" id="srcPager" style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px"></div>
+          </div>
+          <div class="admin-card">
+            <h3>📺 电视直播源</h3>
+            <p class="hint">每行一个 m3u 直播源地址，保存后全站生效（缓存约 30 分钟）。推荐：<br>
+              <code>https://iptv-org.github.io/iptv/countries/cn.m3u</code><br>
+              <code>https://live.fanmingming.com/tv/m3u/ipv6.m3u</code></p>
+            <textarea class="field-area" id="liveInput" style="min-height:110px;font-family:monospace;font-size:12px">${esc((s.liveSources || []).join('\n'))}</textarea>
+            <button class="btn primary" id="saveLiveBtn" style="margin-top:14px">保存直播源</button>
           </div>`;
         const customRows = (s.customSources || []).map((x) => ({ ...x }));
         const disabledSet = new Set(s.disabledSources || []);
@@ -3542,6 +3548,15 @@
         });
         renderEditor();
         updateCountInfo();
+        $('#saveLiveBtn').addEventListener('click', async () => {
+          try {
+            const urls = $('#liveInput').value.split('\n').map((x) => x.trim()).filter(Boolean);
+            const res = await API.adminSaveSettings({ liveSources: urls, liveSourcesAllowEmpty: true });
+            if (lastSettings) lastSettings.liveSources = (res.settings && res.settings.liveSources) || urls;
+            State.liveCache = null;
+            toast('直播源已保存，缓存将在约30分钟后刷新（重新部署可立即生效）', 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
       }
 
       /* ---------------- ⚙️ 站点设置 ---------------- */
@@ -3572,29 +3587,22 @@
             <textarea class="field-area" id="homeSrcInput" style="min-height:96px;font-family:monospace;font-size:12px">${esc((s.homeSources || []).join('\n'))}</textarea>
             <button class="btn primary" id="saveSiteBtn" style="margin-top:14px">保存站点设置</button>
           </div>
-          <div class="admin-card">
+          <div class="admin-card" id="playOptCard">
             <h3>⚡ 播放加载优化</h3>
-            <p class="hint">影响电脑与手机的 HLS 起播速度。<b>保持现状</b>使用原有稳健参数；<b>开启优化</b>会优先低码率起播、预取分片并用 Worker 解码，通常黑屏更短（弱网下也可能更稳）。改完后新打开的影片生效。</p>
-            <label style="display:flex;align-items:center;gap:10px;margin:12px 0;cursor:pointer">
-              <span class="switch"><input type="checkbox" id="playOptSw" ${s.playerOptimize ? 'checked' : ''}><span class="track"></span></span>
-              <span><b id="playOptLabel">${s.playerOptimize ? '已开启优化' : '保持现状'}</b>
-                <small style="display:block;color:var(--dim);margin-top:2px">勾选 = 开启优化 · 取消 = 保持现状</small></span>
-            </label>
-            <button class="btn primary" id="savePlayOptBtn">保存播放优化设置</button>
-          </div>
-          <div class="admin-card">
-            <h3>📺 电视直播源</h3>
-            <p class="hint">每行一个 m3u 直播源地址，保存后全站生效（缓存约 30 分钟）。推荐：<br>
-              <code>https://iptv-org.github.io/iptv/countries/cn.m3u</code><br>
-              <code>https://live.fanmingming.com/tv/m3u/ipv6.m3u</code></p>
-            <textarea class="field-area" id="liveInput" style="min-height:110px;font-family:monospace;font-size:12px">${esc((s.liveSources || []).join('\n'))}</textarea>
-            <button class="btn primary" id="saveLiveBtn" style="margin-top:14px">保存直播源</button>
+            <p class="hint">影响电脑与手机的 HLS 起播速度。<b>保持现状</b>使用原有稳健参数；<b>开启优化</b>会优先低码率起播、预取分片并用 Worker 解码，通常黑屏更短。开关即时保存，新打开的影片生效。</p>
+            <div class="admin-row">
+              <div class="admin-label">加载优化
+                <small>当前：<b id="playOptLabel" style="color:${s.playerOptimize ? 'var(--ok)' : 'var(--dim)'}">${s.playerOptimize ? '已开启优化' : '保持现状'}</b></small>
+              </div>
+              <label class="switch"><input type="checkbox" id="playOptSw" ${s.playerOptimize ? 'checked' : ''}><span class="track"></span></label>
+            </div>
           </div>`;
         $('#adultSwitch').addEventListener('change', async (e) => {
           const on = e.target.checked;
           try {
             const res = await API.adminSaveSettings({ adultEnabled: on });
             State.config = await API.getConfig();
+            if (lastSettings) lastSettings.adultEnabled = on;
             $('#adultState').textContent = on ? '已开启' : '已关闭';
             $('#adultState').style.color = on ? 'var(--danger)' : 'var(--ok)';
             $('#adultCard').classList.toggle('on', on);
@@ -3611,33 +3619,36 @@
               homeSources: homeLines,
             });
             State.settings = { ...State.settings, siteName: res.settings.siteName, announcement: res.settings.announcement, homeSources: res.settings.homeSources || [] };
+            if (lastSettings) {
+              lastSettings.siteName = res.settings.siteName;
+              lastSettings.announcement = res.settings.announcement;
+              lastSettings.homeSources = res.settings.homeSources || [];
+              lastSettings.defaultTheme = res.settings.defaultTheme;
+            }
             $('#brandName').textContent = res.settings.siteName;
             document.title = res.settings.siteName;
             applyAnnouncement(res.settings.announcement);
             toast(`站点设置已保存（首页源 ${homeLines.length} 个）`, 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
-        const syncPlayOptLabel = () => {
-          const on = $('#playOptSw').checked;
-          $('#playOptLabel').textContent = on ? '已开启优化' : '保持现状';
-        };
-        $('#playOptSw').addEventListener('change', syncPlayOptLabel);
-        $('#savePlayOptBtn').addEventListener('click', async () => {
-          const on = $('#playOptSw').checked;
+        $('#playOptSw').addEventListener('change', async (e) => {
+          const on = e.target.checked;
+          const label = $('#playOptLabel');
           try {
-            await API.adminSaveSettings({ playerOptimize: on });
-            State.settings = { ...State.settings, playerOptimize: on };
-            syncPlayOptLabel();
-            toast(on ? '已开启播放加载优化（新打开影片生效）' : '已恢复播放默认参数', 'ok');
-          } catch (err) { toast('保存失败：' + err.message, 'err'); }
-        });
-        $('#saveLiveBtn').addEventListener('click', async () => {
-          try {
-            const urls = $('#liveInput').value.split('\n').map((x) => x.trim()).filter(Boolean);
-            await API.adminSaveSettings({ liveSources: urls, liveSourcesAllowEmpty: false });
-            State.liveCache = null;
-            toast('直播源已保存，缓存将在约30分钟后刷新（重新部署可立即生效）', 'ok');
-          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+            const res = await API.adminSaveSettings({ playerOptimize: on });
+            const saved = !!(res.settings && res.settings.playerOptimize);
+            e.target.checked = saved;
+            State.settings = { ...State.settings, playerOptimize: saved };
+            if (lastSettings) lastSettings.playerOptimize = saved;
+            if (label) {
+              label.textContent = saved ? '已开启优化' : '保持现状';
+              label.style.color = saved ? 'var(--ok)' : 'var(--dim)';
+            }
+            toast(saved ? '已开启播放加载优化（新打开影片生效）' : '已恢复播放默认参数（保持现状）', 'ok');
+          } catch (err) {
+            e.target.checked = !on;
+            toast('保存失败：' + err.message, 'err');
+          }
         });
       }
 
