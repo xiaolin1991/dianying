@@ -1477,7 +1477,7 @@
       const ep = groups[gi].eps[ei];
       const m3uBtn = $('#m3uBtn');
       if (m3uBtn) m3uBtn.title = ep.url ? 'M3U8：' + ep.url : '本集暂无播放地址';
-      Player.play(video, ep.url, tip);
+      Player.play(video, ep.url, tip, { optimize: !!(State.settings && State.settings.playerOptimize) });
       applyPlayerPrefs();
       tip.classList.remove('hidden');
       tip.textContent = '正在加载…';
@@ -1786,14 +1786,34 @@
         }, { passive: false });
       }
 
-      // 桌面双击暂停/播放(电脑保留原生控制条)
+      // 桌面双击: 进出真全屏, 不切换播放/暂停(播放中双击保持播放)
       if (wrap && !isMobilePlayer) {
         wrap.addEventListener('dblclick', (e) => {
           if (e.target.closest('.pp-btn, .m-ctrl, .gest-side')) return;
           e.preventDefault();
-          togglePlay();
-          showTextHud(video.paused ? '⏸ 已暂停' : '▶ 播放中');
-        });
+          e.stopPropagation();
+          const wasPlaying = !video.paused;
+          const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+          const keepPlaying = () => {
+            requestAnimationFrame(() => {
+              if (wasPlaying && video.isConnected && video.paused) video.play().catch(() => {});
+            });
+            setTimeout(() => {
+              if (wasPlaying && video.isConnected && video.paused) video.play().catch(() => {});
+            }, 150);
+          };
+          if (fsEl) {
+            const exit = document.exitFullscreen || document.webkitExitFullscreen;
+            if (exit) Promise.resolve(exit.call(document)).then(keepPlaying).catch(keepPlaying);
+            else keepPlaying();
+          } else if (wrap.requestFullscreen) {
+            wrap.requestFullscreen().then(keepPlaying).catch(() => toast('当前浏览器无法进入全屏', 'err'));
+          } else if (wrap.webkitRequestFullscreen) {
+            try { wrap.webkitRequestFullscreen(); keepPlaying(); } catch (err) { toast('当前浏览器无法进入全屏', 'err'); }
+          } else {
+            toast('当前浏览器不支持全屏', 'err');
+          }
+        }, true);
       }
 
       // 鼠标滚轮
@@ -2924,7 +2944,7 @@
 
     function playCh(url, name) {
       $('#nowName').textContent = '📺 正在播放：' + name;
-      Player.play($('#videoEl'), url, $('#videoTip'));
+      Player.play($('#videoEl'), url, $('#videoTip'), { optimize: !!(State.settings && State.settings.playerOptimize) });
       $$('#liveChs .live-ch').forEach((el) => el.classList.toggle('on', el.dataset.u === url));
       const last = { url, name };
       store.set('lastCh', last);
@@ -3553,6 +3573,16 @@
             <button class="btn primary" id="saveSiteBtn" style="margin-top:14px">保存站点设置</button>
           </div>
           <div class="admin-card">
+            <h3>⚡ 播放加载优化</h3>
+            <p class="hint">影响电脑与手机的 HLS 起播速度。<b>保持现状</b>使用原有稳健参数；<b>开启优化</b>会优先低码率起播、预取分片并用 Worker 解码，通常黑屏更短（弱网下也可能更稳）。改完后新打开的影片生效。</p>
+            <label style="display:flex;align-items:center;gap:10px;margin:12px 0;cursor:pointer">
+              <span class="switch"><input type="checkbox" id="playOptSw" ${s.playerOptimize ? 'checked' : ''}><span class="track"></span></span>
+              <span><b id="playOptLabel">${s.playerOptimize ? '已开启优化' : '保持现状'}</b>
+                <small style="display:block;color:var(--dim);margin-top:2px">勾选 = 开启优化 · 取消 = 保持现状</small></span>
+            </label>
+            <button class="btn primary" id="savePlayOptBtn">保存播放优化设置</button>
+          </div>
+          <div class="admin-card">
             <h3>📺 电视直播源</h3>
             <p class="hint">每行一个 m3u 直播源地址，保存后全站生效（缓存约 30 分钟）。推荐：<br>
               <code>https://iptv-org.github.io/iptv/countries/cn.m3u</code><br>
@@ -3585,6 +3615,20 @@
             document.title = res.settings.siteName;
             applyAnnouncement(res.settings.announcement);
             toast(`站点设置已保存（首页源 ${homeLines.length} 个）`, 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+        const syncPlayOptLabel = () => {
+          const on = $('#playOptSw').checked;
+          $('#playOptLabel').textContent = on ? '已开启优化' : '保持现状';
+        };
+        $('#playOptSw').addEventListener('change', syncPlayOptLabel);
+        $('#savePlayOptBtn').addEventListener('click', async () => {
+          const on = $('#playOptSw').checked;
+          try {
+            await API.adminSaveSettings({ playerOptimize: on });
+            State.settings = { ...State.settings, playerOptimize: on };
+            syncPlayOptLabel();
+            toast(on ? '已开启播放加载优化（新打开影片生效）' : '已恢复播放默认参数', 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
         $('#saveLiveBtn').addEventListener('click', async () => {

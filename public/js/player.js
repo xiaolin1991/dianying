@@ -4,26 +4,67 @@
 
   let current = null; // { hls }
 
+  /** 现状: 稳健偏保守 */
+  const HLS_DEFAULT = {
+    maxBufferLength: 30,
+    maxMaxBufferLength: 60,
+    manifestLoadingTimeOut: 15000,
+    fragLoadingTimeOut: 20000,
+  };
+
+  /** 优化: 更快起播(低码率先出画) + 分片预取 + Worker 解码 */
+  const HLS_OPTIMIZE = {
+    enableWorker: true,
+    startFragPrefetch: true,
+    testBandwidth: true,
+    // -1=自动; 优化模式下先从较低档起播再升, 缩短黑屏等待
+    startLevel: 0,
+    abrEwmaDefaultEstimate: 300000,
+    maxBufferLength: 18,
+    maxMaxBufferLength: 48,
+    maxBufferSize: 40 * 1000 * 1000,
+    maxStarvationDelay: 2,
+    maxLoadingDelay: 2,
+    manifestLoadingTimeOut: 10000,
+    fragLoadingTimeOut: 15000,
+    fragLoadingMaxRetry: 4,
+    fragLoadingRetryDelay: 400,
+    manifestLoadingMaxRetry: 3,
+    levelLoadingMaxRetry: 3,
+    nudgeMaxRetry: 5,
+  };
+
   /**
    * 播放 url 到 video 元素
+   * @param {HTMLVideoElement} videoEl
+   * @param {string} url
+   * @param {HTMLElement|null} tipEl
+   * @param {{ optimize?: boolean }} [opts]
    * @returns {{destroy: Function}}
    */
-  function play(videoEl, url, tipEl) {
+  function play(videoEl, url, tipEl, opts) {
     destroy();
     showTip(tipEl, false);
+    const optimize = !!(opts && opts.optimize);
     const isM3u8 = /\.m3u8(\?|$)/i.test(url);
+
+    try {
+      videoEl.preload = optimize ? 'auto' : (videoEl.preload || 'metadata');
+    } catch (e) { /* ignore */ }
 
     if (isM3u8) {
       if (window.Hls && window.Hls.isSupported()) {
-        const hls = new Hls({
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
-          manifestLoadingTimeOut: 15000,
-          fragLoadingTimeOut: 20000,
-        });
+        const hls = new Hls(optimize ? { ...HLS_OPTIMIZE } : { ...HLS_DEFAULT });
         hls.loadSource(url);
         hls.attachMedia(videoEl);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => { showTip(tipEl, false); videoEl.play().catch(() => {}); });
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          showTip(tipEl, false);
+          // 优化模式: 清单就绪后若有多档, 从低档起播, 随后交给 ABR 升档
+          if (optimize && data && Array.isArray(data.levels) && data.levels.length > 1) {
+            try { hls.startLevel = 0; hls.currentLevel = 0; hls.nextLevel = -1; hls.loadLevel = -1; } catch (e) {}
+          }
+          videoEl.play().catch(() => {});
+        });
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (!data.fatal) return;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
