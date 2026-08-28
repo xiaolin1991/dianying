@@ -501,11 +501,21 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   border-radius: 0;
   touch-action: none;
 }
+/* 手势层: 盖住视频接收滑动; 底部留空给原生控制条点击 */
+.gest-layer {
+  display: block;
+  position: absolute; left: 0; right: 0; top: 0; bottom: 48px;
+  z-index: 5; touch-action: none;
+}
+.video-wrap.fake-fs .gest-layer,
+.video-wrap:fullscreen .gest-layer,
+.video-wrap:-webkit-full-screen .gest-layer { bottom: 56px; }
 .video-wrap:fullscreen .gest-hud,
 .video-wrap:-webkit-full-screen .gest-hud,
-.video-wrap.fake-fs .gest-hud { z-index: 10; }
+.video-wrap.fake-fs .gest-hud { z-index: 20; }
 .video-wrap:fullscreen .fs-exit-btn,
-.video-wrap:-webkit-full-screen .fs-exit-btn { display: block; }
+.video-wrap:-webkit-full-screen .fs-exit-btn { display: block; z-index: 21; }
+.video-wrap.fake-fs .fs-exit-btn { z-index: 21; }
 .fs-exit-btn {
   display: none; position: absolute; left: 10px; top: 10px; z-index: 6;
   background: rgba(0,0,0,.5); color: #fff; border: 1px solid rgba(255,255,255,.35);
@@ -621,22 +631,31 @@ body.tv .src-badge, body.tv .fs-exit-btn, body.tv .gest-hud { backdrop-filter: n
 /* TV 上没有触屏手势/下载推广, 相关提示隐藏 */
 body.tv .dl-hero-cta .btn.ghost { display: none; }
 
-/* 触屏手势 HUD(手势直接绑在 video 上, 无遮挡层, 原生按钮全部可点) */
+/* 触屏手势 HUD: 亮度/音量竖条, 全屏中央两侧显示 */
 .gest-hud {
-  position: absolute; top: 12%; left: 50%; transform: translateX(-50%);
-  background: rgba(0, 0, 0, .62); color: #fff; padding: 9px 16px; border-radius: 13px;
-  font-size: 13.5px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 6;
+  position: absolute; top: 18%; left: 50%; transform: translateX(-50%);
+  background: rgba(0, 0, 0, .72); color: #fff; padding: 10px 16px; border-radius: 14px;
+  font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20;
+  box-shadow: 0 8px 28px rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.18);
+  white-space: nowrap;
 }
 .gest-hud.show { opacity: 1; }
-/* 竖向手势(亮度/音量): 图标 + 竖形进度条 */
-.gest-hud.bar { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 13px 15px; border-radius: 17px; }
-.gest-hud .gh-ico { font-size: 24px; line-height: 1; }
-.gest-hud .gh-bar {
-  width: 5px; height: 78px; border-radius: 4px; position: relative; overflow: hidden;
-  background: rgba(255, 255, 255, .28);
+.gest-hud.bar {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 16px 18px; border-radius: 18px; min-width: 64px;
 }
-.gest-hud .gh-bar i { position: absolute; left: 0; right: 0; bottom: 0; display: block; background: #fff; border-radius: 4px; }
-.gest-hud .gh-val { font-size: 11.5px; font-weight: 700; color: #fff; letter-spacing: .5px; }
+.gest-hud .gh-ico { font-size: 26px; line-height: 1; }
+.gest-hud .gh-bar {
+  width: 8px; height: 110px; border-radius: 6px; position: relative; overflow: hidden;
+  background: rgba(255, 255, 255, .22);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+}
+.gest-hud .gh-bar i {
+  position: absolute; left: 0; right: 0; bottom: 0; display: block;
+  background: linear-gradient(180deg, #fff, #cfe0ff); border-radius: 6px;
+  transition: height .05s linear;
+}
+.gest-hud .gh-val { font-size: 12.5px; font-weight: 800; color: #fff; letter-spacing: .3px; }
 
 /* ---------------- 直播 ---------------- */
 .live-layout { display: grid; grid-template-columns: 250px 1fr; gap: 18px; margin-top: 14px; align-items: start; }

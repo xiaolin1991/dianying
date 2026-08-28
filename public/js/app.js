@@ -1244,6 +1244,7 @@
           <div class="play-col">
             <div class="play-stage">
               <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline autoplay></video>
+                <div class="gest-layer" id="gestLayer" aria-hidden="true"></div>
                 <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
                 <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
                 <div class="video-tip hidden" id="videoTip"></div>
@@ -1287,20 +1288,25 @@
     const video = $('#videoEl');
     const tip = $('#videoTip');
     const wrap = $('#videoWrap');
+    const gestLayer = $('#gestLayer');
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
     const getSavedBright = () => Math.min(2.2, Math.max(0.25, Number(store.get('vidBright', 1)) || 1));
-    /** 仅容器级/假全屏时应用亮度滤镜; 退出全屏立即清掉, 避免整页发亮 */
+    /** 假全屏 / 容器全屏 / 视频原生全屏 均视为播放器全屏 */
     const isPlayerFs = () => {
       if (!wrap) return false;
       if (wrap.classList.contains('fake-fs')) return true;
       const fs = document.fullscreenElement || document.webkitFullscreenElement;
-      return fs === wrap;
+      if (fs === wrap || fs === video) return true;
+      try { if (video && video.webkitDisplayingFullscreen) return true; } catch (e) {}
+      return false;
     };
+    /** 亮度只打在 video 上, 避免连 HUD/按钮一起被滤镜 */
     const applyBrightFilter = (bright) => {
-      if (!wrap) return;
+      const b = bright == null ? getSavedBright() : bright;
       try {
-        if (isPlayerFs()) wrap.style.filter = `brightness(${bright == null ? getSavedBright() : bright})`;
-        else wrap.style.filter = '';
+        if (wrap) wrap.style.filter = '';
+        if (isPlayerFs()) video.style.filter = `brightness(${b})`;
+        else video.style.filter = '';
       } catch (e) {}
     };
     const applyPlayerPrefs = () => {
@@ -1457,15 +1463,14 @@
       else toast('复制失败，可长按按钮查看完整地址', 'err');
     });
 
-    // ⛶ 全屏: 触屏优先假全屏/容器全屏(保证亮度·音量手势可用);
-    // 勿用 video.webkitEnterFullscreen — 系统原生全屏会吞掉手势
+    // ⛶ 全屏: 触屏一律假全屏, 保证左侧亮度/右侧音量手势与进度条可用
+    const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
     $('#fsBtn').addEventListener('click', () => {
       const wrapEl = $('#videoWrap');
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
       if (fsEl) { (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document); return; }
       if (wrapEl.classList.contains('fake-fs')) { exitFakeFs(); return; }
-      const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-      if (isTouch) { enterFakeFs(); return; }
+      if (isTouchDevice) { enterFakeFs(); return; }
       const legacyFs = () => {
         if (wrapEl.requestFullscreen) wrapEl.requestFullscreen().catch(() => enterFakeFs());
         else if (wrapEl.webkitRequestFullscreen) { try { wrapEl.webkitRequestFullscreen(); } catch (e) { enterFakeFs(); } }
@@ -1486,20 +1491,36 @@
       const wrapEl = $('#videoWrap');
       wrapEl.classList.remove('fake-fs');
       document.body.style.overflow = '';
-      applyBrightFilter(); // 退全屏清亮度滤镜, 恢复页面正常观感
+      applyBrightFilter();
       try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
     }
     $('#fsExit').addEventListener('click', exitFakeFs);
-    const onFsChange = () => {
+    const onFsChange = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      // 触屏若进了 video 原生全屏, 立刻退回假全屏(否则左手亮度手势无效)
+      if (isTouchDevice && fsEl === video) {
+        try {
+          const exit = document.exitFullscreen || document.webkitExitFullscreen;
+          if (exit) await exit.call(document);
+        } catch (e) {}
+        enterFakeFs();
+        return;
+      }
       if (!fsEl) {
         const wrapEl = $('#videoWrap');
         if (wrapEl && !wrapEl.classList.contains('fake-fs')) document.body.style.overflow = '';
       }
-      applyBrightFilter(); // 进/退系统全屏时同步亮度滤镜
+      applyBrightFilter();
     };
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
+    // iOS 旧内核: 视频原生全屏开始/结束
+    video.addEventListener('webkitbeginfullscreen', () => {
+      if (!isTouchDevice) return;
+      try { if (video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
+      setTimeout(() => enterFakeFs(), 50);
+    });
+    video.addEventListener('webkitendfullscreen', () => applyBrightFilter());
 
     // 收藏(与详情页同一份本地收藏夹)
     $('#playFav').addEventListener('click', () => {
@@ -1517,9 +1538,8 @@
       btn.classList.toggle('on', idx < 0);
     });
 
-    // ---- 触屏手势: 绑定在整个播放器容器(含全屏状态), preventDefault 阻止页面滚动 ----
-    // 左半边上下滑=亮度(滤镜作用于容器, 全屏不丢) | 右半边上下滑=音量 | 左右横滑=快进快退
-    if (('ontouchstart' in window) || (navigator.maxTouchPoints > 0)) {
+    // ---- 触屏手势: 绑在手势层(全屏时铺满), 左=亮度 右=音量 横滑=进度 ----
+    if (isTouchDevice && gestLayer) {
       const hud = $('#gestHud');
       const fmtT = (sec) => {
         sec = Math.max(0, Math.floor(sec || 0));
@@ -1529,62 +1549,76 @@
       let bright = getSavedBright();
       let sx = 0, sy = 0, mode = '', startVal = 0, halfW = 200;
       let seekBase = 0, seekTarget = -1, lastSeekApply = 0, hudTimer = null;
-      // 竖向手势: 图标 + 竖形进度条(左=亮度 / 右=音量), 一眼可见滑动生效
-      const showBarHud = (icon, pct, side) => {
+
+      const showBarHud = (icon, label, pct, side) => {
+        if (!hud) return;
         const p = Math.max(0, Math.min(100, Math.round(pct)));
-        hud.innerHTML = `<div class="gh-ico">${icon}</div><div class="gh-bar"><i style="height:${p}%"></i></div><div class="gh-val">${p}%</div>`;
-        hud.style.left = side === 'b' ? '24%' : '76%';
-        hud.classList.add('bar');
-        hud.classList.add('show');
+        hud.innerHTML = `<div class="gh-ico">${icon}</div><div class="gh-bar"><i style="height:${p}%"></i></div><div class="gh-val">${label} ${p}%</div>`;
+        hud.style.left = side === 'b' ? '18%' : '82%';
+        hud.style.top = '50%';
+        hud.style.transform = 'translate(-50%, -50%)';
+        hud.classList.add('bar', 'show');
         clearTimeout(hudTimer);
-        hudTimer = setTimeout(() => hud.classList.remove('show'), 550);
+        // 滑动过程中保持显示; 松手后再淡出
+      };
+      const hideBarHudSoon = () => {
+        clearTimeout(hudTimer);
+        hudTimer = setTimeout(() => { if (hud) hud.classList.remove('show'); }, 900);
       };
       const showTextHud = (t) => {
+        if (!hud) return;
         hud.textContent = t;
         hud.style.left = '50%';
+        hud.style.top = '18%';
+        hud.style.transform = 'translateX(-50%)';
         hud.classList.remove('bar');
         hud.classList.add('show');
         clearTimeout(hudTimer);
-        hudTimer = setTimeout(() => hud.classList.remove('show'), 550);
+        hudTimer = setTimeout(() => hud.classList.remove('show'), 900);
       };
 
-      wrap.addEventListener('touchstart', (e) => {
+      gestLayer.addEventListener('touchstart', (e) => {
         const t = e.touches[0];
+        const rect = wrap.getBoundingClientRect();
         sx = t.clientX; sy = t.clientY; mode = ''; seekTarget = -1;
-        halfW = wrap.getBoundingClientRect().width / 2 || 200;
+        halfW = rect.width / 2 || 200;
+        bright = getSavedBright();
       }, { passive: true });
 
-      wrap.addEventListener('touchmove', (e) => {
+      gestLayer.addEventListener('touchmove', (e) => {
         const t = e.touches[0];
         const dx = t.clientX - sx, dyUp = sy - t.clientY;
         if (!mode) {
-          if (Math.abs(dx) < 14 && Math.abs(dyUp) < 14) return;
-          // 主轴判定: 横向=进度; 纵向按触点左/右半区=亮度/音量
-          mode = Math.abs(dx) > Math.abs(dyUp)
+          if (Math.abs(dx) < 12 && Math.abs(dyUp) < 12) return;
+          const rect = wrap.getBoundingClientRect();
+          const localX = sx - (rect.left || 0);
+          mode = Math.abs(dx) > Math.abs(dyUp) * 1.15
             ? 'seek'
-            : (sx - (wrap.getBoundingClientRect().left || 0) < halfW ? 'b' : 'v');
+            : (localX < halfW ? 'b' : 'v');
           startVal = mode === 'b' ? bright : mode === 'v' ? getSavedVol() : (video.currentTime || 0);
           if (mode === 'seek') seekBase = video.currentTime || 0;
         }
-        e.preventDefault(); // 手势期间锁定页面滚动(全屏内同样有效)
+        e.preventDefault();
 
         if (mode === 'b') {
-          // 亮度仅全屏时生效(写记忆); 非全屏提示先全屏
-          bright = Math.min(2.2, Math.max(0.25, startVal + dyUp / 180));
+          // 全屏灵敏度按屏高, 非全屏提示先全屏
+          const sens = Math.max(160, (wrap.getBoundingClientRect().height || 320) * 0.55);
+          bright = Math.min(2.2, Math.max(0.25, startVal + dyUp / sens));
           store.set('vidBright', Number(bright.toFixed(2)));
+          const pct = ((bright - 0.25) / (2.2 - 0.25)) * 100;
           if (isPlayerFs()) {
             applyBrightFilter(bright);
-            showBarHud('☀️', ((bright - 0.25) / (2.2 - 0.25)) * 100, 'b');
+            showBarHud('☀️', '亮度', pct, 'b');
           } else {
-            showTextHud('☀️ 请先全屏再调亮度');
+            showTextHud('☀️ 请先点「全屏」再调亮度');
           }
         } else if (mode === 'v') {
-          const nv = Math.min(1, Math.max(0, startVal + dyUp / 180));
-          try { video.volume = nv; video.muted = nv <= 0; } catch (err) { /* iOS 系统限制 */ }
+          const sens = Math.max(160, (wrap.getBoundingClientRect().height || 320) * 0.55);
+          const nv = Math.min(1, Math.max(0, startVal + dyUp / sens));
+          try { video.volume = nv; video.muted = nv <= 0; } catch (err) {}
           store.set('vidVol', Number(nv.toFixed(2)));
-          showBarHud(nv <= 0 ? '🔇' : '🔊', nv * 100, 'v');
+          showBarHud(nv <= 0 ? '🔇' : '🔊', '音量', nv * 100, 'v');
         } else if (mode === 'seek' && video.duration) {
-          // 整屏宽度 ≈ 快进/快退 90 秒
           seekTarget = Math.min(video.duration - 0.5, Math.max(0, seekBase + dx * (90 / halfW)));
           const fwd = seekTarget >= seekBase;
           showTextHud(`${fwd ? '⏩' : '⏪'} ${fmtT(seekTarget)} / ${fmtT(video.duration)}`);
@@ -1593,65 +1627,68 @@
             try { video.currentTime = seekTarget; lastSeekApply = now; } catch (err) {}
           }
         }
-      }, { passive: false }); // 必须 false 才能 preventDefault 阻止页面滚动
+      }, { passive: false });
 
-      wrap.addEventListener('touchend', () => {
-        // 结束时把最终目标时间精确落位(节流期间可能未应用到最后值)
+      gestLayer.addEventListener('touchend', () => {
         if (mode === 'seek' && seekTarget >= 0 && video.duration) {
           try { video.currentTime = seekTarget; } catch (e) {}
           showTextHud('⏱ 已跳到 ' + fmtT(video.currentTime));
+        } else if (mode === 'b' || mode === 'v') {
+          hideBarHudSoon();
         }
+        mode = ''; seekTarget = -1;
+      });
+      gestLayer.addEventListener('touchcancel', () => {
+        if (mode === 'b' || mode === 'v') hideBarHudSoon();
         mode = ''; seekTarget = -1;
       });
     }
 
-    // 鼠标滚轮: 在播放器上滚轮调音量(Shift+滚轮调亮度)
+    // 鼠标滚轮: 在播放器上滚轮调音量(Shift+滚轮调亮度), 显示进度条
     if (wrap) {
       let wheelHudT = null;
+      const showWheelBar = (icon, label, pct, side) => {
+        const hud = $('#gestHud');
+        if (!hud) return;
+        const p = Math.max(0, Math.min(100, Math.round(pct)));
+        hud.innerHTML = `<div class="gh-ico">${icon}</div><div class="gh-bar"><i style="height:${p}%"></i></div><div class="gh-val">${label} ${p}%</div>`;
+        hud.style.left = side === 'b' ? '18%' : '82%';
+        hud.style.top = '50%';
+        hud.style.transform = 'translate(-50%, -50%)';
+        hud.classList.add('bar', 'show');
+        clearTimeout(wheelHudT);
+        wheelHudT = setTimeout(() => hud.classList.remove('show'), 1000);
+      };
       wrap.addEventListener('wheel', (e) => {
         if (!video.isConnected) return;
         e.preventDefault();
-        const hud = $('#gestHud');
         const step = e.deltaY < 0 ? 0.05 : -0.05;
         if (e.shiftKey) {
           let bright = getSavedBright();
           bright = Math.min(2.2, Math.max(0.25, bright + step));
           store.set('vidBright', Number(bright.toFixed(2)));
           if (!isPlayerFs()) {
+            const hud = $('#gestHud');
             if (hud) {
               hud.textContent = '☀️ 请先全屏再调亮度';
               hud.style.left = '50%';
+              hud.style.top = '18%';
+              hud.style.transform = 'translateX(-50%)';
               hud.classList.remove('bar');
               hud.classList.add('show');
               clearTimeout(wheelHudT);
-              wheelHudT = setTimeout(() => hud.classList.remove('show'), 800);
+              wheelHudT = setTimeout(() => hud.classList.remove('show'), 1000);
             }
             return;
           }
           applyBrightFilter(bright);
-          if (hud) {
-            const p = Math.round(((bright - 0.25) / (2.2 - 0.25)) * 100);
-            hud.innerHTML = `<div class="gh-ico">☀️</div><div class="gh-val">${p}%</div>`;
-            hud.style.left = '50%';
-            hud.classList.remove('bar');
-            hud.classList.add('show');
-            clearTimeout(wheelHudT);
-            wheelHudT = setTimeout(() => hud.classList.remove('show'), 800);
-          }
+          showWheelBar('☀️', '亮度', ((bright - 0.25) / (2.2 - 0.25)) * 100, 'b');
         } else {
           let vol = getSavedVol();
           vol = Math.min(1, Math.max(0, vol + step));
           store.set('vidVol', Number(vol.toFixed(2)));
           try { video.volume = vol; video.muted = vol <= 0; } catch (err) {}
-          if (hud) {
-            const p = Math.round(vol * 100);
-            hud.innerHTML = `<div class="gh-ico">${vol <= 0 ? '🔇' : '🔊'}</div><div class="gh-val">${p}%</div>`;
-            hud.style.left = '50%';
-            hud.classList.remove('bar');
-            hud.classList.add('show');
-            clearTimeout(wheelHudT);
-            wheelHudT = setTimeout(() => hud.classList.remove('show'), 800);
-          }
+          showWheelBar(vol <= 0 ? '🔇' : '🔊', '音量', vol * 100, 'v');
         }
       }, { passive: false });
     }
