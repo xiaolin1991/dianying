@@ -499,7 +499,13 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   position: fixed; inset: 0; z-index: 2147483000;
   width: 100vw !important; height: 100vh !important;
   border-radius: 0;
+  touch-action: none;
 }
+.video-wrap:fullscreen .gest-hud,
+.video-wrap:-webkit-full-screen .gest-hud,
+.video-wrap.fake-fs .gest-hud { z-index: 10; }
+.video-wrap:fullscreen .fs-exit-btn,
+.video-wrap:-webkit-full-screen .fs-exit-btn { display: block; }
 .fs-exit-btn {
   display: none; position: absolute; left: 10px; top: 10px; z-index: 6;
   background: rgba(0,0,0,.5); color: #fff; border: 1px solid rgba(255,255,255,.35);
@@ -526,29 +532,30 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
 #epsNavBot:not(:empty) { margin-top: 12px; }
 
 /* ---- 后台侧边栏多标签布局 ---- */
-.adm-shell { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 18px; align-items: start; }
+.adm-shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: start; }
 .adm-side {
-  position: sticky; top: 74px;
-  display: flex; flex-direction: column; gap: 3px;
-  background: var(--card); border: 1px solid var(--card-br); border-radius: 14px; padding: 9px;
+  position: sticky; top: 18px;
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--card); border: 1px solid var(--card-br); border-radius: 16px; padding: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.06);
 }
 .adm-nav-item {
-  display: flex; align-items: center; gap: 8px; text-align: left;
-  background: none; border: none; border-radius: 10px; cursor: pointer;
-  padding: 9px 11px; font-size: 13.5px; color: var(--dim); font-weight: 600;
-  transition: background .15s, color .15s;
+  display: flex; align-items: center; gap: 8px; text-align: left; width: 100%;
+  background: none; border: none; border-radius: 11px; cursor: pointer;
+  padding: 11px 14px; font-size: 13.5px; color: var(--dim); font-weight: 600;
+  transition: background .15s, color .15s, transform .12s;
 }
 .adm-nav-item:hover { background: var(--bg2); color: var(--txt); }
-.adm-nav-item.on { background: linear-gradient(135deg, var(--acc), var(--acc2)); color: #fff; box-shadow: 0 4px 14px rgba(91,140,255,.30); }
+.adm-nav-item.on { background: linear-gradient(135deg, var(--acc), var(--acc2)); color: #fff; box-shadow: 0 4px 14px rgba(91,140,255,.28); }
 .adm-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 @media (max-width: 820px) {
   .adm-shell { grid-template-columns: 1fr; gap: 10px; }
   .adm-side {
-    position: static; flex-direction: row; overflow-x: auto; padding: 7px; gap: 5px;
+    position: static; flex-direction: row; overflow-x: auto; padding: 8px; gap: 5px;
     -webkit-overflow-scrolling: touch; scrollbar-width: none;
   }
   .adm-side::-webkit-scrollbar { display: none; }
-  .adm-nav-item { white-space: nowrap; padding: 8px 12px; font-size: 12.5px; flex-shrink: 0; }
+  .adm-nav-item { white-space: nowrap; padding: 8px 12px; font-size: 12.5px; flex-shrink: 0; width: auto; }
 }
 
 /* ---- TV 虚拟键盘(盒子无输入法兜底, 遥控器 D-pad 可导航) ---- */
@@ -653,8 +660,29 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
 .live-now { color: var(--acc); font-size: 12.5px; margin-top: 8px; }
 
 /* ---------------- 后台 ---------------- */
-.admin-layout { max-width: 1400px; margin: 26px auto; padding: 0 22px; display: grid; gap: 18px; }
-.admin-card { background: var(--card); border: 1px solid var(--card-br); border-radius: 17px; padding: 24px 26px; }
+.admin-layout { max-width: 1400px; margin: 22px auto 40px; padding: 0 22px; display: grid; gap: 16px; }
+.adm-topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--card-br); border-radius: 16px;
+  padding: 16px 20px; box-shadow: 0 8px 28px rgba(0,0,0,.05);
+}
+.adm-brand { font-size: 18px; font-weight: 800; letter-spacing: .2px; }
+.adm-brand-sub { font-size: 12.5px; color: var(--dim); margin-top: 3px; }
+.adm-top-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.adm-login-wrap {
+  min-height: calc(100vh - 160px); display: flex; align-items: center; justify-content: center;
+  padding: 24px 16px;
+  background:
+    radial-gradient(900px 420px at 15% 10%, color-mix(in srgb, var(--acc) 18%, transparent), transparent 60%),
+    radial-gradient(700px 360px at 90% 80%, color-mix(in srgb, var(--acc2) 14%, transparent), transparent 55%);
+}
+.adm-login-card { width: min(100%, 420px); box-shadow: 0 18px 50px rgba(0,0,0,.12); }
+.adm-login-title { text-align: center; margin: 4px 0 6px; font-size: 22px; }
+.adm-login-sub { text-align: center; margin: 0 0 8px; }
+.admin-card {
+  background: var(--card); border: 1px solid var(--card-br); border-radius: 16px;
+  padding: 22px 24px; box-shadow: 0 6px 22px rgba(0,0,0,.04);
+}
 .admin-card h3 { font-size: 16.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .admin-card .hint { font-size: 12.5px; color: var(--dim); line-height: 1.7; margin-top: 8px; }
 .admin-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 0; border-bottom: 1px dashed var(--card-br); }

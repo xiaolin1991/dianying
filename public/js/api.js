@@ -2,16 +2,36 @@
 (function () {
   'use strict';
 
+  const ADMIN_TOKEN_KEY = 'ntv:adminToken';
+  function getAdminToken() {
+    try { return sessionStorage.getItem(ADMIN_TOKEN_KEY) || ''; } catch (e) { return ''; }
+  }
+  function setAdminToken(tok) {
+    try {
+      if (tok) sessionStorage.setItem(ADMIN_TOKEN_KEY, tok);
+      else sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+    } catch (e) { /* ignore */ }
+  }
+
   async function jfetch(url, opt = {}, timeout = 20000) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeout);
     try {
-      const res = await fetch(url, { ...opt, signal: ctrl.signal });
+      const headers = Object.assign({}, opt.headers || {});
+      // 后台接口: Cookie 失败时用登录下发的 Bearer token 兜底(解决部分环境 Secure Cookie 不落地)
+      if (/^\/api\/admin\//.test(url) && url !== '/api/admin/login') {
+        const tok = getAdminToken();
+        if (tok && !headers.Authorization) headers.Authorization = 'Bearer ' + tok;
+      }
+      const res = await fetch(url, { ...opt, headers, credentials: 'same-origin', signal: ctrl.signal });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         // 游客试看到期: 全局广播, 由应用层弹出注册框
         if (res.status === 401 && data.code === 'login_required') {
           try { window.dispatchEvent(new CustomEvent('xl:need-login')); } catch (e) {}
+        }
+        if (res.status === 401 && /^\/api\/admin\//.test(url) && url !== '/api/admin/login') {
+          setAdminToken('');
         }
         const err = new Error(data.error || ('HTTP ' + res.status));
         err.code = data.code;
@@ -42,13 +62,20 @@
     categories: (source, timeout = 22000) => proxyMacs(source, { ac: 'list' }, timeout),
     detail: (source, ids, timeout = 22000) => proxyMacs(source, { ac: 'videolist', ids }, timeout),
 
-    adminLogin: (password) =>
-      jfetch('/api/admin/login', {
+    adminLogin: async (password) => {
+      const data = await jfetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
-      }),
-    adminLogout: () => jfetch('/api/admin/logout', { method: 'POST' }, 8000),
+      });
+      if (data && data.token) setAdminToken(data.token);
+      return data;
+    },
+    adminLogout: async () => {
+      try { await jfetch('/api/admin/logout', { method: 'POST' }, 8000); }
+      finally { setAdminToken(''); }
+      return { ok: true };
+    },
     adminSession: () => jfetch('/api/admin/session', {}, 8000),
     adminGetSettings: () => jfetch('/api/admin/settings', {}, 8000),
     adminSaveSettings: (patch) =>

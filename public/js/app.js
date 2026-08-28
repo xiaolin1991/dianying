@@ -1289,11 +1289,24 @@
     const wrap = $('#videoWrap');
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
     const getSavedBright = () => Math.min(2.2, Math.max(0.25, Number(store.get('vidBright', 1)) || 1));
+    /** 仅容器级/假全屏时应用亮度滤镜; 退出全屏立即清掉, 避免整页发亮 */
+    const isPlayerFs = () => {
+      if (!wrap) return false;
+      if (wrap.classList.contains('fake-fs')) return true;
+      const fs = document.fullscreenElement || document.webkitFullscreenElement;
+      return fs === wrap;
+    };
+    const applyBrightFilter = (bright) => {
+      if (!wrap) return;
+      try {
+        if (isPlayerFs()) wrap.style.filter = `brightness(${bright == null ? getSavedBright() : bright})`;
+        else wrap.style.filter = '';
+      } catch (e) {}
+    };
     const applyPlayerPrefs = () => {
       const vol = getSavedVol();
-      const bright = getSavedBright();
       try { video.volume = vol; if (vol > 0) video.muted = false; } catch (e) {}
-      if (wrap) try { wrap.style.filter = `brightness(${bright})`; } catch (e) {}
+      applyBrightFilter();
     };
     applyPlayerPrefs();
     ['loadedmetadata', 'canplay', 'playing'].forEach((ev) => video.addEventListener(ev, applyPlayerPrefs));
@@ -1444,43 +1457,49 @@
       else toast('复制失败，可长按按钮查看完整地址', 'err');
     });
 
-    // ⛶ 全屏: 优先「容器级」元素全屏 —— 亮度滤镜/手势/进度滑动在全屏内依然生效;
-    // 浏览器不支持元素全屏(旧 iPhone Safari)时启用自绘假全屏兜底, 手势照常可用
+    // ⛶ 全屏: 触屏优先假全屏/容器全屏(保证亮度·音量手势可用);
+    // 勿用 video.webkitEnterFullscreen — 系统原生全屏会吞掉手势
     $('#fsBtn').addEventListener('click', () => {
-      const wrap = $('#videoWrap');
+      const wrapEl = $('#videoWrap');
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
       if (fsEl) { (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document); return; }
-      if (wrap.classList.contains('fake-fs')) { exitFakeFs(); return; }
+      if (wrapEl.classList.contains('fake-fs')) { exitFakeFs(); return; }
+      const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+      if (isTouch) { enterFakeFs(); return; }
       const legacyFs = () => {
-        if (video.webkitEnterFullscreen) { try { video.webkitEnterFullscreen(); return; } catch (e) {} }
-        if (wrap.requestFullscreen) wrap.requestFullscreen().catch(() => enterFakeFs());
-        else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen();
+        if (wrapEl.requestFullscreen) wrapEl.requestFullscreen().catch(() => enterFakeFs());
+        else if (wrapEl.webkitRequestFullscreen) { try { wrapEl.webkitRequestFullscreen(); } catch (e) { enterFakeFs(); } }
         else enterFakeFs();
       };
-      if (wrap.requestFullscreen) wrap.requestFullscreen().catch(legacyFs);
-      else if (wrap.webkitRequestFullscreen) { try { wrap.webkitRequestFullscreen(); } catch (e) { legacyFs(); } }
+      if (wrapEl.requestFullscreen) wrapEl.requestFullscreen().catch(legacyFs);
+      else if (wrapEl.webkitRequestFullscreen) { try { wrapEl.webkitRequestFullscreen(); } catch (e) { legacyFs(); } }
       else legacyFs();
     });
     function enterFakeFs() {
-      const wrap = $('#videoWrap');
-      wrap.classList.add('fake-fs');
+      const wrapEl = $('#videoWrap');
+      wrapEl.classList.add('fake-fs');
       document.body.style.overflow = 'hidden';
+      applyBrightFilter(getSavedBright());
       screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {});
     }
     function exitFakeFs() {
-      const wrap = $('#videoWrap');
-      wrap.classList.remove('fake-fs');
+      const wrapEl = $('#videoWrap');
+      wrapEl.classList.remove('fake-fs');
       document.body.style.overflow = '';
+      applyBrightFilter(); // 退全屏清亮度滤镜, 恢复页面正常观感
       try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
     }
     $('#fsExit').addEventListener('click', exitFakeFs);
-    document.addEventListener('fullscreenchange', () => {
-      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        // 从系统全屏退出后恢复滚动锁与假全屏状态
-        const wrap = $('#videoWrap');
-        if (wrap && !wrap.classList.contains('fake-fs')) document.body.style.overflow = '';
+    const onFsChange = () => {
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fsEl) {
+        const wrapEl = $('#videoWrap');
+        if (wrapEl && !wrapEl.classList.contains('fake-fs')) document.body.style.overflow = '';
       }
-    });
+      applyBrightFilter(); // 进/退系统全屏时同步亮度滤镜
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
 
     // 收藏(与详情页同一份本地收藏夹)
     $('#playFav').addEventListener('click', () => {
@@ -1550,10 +1569,15 @@
         e.preventDefault(); // 手势期间锁定页面滚动(全屏内同样有效)
 
         if (mode === 'b') {
+          // 亮度仅全屏时生效(写记忆); 非全屏提示先全屏
           bright = Math.min(2.2, Math.max(0.25, startVal + dyUp / 180));
-          try { wrap.style.filter = `brightness(${bright})`; } catch (err) {}
           store.set('vidBright', Number(bright.toFixed(2)));
-          showBarHud('☀️', ((bright - 0.25) / (2.2 - 0.25)) * 100, 'b');
+          if (isPlayerFs()) {
+            applyBrightFilter(bright);
+            showBarHud('☀️', ((bright - 0.25) / (2.2 - 0.25)) * 100, 'b');
+          } else {
+            showTextHud('☀️ 请先全屏再调亮度');
+          }
         } else if (mode === 'v') {
           const nv = Math.min(1, Math.max(0, startVal + dyUp / 180));
           try { video.volume = nv; video.muted = nv <= 0; } catch (err) { /* iOS 系统限制 */ }
@@ -1593,7 +1617,18 @@
           let bright = getSavedBright();
           bright = Math.min(2.2, Math.max(0.25, bright + step));
           store.set('vidBright', Number(bright.toFixed(2)));
-          try { wrap.style.filter = `brightness(${bright})`; } catch (err) {}
+          if (!isPlayerFs()) {
+            if (hud) {
+              hud.textContent = '☀️ 请先全屏再调亮度';
+              hud.style.left = '50%';
+              hud.classList.remove('bar');
+              hud.classList.add('show');
+              clearTimeout(wheelHudT);
+              wheelHudT = setTimeout(() => hud.classList.remove('show'), 800);
+            }
+            return;
+          }
+          applyBrightFilter(bright);
           if (hud) {
             const p = Math.round(((bright - 0.25) / (2.2 - 0.25)) * 100);
             hud.innerHTML = `<div class="gh-ico">☀️</div><div class="gh-val">${p}%</div>`;
@@ -2751,30 +2786,44 @@
 
     /* 未登录 → 登录卡片 */
     if (!hasSession) {
-      v.innerHTML = `<div class="login-box admin-card"><div class="login-logo">
-        <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="none" stroke="var(--acc)" stroke-width="3"/><path d="M19 15.5v17l14-8.5z" fill="var(--acc)"/></svg>
-      </div><h3 style="text-align:center;margin-bottom:18px">管理员登录</h3>
-      <input class="field-input" id="pwdInput" type="password" placeholder="请输入管理密码">
-      <button class="btn primary" id="loginBtn" style="width:100%;justify-content:center;margin-top:14px">登 录</button>
-      <p class="hint" style="text-align:center">初始密码 admin123 · 部署时通过环境变量 ADMIN_PASSWORD 修改</p></div>`;
+      v.innerHTML = `<div class="adm-login-wrap">
+        <div class="login-box admin-card adm-login-card">
+          <div class="login-logo">
+            <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="none" stroke="var(--acc)" stroke-width="3"/><path d="M19 15.5v17l14-8.5z" fill="var(--acc)"/></svg>
+          </div>
+          <h3 class="adm-login-title">管理员登录</h3>
+          <p class="hint adm-login-sub">输入管理密码进入后台控制台</p>
+          <input class="field-input" id="pwdInput" type="password" placeholder="请输入管理密码" autocomplete="current-password">
+          <button class="btn primary" id="loginBtn" style="width:100%;justify-content:center;margin-top:14px">登 录</button>
+          <p class="hint" style="text-align:center;margin-top:14px">初始密码 admin123 · 可在安全中心修改</p>
+        </div></div>`;
       const doLogin = async () => {
         const pwd = $('#pwdInput').value;
         if (!pwd) return toast('请输入密码', 'err');
+        const btn = $('#loginBtn');
+        if (btn) { btn.disabled = true; btn.textContent = '登录中…'; }
         try {
           await API.adminLogin(pwd);
-          store.set('adminPathLive', usedSeg); // 记住可用入口, 站内「前往后台」链接跟随
+          store.set('adminPathLive', usedSeg);
           toast('登录成功', 'ok');
-          renderPanel();
+          // 先切到加载态, 再完整重进后台(避免停在登录页干等)
+          v.innerHTML = `<div class="adm-login-wrap"><div class="login-box admin-card adm-login-card" style="text-align:center">
+            <div class="spin" style="margin:8px auto"></div>
+            <p style="margin-top:14px;font-weight:600">正在进入后台…</p>
+          </div></div>`;
+          await viewAdmin(null, usedSeg);
         } catch (e) {
+          if (btn) { btn.disabled = false; btn.textContent = '登 录'; }
           if (/Failed to fetch|NetworkError|Load failed/i.test(e.message)) {
             toast('无法连接后端：本地请先运行 npm run dev 并访问 http://127.0.0.1:8787', 'err');
           } else {
-            toast(e.message === 'unauthorized' ? '密码错误' : e.message, 'err');
+            toast(e.message === 'unauthorized' || e.message === '密码错误' ? '密码错误' : e.message, 'err');
           }
         }
       };
       $('#loginBtn').addEventListener('click', doLogin);
       $('#pwdInput').addEventListener('keydown', (e) => e.key === 'Enter' && doLogin());
+      setTimeout(() => { const i = $('#pwdInput'); i && i.focus(); }, 60);
       return;
     }
 
@@ -2804,10 +2853,14 @@
       const v2 = $('#view');
       v2.innerHTML = `
         <div class="admin-layout">
-          <div class="page-head" style="margin:0">
-            <div class="page-title">⚙️ 后台管理</div>
-            <div style="display:flex;gap:10px;align-items:center">
+          <div class="adm-topbar">
+            <div>
+              <div class="adm-brand">后台管理</div>
+              <div class="adm-brand-sub">${esc(s.siteName || '晓林影视')}</div>
+            </div>
+            <div class="adm-top-actions">
               <span class="status-pill ${s.storage === 'kv' ? 'ok' : 'warn'}">${s.storage === 'kv' ? 'KV 持久存储' : '内存临时存储'}</span>
+              <a class="btn ghost small" href="#/home">回前台</a>
               <button class="btn ghost small" id="logoutBtn">退出登录</button>
             </div>
           </div>

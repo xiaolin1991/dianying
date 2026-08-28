@@ -1016,8 +1016,9 @@ export default {
         const settings = await getSettings(env);
         if (!(await verifyAdminPassword(env, settings, body.password))) return json({ error: '密码错误' }, 401);
         const token = await makeToken(env);
+        const secure = url.protocol === 'https:' ? '; Secure' : '';
         return json({ token }, 200, {
-          'Set-Cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL}`,
+          'Set-Cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=${SESSION_TTL}`,
         });
       }
       if (path.startsWith('/api/admin/')) {
