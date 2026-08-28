@@ -335,13 +335,23 @@
   }
 
   /* ------------------------------ 卡片渲染 ------------------------------ */
+  /** 桌面浏览器新标签打开; 手机/App 同页打开(便于返回后恢复滚动位置) */
+  function preferNewTab() {
+    try {
+      if (typeof inApp === 'function' && inApp()) return false;
+      if (typeof isMobileUA === 'function' && isMobileUA()) return false;
+      if (typeof isTvDevice === 'function' && isTvDevice()) return false;
+      return true;
+    } catch (e) { return true; }
+  }
   /** 卡片为真实链接; 列表页离开前会缓存 DOM+滚动, 返回时回到原位置 */
   function cardHtml(item) {
     indexTitle(item); // 登记到全站标题索引(供首字母快搜)
     // 海报卡片直接进播放器页面(跳过详情中间页); 详情仍可从播放页「← 详情」进入
     const href = `#/play/${esc(item.sourceKey)}/${encodeURIComponent(item.id)}?ep=0&group=0`;
+    const blank = preferNewTab() ? ' target="_blank" rel="noopener"' : '';
     return `
-      <a class="card" href="${href}">
+      <a class="card" href="${href}"${blank}>
         <div class="card-poster">
           <img loading="lazy" referrerpolicy="no-referrer" src="${esc(item.pic)}" alt=""
                onerror="this.style.visibility='hidden'">
@@ -740,13 +750,14 @@
 
     const cur = { pool: featuredSources(6), pageBy: new Map(), seen: new Set(), year: query.year || '全部' };
     browseCursors.set(cat, cur);
+    const life = { ok: alive }; // 返回本页时 rebind 会换上新的 alive, 才能继续下滑加载
 
     $$('#yearChips .chip').forEach((c) => c.addEventListener('click', () => {
       location.hash = `#/browse/${encodeURIComponent(cat)}?year=${encodeURIComponent(c.dataset.y)}`;
     }));
 
     const statEl = $('#browseStat');
-    const setStat = (t) => { if (alive() && statEl) statEl.textContent = t; };
+    const setStat = (t) => { if (life.ok() && statEl) statEl.textContent = t; };
 
     /** 并发执行一批任务(每源一页), 单个返回立即上屏 */
     async function runWave(tasks) {
@@ -755,12 +766,12 @@
       const CONC = 5;
       const worker = async () => {
         while (idx < tasks.length) {
-          if (!alive()) return added;
+          if (!life.ok()) return added;
           const { s, pg } = tasks[idx++];
           try {
             const r = await API.list(s, pg);
             const grid = $('#browseGrid');
-            if (!grid || !alive()) return added;
+            if (!grid || !life.ok()) return added;
             const frag = [];
             for (const vod of (r.list || [])) {
               const tn = String(vod.type_name || '');
@@ -807,11 +818,11 @@
     let waving = false, exhausted = false, emptyStreak = 0;
     const countCards = () => $$('#browseGrid .card').length;
     async function loadNext() {
-      if (waving || exhausted || !alive()) return;
+      if (waving || exhausted || !life.ok()) return;
       waving = true;
       setStat('⏳ 正在加载更多…');
       const added = await runWave(nextTasks(2));
-      if (!alive()) return;
+      if (!life.ok()) return;
       waving = false;
       if (added <= 0) {
         emptyStreak++;
@@ -827,7 +838,7 @@
       }
     }
     const okFirst = await runWave(nextTasks(2)) > 0; // 首波: 每源前2页并发
-    if (!alive()) return;
+    if (!life.ok()) return;
     waving = false;
     if (okFirst) setStat(`✅ 已显示 ${countCards()} 部`);
     else {
@@ -844,9 +855,11 @@
     const browseKey = listRouteKey(['browse', cat], query);
     activeListPage = {
       key: browseKey,
-      getState: () => ({ cat, year: cur.year }),
+      getState: () => ({ cat, year: cur.year, exhausted }),
       rebind: (alive2) => {
-        if (!alive2()) return;
+        life.ok = alive2;
+        waving = false;
+        if (!life.ok()) return;
         $$('#yearChips .chip').forEach((c) => c.addEventListener('click', () => {
           location.hash = `#/browse/${encodeURIComponent(cat)}?year=${encodeURIComponent(c.dataset.y)}`;
         }));
@@ -857,6 +870,9 @@
           }, { rootMargin: '500px' });
           io2.observe(sen);
         }
+        // 贴底时立即补一批, 避免返回后需手动再滑才触发
+        const r = sen && sen.getBoundingClientRect();
+        if (r && r.top < window.innerHeight + 500 && !exhausted) loadNext();
       },
     };
   }
@@ -901,24 +917,27 @@
 
     const sources = visibleSources();
     const merged = new Map(); // normTitle|year -> item
-    let done = 0, renderTimer = null, reveal = 48;
+    const doneKeys = new Set(); // 已完成搜索的源 key(返回后可准确续搜)
+    let renderTimer = null, reveal = 48, idx = 0, resuming = false;
+    const life = { ok: alive }; // 返回搜索页时换新 alive, 才能继续展示/补搜
+    const doneCount = () => doneKeys.size;
 
     const applyProgress = () => {
-      const finished = done >= sources.length;
+      const finished = doneCount() >= sources.length;
       const bar = $('#progBar'), stat = $('#srcStat'), prog = $('.search-progress', v);
       if (bar) {
-        bar.style.width = Math.round((done / Math.max(sources.length, 1)) * 100) + '%';
+        bar.style.width = Math.round((doneCount() / Math.max(sources.length, 1)) * 100) + '%';
         bar.classList.toggle('done', finished);
       }
       if (stat) {
         stat.innerHTML = finished
           ? `<span class="search-done">✅ 搜索完成</span> · ${sources.length} 个源 · 共 ${merged.size} 条结果`
-          : `<span class="spin"></span> 正在搜索 <b>${done}</b>/${sources.length} 个源 · 已找到 ${merged.size} 条…`;
+          : `<span class="spin"></span> 正在搜索 <b>${doneCount()}</b>/${sources.length} 个源 · 已找到 ${merged.size} 条…`;
       }
       if (prog && finished) prog.remove();
     };
     const renderGrid = () => {
-      if (!alive()) return;
+      if (!life.ok()) return;
       const grid = $('#srGrid');
       if (!grid) return;
       grid.innerHTML = [...merged.values()]
@@ -928,8 +947,9 @@
       if (sen) sen.classList.toggle('hidden', merged.size <= reveal);
     };
     // 滚动分批展示更多结果
-    const srSen = $('#srSentinel');
-    if (srSen && 'IntersectionObserver' in window) {
+    function bindRevealIO() {
+      const srSen = $('#srSentinel');
+      if (!srSen || !('IntersectionObserver' in window)) return;
       const io = new IntersectionObserver((es) => {
         es.forEach((en) => {
           if (en.isIntersecting && reveal < merged.size) { reveal += 48; renderGrid(); }
@@ -937,6 +957,7 @@
       }, { rootMargin: '400px' });
       io.observe(srSen);
     }
+    bindRevealIO();
     // 节流渲染: 任一源返回后 120ms 内合并刷新, 结果逐步出现
     const scheduleRender = () => {
       if (renderTimer) return;
@@ -960,58 +981,71 @@
     };
 
     // 固定并发池: 始终保持 12 个源在搜, 单个完成立即计数/渲染
-    let idx = 0;
     const CONCURRENCY = Math.min(12, sources.length);
     const worker = async () => {
       while (idx < sources.length) {
-        if (!alive()) return;
+        if (!life.ok()) return;
         const i = idx++;
-        try { handle(sources[i], await API.search(sources[i], q)); } catch (e) { /* 该源失败 */ }
-        done++;
+        const s = sources[i];
+        if (!s || doneKeys.has(s.key)) continue;
+        try { handle(s, await API.search(s, q)); } catch (e) { /* 该源失败 */ }
+        doneKeys.add(s.key);
         applyProgress();
       }
     };
-    await Promise.allSettled(Array.from({ length: CONCURRENCY }, worker));
-    if (!alive()) return;
-    if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
-    applyProgress();
-    renderGrid();
-    if (!merged.size) setHtml('#srEmpty', '<div class="big">🙈</div><p>没有找到相关内容</p>');
-    const emptyEl = $('#srEmpty');
-    if (emptyEl && !merged.size) emptyEl.classList.remove('hidden');
+    async function runSearchPool() {
+      if (resuming || doneCount() >= sources.length) return;
+      resuming = true;
+      idx = 0; // 从头扫, 已完成的源靠 doneKeys 跳过
+      await Promise.allSettled(Array.from({ length: CONCURRENCY }, worker));
+      resuming = false;
+      if (!life.ok()) return;
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      applyProgress();
+      renderGrid();
+      if (!merged.size) setHtml('#srEmpty', '<div class="big">🙈</div><p>没有找到相关内容</p>');
+      const emptyEl = $('#srEmpty');
+      if (emptyEl && !merged.size) emptyEl.classList.remove('hidden');
+    }
+    await runSearchPool();
+    if (!life.ok()) return;
 
     const searchKey = listRouteKey(['search'], { q });
     activeListPage = {
       key: searchKey,
-      getState: () => ({ q, reveal, merged: [...merged.values()] }),
+      getState: () => ({
+        q, reveal,
+        doneKeys: [...doneKeys],
+        merged: [...merged.values()],
+        finished: doneCount() >= sources.length,
+      }),
       rebind: (alive2, state) => {
-        if (!alive2()) return;
+        life.ok = alive2;
+        if (!life.ok()) return;
         const inp = $('#searchInput');
-        if (inp && state.q) inp.value = state.q;
-        let reveal2 = state.reveal || 48;
-        const merged2 = new Map();
-        for (const item of (state.merged || [])) {
-          const tkey = String(item.title || '').replace(/[\s·:：,，.!！?？]/g, '').toLowerCase() + '|' + (item.year || '');
-          merged2.set(tkey, item);
+        if (inp && (state.q || q)) inp.value = state.q || q;
+        reveal = state.reveal || reveal || 48;
+        if (Array.isArray(state.merged) && state.merged.length) {
+          merged.clear();
+          for (const item of state.merged) {
+            const tkey = String(item.title || '').replace(/[\s·:：,，.!！?？]/g, '').toLowerCase() + '|' + (item.year || '');
+            merged.set(tkey, item);
+          }
         }
-        const renderGrid2 = () => {
-          if (!alive2()) return;
-          const grid = $('#srGrid');
-          if (!grid) return;
-          grid.innerHTML = [...merged2.values()]
-            .sort((a, b) => b.srcCount - a.srcCount)
-            .slice(0, reveal2).map(cardHtml).join('');
+        doneKeys.clear();
+        for (const k of (state.doneKeys || [])) doneKeys.add(k);
+        applyProgress();
+        renderGrid();
+        bindRevealIO();
+        // 未搜完: 继续并发搜剩余源; 已搜完: 下滑继续揭示更多结果
+        if (doneCount() < sources.length) runSearchPool();
+        else {
           const sen = $('#srSentinel');
-          if (sen) sen.classList.toggle('hidden', merged2.size <= reveal2);
-        };
-        const srSen2 = $('#srSentinel');
-        if (srSen2 && 'IntersectionObserver' in window) {
-          const io2 = new IntersectionObserver((es) => {
-            es.forEach((en) => {
-              if (en.isIntersecting && reveal2 < merged2.size) { reveal2 += 48; renderGrid2(); }
-            });
-          }, { rootMargin: '400px' });
-          io2.observe(srSen2);
+          const r = sen && sen.getBoundingClientRect();
+          if (r && r.top < window.innerHeight + 400 && reveal < merged.size) {
+            reveal = Math.min(merged.size, reveal + 48);
+            renderGrid();
+          }
         }
       },
     };
@@ -2312,9 +2346,10 @@
       <div class="scroll-sentinel" id="srcSentinel"></div>`;
 
     let page = 1, busy = false, exhausted = false, consecFails = 0;
+    const life = { ok: alive };
     const grid = $('#srcGrid'), statusEl = $('#srcStatus');
 
-    const setStatus = (t) => { if (alive() && statusEl) statusEl.textContent = t; };
+    const setStatus = (t) => { if (life.ok() && statusEl) statusEl.textContent = t; };
     const fetchPage = (p, timeout) => (q ? API.search(src, q, p, timeout) : API.list(src, p, cat, timeout));
 
     function showLoadError(msg) {
@@ -2330,14 +2365,14 @@
     }
 
     async function loadPage() {
-      if (busy || exhausted || !alive()) return;
+      if (busy || exhausted || !life.ok()) return;
       busy = true;
       setStatus('⏳ 正在加载…');
       try {
         // 每波并发抓2页: 谁先回来谁先显示; 失败的页自动跳过不挡路
         const batch = [page, page + 1];
         const results = await Promise.allSettled(batch.map((p) => fetchPage(p, 12000)));
-        if (!alive()) return;
+        if (!life.ok()) return;
         let addedAny = false;
         for (let i = 0; i < results.length; i++) {
           const g = $('#srcGrid');
@@ -2371,14 +2406,14 @@
           exhausted = true;
           setStatus(shown ? `✅ 已加载全部（${shown} 部）` : '');
         }
-        if (addedAny && shown < HOME_ROW_COUNT * 3 && !exhausted && alive()) {
+        if (addedAny && shown < HOME_ROW_COUNT * 3 && !exhausted && life.ok()) {
           // 第一屏还没填满就继续补(递归受 busy 守护)
           await loadPage();
         }
       } catch (err) {
         // 任何意外异常都不能卡死 busy 标志(iPad 老 WebKit 实测会因此永久停在骨架屏)
         console.warn('[sources] loadPage error:', err);
-        if (alive()) showLoadError('加载出错：' + (err && err.message ? err.message : '未知错误'));
+        if (life.ok()) showLoadError('加载出错：' + (err && err.message ? err.message : '未知错误'));
       } finally {
         busy = false; // 关键: 无论成功失败/提前return, 必须解锁
       }
@@ -2415,18 +2450,23 @@
         key: listRouteKey(['sources', src.key], { q, cat }),
         getState: () => ({ selKey: src.key, q, cat, page, exhausted }),
         rebind: (alive2, st) => {
-          if (!alive2()) return;
+          life.ok = alive2;
+          busy = false;
+          if (!life.ok()) return;
           if (st && st.page != null) page = st.page;
           if (st && st.exhausted != null) exhausted = st.exhausted;
           attachPanelEvents();
           if (bindSourcesChrome) bindSourcesChrome();
+          const senEl = $('#srcSentinel');
+          const r = senEl && senEl.getBoundingClientRect();
+          if (r && r.top < window.innerHeight + 500 && !exhausted) loadPage();
         },
       };
     }
 
     // 分类节点(异步加载, 不阻塞首屏)
     loadSourceCats(src, alive).then((cats) => {
-      if (!alive() || !cats.length) return;
+      if (!life.ok() || !cats.length) return;
       const box = $('#srcCats');
       if (!box) return;
       box.classList.remove('hidden');
@@ -2440,12 +2480,12 @@
     });
 
     await loadPage();
-    if (!alive()) return;
+    if (!life.ok()) return;
     attachPanelEvents();
     registerSourceListPage();
     // 首屏未填满时继续补
     const chain = () => {
-      if (exhausted || !alive()) return;
+      if (exhausted || !life.ok()) return;
       const senEl = $('#srcSentinel');
       if (!senEl) return;
       const r = senEl.getBoundingClientRect();
