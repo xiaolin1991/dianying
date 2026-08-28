@@ -1243,11 +1243,19 @@
         <div class="play-top-row">
           <div class="play-col">
             <div class="play-stage">
-              <div class="video-wrap" id="videoWrap"><video id="videoEl" controls playsinline webkit-playsinline autoplay></video>
+              <div class="video-wrap" id="videoWrap"><video id="videoEl" playsinline webkit-playsinline autoplay></video>
                 <div class="gest-side gest-left" id="gestLeft" aria-hidden="true"></div>
                 <div class="gest-side gest-right" id="gestRight" aria-hidden="true"></div>
-                <button class="pp-btn" id="ppBtn" type="button" title="播放/暂停" aria-label="播放/暂停">▶</button>
-                <button class="fs-exit-btn" id="fsExit" type="button">✕ 退出全屏</button>
+                <button class="pp-btn" id="ppBtn" type="button" title="播放" aria-label="播放">▶</button>
+                <div class="m-ctrl" id="mCtrl">
+                  <div class="m-ctrl-row">
+                    <span class="m-time" id="mTimeCur">0:00</span>
+                    <input class="m-seek" id="mSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="进度" />
+                    <span class="m-time" id="mTimeDur">0:00</span>
+                    <button type="button" class="m-icon-btn" id="mPpBtn" title="播放/暂停" aria-label="播放/暂停">❚❚</button>
+                    <button type="button" class="m-icon-btn" id="mFsToggle" title="全屏" aria-label="全屏">⛶</button>
+                  </div>
+                </div>
                 <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
                 <div class="video-tip hidden" id="videoTip"></div>
                 <div class="gest-hud" id="gestHud"></div>
@@ -1293,8 +1301,27 @@
     const gestLeft = $('#gestLeft');
     const gestRight = $('#gestRight');
     const ppBtn = $('#ppBtn');
+    const mCtrl = $('#mCtrl');
+    const mSeek = $('#mSeek');
+    const mPpBtn = $('#mPpBtn');
+    const mFsToggle = $('#mFsToggle');
+    const mTimeCur = $('#mTimeCur');
+    const mTimeDur = $('#mTimeDur');
     const stageHome = wrap && wrap.parentElement; // 假全屏结束后还原位置
     let autoFsByOrient = false;
+    // 仅真手机/APK WebView 走假全屏与横屏自动全屏; 带触摸的笔记本不算手机
+    const isMobilePlayer = (() => {
+      const ua = navigator.userAgent || '';
+      if (/Windows NT|Macintosh|Linux x86_64|CrOS/i.test(ua) && !/Android|iPhone|iPod|Mobile/i.test(ua)) return false;
+      if (/iPhone|iPod|Android.+Mobile|Mobile.+Android|xiaolin/i.test(ua)) return true;
+      if (/Android/i.test(ua) && Math.min(screen.width, screen.height) <= 820) return true;
+      return window.matchMedia('(max-width: 820px) and (hover: none) and (pointer: coarse)').matches;
+    })();
+    if (!isMobilePlayer) video.setAttribute('controls', '');
+    else {
+      video.removeAttribute('controls');
+      if (wrap) wrap.classList.add('is-mobile-player');
+    }
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
     const getSavedBright = () => Math.min(2.2, Math.max(0.25, Number(store.get('vidBright', 1)) || 1));
     /** 假全屏 / 容器全屏 / 视频原生全屏 均视为播放器全屏 */
@@ -1320,10 +1347,36 @@
       try { video.volume = vol; if (vol > 0) video.muted = false; } catch (e) {}
       applyBrightFilter();
     };
+    const fmtClock = (sec) => {
+      sec = Math.max(0, Math.floor(sec || 0));
+      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s2 = sec % 60;
+      return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s2).padStart(2, '0');
+    };
+    let mCtrlHideT = null;
+    let mSeeking = false;
+    const bumpMCtrl = () => {
+      if (!isMobilePlayer || !mCtrl) return;
+      mCtrl.classList.add('show');
+      clearTimeout(mCtrlHideT);
+      // 暂停时保持进度条; 播放中无操作 1s 后隐藏
+      if (video.paused || mSeeking) return;
+      mCtrlHideT = setTimeout(() => { if (!video.paused && !mSeeking) mCtrl.classList.remove('show'); }, 1000);
+    };
+    const syncMSeek = () => {
+      if (!mSeek || !video.duration) return;
+      if (mSeeking) return;
+      mSeek.value = String(Math.round((video.currentTime / video.duration) * 1000));
+      if (mTimeCur) mTimeCur.textContent = fmtClock(video.currentTime);
+      if (mTimeDur) mTimeDur.textContent = fmtClock(video.duration);
+    };
     const syncPpBtn = () => {
-      if (!ppBtn) return;
-      ppBtn.textContent = video.paused ? '▶' : '❚❚';
-      ppBtn.classList.toggle('paused', video.paused);
+      if (ppBtn) {
+        ppBtn.textContent = '▶';
+        ppBtn.classList.toggle('paused', video.paused);
+      }
+      if (mPpBtn) mPpBtn.textContent = video.paused ? '▶' : '❚❚';
+      if (mFsToggle) mFsToggle.classList.toggle('on', isPlayerFs());
+      if (isMobilePlayer) bumpMCtrl();
     };
     const togglePlay = () => {
       if (video.paused) video.play().catch(() => {});
@@ -1332,13 +1385,37 @@
     };
     applyPlayerPrefs();
     syncPpBtn();
-    ['loadedmetadata', 'canplay', 'playing', 'pause', 'play'].forEach((ev) => {
-      video.addEventListener(ev, () => { applyPlayerPrefs(); syncPpBtn(); });
+    ['loadedmetadata', 'canplay', 'playing', 'pause', 'play', 'timeupdate', 'durationchange'].forEach((ev) => {
+      video.addEventListener(ev, () => {
+        if (ev === 'timeupdate' || ev === 'durationchange') { syncMSeek(); return; }
+        applyPlayerPrefs();
+        syncPpBtn();
+        syncMSeek();
+      });
     });
     video.addEventListener('volumechange', () => {
       try { if (!video.muted && video.volume >= 0) store.set('vidVol', Number(video.volume.toFixed(2))); } catch (e) {}
     });
-    if (ppBtn) ppBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); });
+    if (ppBtn) ppBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); bumpMCtrl(); });
+    if (mPpBtn) mPpBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); bumpMCtrl(); });
+    if (mSeek) {
+      mSeek.addEventListener('pointerdown', () => { mSeeking = true; bumpMCtrl(); });
+      mSeek.addEventListener('input', () => {
+        if (!video.duration) return;
+        const t = (Number(mSeek.value) / 1000) * video.duration;
+        if (mTimeCur) mTimeCur.textContent = fmtClock(t);
+        bumpMCtrl();
+      });
+      const endSeek = () => {
+        if (!video.duration) { mSeeking = false; return; }
+        try { video.currentTime = (Number(mSeek.value) / 1000) * video.duration; } catch (e) {}
+        mSeeking = false;
+        bumpMCtrl();
+      };
+      mSeek.addEventListener('change', endSeek);
+      mSeek.addEventListener('pointerup', endSeek);
+      mSeek.addEventListener('pointercancel', () => { mSeeking = false; bumpMCtrl(); });
+    }
 
     // 右侧「同类推荐」栏高度 = 播放器实际渲染高度(含窗口缩放自适应; ≤1080px 横排模式自动解除)
     const syncRailH = () => {
@@ -1483,23 +1560,24 @@
       else toast('复制失败，可长按按钮查看完整地址', 'err');
     });
 
-    // ⛶ 全屏: 触屏一律假全屏, 保证左侧亮度/右侧音量手势与进度条可用
-    const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    // ⛶ 全屏: 手机假全屏; 电脑只用浏览器原生 Fullscreen API(真正铺满含隐藏浏览器栏)
+    const toggleFakeFs = () => {
+      if (wrap.classList.contains('fake-fs')) { autoFsByOrient = false; exitFakeFs(); }
+      else { autoFsByOrient = false; enterFakeFs(); }
+      syncPpBtn();
+      bumpMCtrl();
+    };
     $('#fsBtn').addEventListener('click', () => {
       const wrapEl = $('#videoWrap');
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
       if (fsEl) { (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document); return; }
-      if (wrapEl.classList.contains('fake-fs')) { autoFsByOrient = false; exitFakeFs(); return; }
-      if (isTouchDevice) { autoFsByOrient = false; enterFakeFs(); return; }
-      const legacyFs = () => {
-        if (wrapEl.requestFullscreen) wrapEl.requestFullscreen().catch(() => enterFakeFs());
-        else if (wrapEl.webkitRequestFullscreen) { try { wrapEl.webkitRequestFullscreen(); } catch (e) { enterFakeFs(); } }
-        else enterFakeFs();
-      };
-      if (wrapEl.requestFullscreen) wrapEl.requestFullscreen().catch(legacyFs);
-      else if (wrapEl.webkitRequestFullscreen) { try { wrapEl.webkitRequestFullscreen(); } catch (e) { legacyFs(); } }
-      else legacyFs();
+      if (isMobilePlayer) { toggleFakeFs(); return; }
+      // 电脑端: 只走真正的 Fullscreen API, 绝不假全屏
+      if (wrapEl.requestFullscreen) wrapEl.requestFullscreen().catch(() => toast('当前浏览器无法进入全屏', 'err'));
+      else if (wrapEl.webkitRequestFullscreen) { try { wrapEl.webkitRequestFullscreen(); } catch (e) { toast('当前浏览器无法进入全屏', 'err'); } }
+      else toast('当前浏览器不支持全屏', 'err');
     });
+    if (mFsToggle) mFsToggle.addEventListener('click', (e) => { e.stopPropagation(); if (isMobilePlayer) toggleFakeFs(); });
     function enterFakeFs() {
       const wrapEl = $('#videoWrap');
       if (!wrapEl || wrapEl.classList.contains('fake-fs')) return;
@@ -1509,6 +1587,7 @@
       document.documentElement.classList.add('player-fs');
       applyBrightFilter(getSavedBright());
       try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); } catch (e) {}
+      bumpMCtrl();
     }
     function exitFakeFs() {
       const wrapEl = $('#videoWrap');
@@ -1520,15 +1599,17 @@
       applyBrightFilter();
       try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
     }
-    $('#fsExit').addEventListener('click', () => { autoFsByOrient = false; exitFakeFs(); });
     const onFsChange = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      if (isTouchDevice && fsEl === video) {
+      // 手机: 原生全屏钮在假全屏中再点 → 退出假全屏; 非假全屏时点原生 → 改走假全屏
+      if (isMobilePlayer && fsEl === video) {
         try {
           const exit = document.exitFullscreen || document.webkitExitFullscreen;
           if (exit) await exit.call(document);
         } catch (e) {}
-        enterFakeFs();
+        if (wrap.classList.contains('fake-fs')) { autoFsByOrient = false; exitFakeFs(); }
+        else enterFakeFs();
+        syncPpBtn();
         return;
       }
       if (!fsEl) {
@@ -1539,31 +1620,39 @@
         }
       }
       applyBrightFilter();
+      syncPpBtn();
     };
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
     video.addEventListener('webkitbeginfullscreen', () => {
-      if (!isTouchDevice) return;
+      if (!isMobilePlayer) return;
       try { if (video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
-      setTimeout(() => enterFakeFs(), 50);
+      setTimeout(() => {
+        if (wrap.classList.contains('fake-fs')) { autoFsByOrient = false; exitFakeFs(); }
+        else enterFakeFs();
+        syncPpBtn();
+      }, 50);
     });
     video.addEventListener('webkitendfullscreen', () => applyBrightFilter());
 
-    // 手机横屏自动全屏; 转回竖屏自动退出(仅自动进入时)
+    // 仅手机横屏自动全屏; 电脑绝不触发
     const orientMq = window.matchMedia('(orientation: landscape)');
     const onOrientFs = () => {
-      if (!alive() || !video.isConnected || !isTouchDevice) return;
+      if (!alive() || !video.isConnected || !isMobilePlayer) return;
       if (orientMq.matches) {
         if (!isPlayerFs()) { autoFsByOrient = true; enterFakeFs(); }
       } else if (autoFsByOrient && wrap.classList.contains('fake-fs')) {
         autoFsByOrient = false;
         exitFakeFs();
       }
+      syncPpBtn();
     };
-    if (orientMq.addEventListener) orientMq.addEventListener('change', onOrientFs);
-    else if (orientMq.addListener) orientMq.addListener(onOrientFs);
-    window.addEventListener('orientationchange', () => setTimeout(onOrientFs, 120));
-    setTimeout(onOrientFs, 200);
+    if (isMobilePlayer) {
+      if (orientMq.addEventListener) orientMq.addEventListener('change', onOrientFs);
+      else if (orientMq.addListener) orientMq.addListener(onOrientFs);
+      window.addEventListener('orientationchange', () => setTimeout(onOrientFs, 120));
+      setTimeout(onOrientFs, 200);
+    }
 
     // 收藏(与详情页同一份本地收藏夹)
     $('#playFav').addEventListener('click', () => {
@@ -1616,7 +1705,7 @@
         hudTimer = setTimeout(() => hud.classList.remove('show'), 900);
       };
 
-      if (isTouchDevice) {
+      if (isMobilePlayer) {
         const bindSideGest = (el, kind) => {
           if (!el) return;
           let sx = 0, sy = 0, mode = '', startVal = 0, seekBase = 0, seekTarget = -1, lastSeekApply = 0, bright = 1;
@@ -1624,6 +1713,7 @@
             const t = e.touches[0];
             sx = t.clientX; sy = t.clientY; mode = ''; seekTarget = -1;
             bright = getSavedBright();
+            bumpMCtrl();
           }, { passive: true });
           el.addEventListener('touchmove', (e) => {
             const t = e.touches[0];
@@ -1635,6 +1725,7 @@
               if (mode === 'seek') seekBase = video.currentTime || 0;
             }
             e.preventDefault();
+            bumpMCtrl();
             const sens = Math.max(140, (wrap.getBoundingClientRect().height || 300) * 0.5);
             if (mode === 'b') {
               bright = Math.min(2.2, Math.max(0.25, startVal + dyUp / sens));
@@ -1663,17 +1754,24 @@
               showTextHud('⏱ 已跳到 ' + fmtT(video.currentTime));
             } else if (mode === 'b' || mode === 'v') hideBarHudSoon();
             mode = ''; seekTarget = -1;
+            bumpMCtrl();
           });
-          el.addEventListener('touchcancel', () => { if (mode === 'b' || mode === 'v') hideBarHudSoon(); mode = ''; });
+          el.addEventListener('touchcancel', () => { if (mode === 'b' || mode === 'v') hideBarHudSoon(); mode = ''; bumpMCtrl(); });
         };
         bindSideGest(gestLeft, 'b');
         bindSideGest(gestRight, 'v');
 
+        // 单击立刻出进度条; 双击暂停/播放
         let lastTapAt = 0, lastTapX = 0, lastTapY = 0;
+        wrap.addEventListener('touchstart', (e) => {
+          if (e.target.closest('.m-ctrl, .pp-btn')) return;
+          bumpMCtrl();
+        }, { passive: true });
         wrap.addEventListener('touchend', (e) => {
-          if (e.target.closest('.gest-side, .pp-btn, .fs-exit-btn')) return;
+          if (e.target.closest('.gest-side, .pp-btn, .m-ctrl')) return;
           const t = (e.changedTouches && e.changedTouches[0]) || null;
           if (!t) return;
+          bumpMCtrl();
           const now = Date.now();
           const dt = now - lastTapAt;
           const dist = Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY);
@@ -1688,10 +1786,10 @@
         }, { passive: false });
       }
 
-      // 桌面双击暂停/播放
-      if (wrap) {
+      // 桌面双击暂停/播放(电脑保留原生控制条)
+      if (wrap && !isMobilePlayer) {
         wrap.addEventListener('dblclick', (e) => {
-          if (e.target.closest('.pp-btn, .fs-exit-btn, .gest-side')) return;
+          if (e.target.closest('.pp-btn, .m-ctrl, .gest-side')) return;
           e.preventDefault();
           togglePlay();
           showTextHud(video.paused ? '⏸ 已暂停' : '▶ 播放中');

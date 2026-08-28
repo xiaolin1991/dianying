@@ -513,44 +513,71 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   transform: none !important;
 }
 html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% !important; }
-/* 左右侧条手势: 中间留给原生进度条/音量/全屏点击 */
-.gest-side {
-  position: absolute; top: 0; bottom: 52px; width: 20%;
+/* 左右侧条手势: 仅手机; 中间留给点击出进度条 */
+.gest-side { display: none; }
+.video-wrap.is-mobile-player .gest-side {
+  display: block;
+  position: absolute; top: 0; bottom: 56px; width: 20%;
   z-index: 5; touch-action: none; -webkit-tap-highlight-color: transparent;
 }
 .gest-side.gest-left { left: 0; }
 .gest-side.gest-right { right: 0; }
-.video-wrap.fake-fs .gest-side,
-.video-wrap:fullscreen .gest-side,
-.video-wrap:-webkit-full-screen .gest-side { bottom: 60px; width: 18%; }
-/* 中央播放/暂停按钮(手机常显, 桌面悬停或暂停时显) */
+.video-wrap.fake-fs .gest-side { bottom: 64px; width: 18%; }
+/* 中央播放钮: 仅暂停时显示 */
 .pp-btn {
+  display: none;
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   z-index: 7; width: 58px; height: 58px; border-radius: 50%;
   border: 1px solid rgba(255,255,255,.4);
   background: rgba(0,0,0,.5); color: #fff; font-size: 22px; line-height: 1;
   cursor: pointer; backdrop-filter: blur(6px);
-  display: grid; place-items: center; padding: 0;
+  place-items: center; padding: 0;
   opacity: 0; pointer-events: none; transition: opacity .18s;
 }
-.pp-btn.paused { opacity: 1; pointer-events: auto; }
-.video-wrap:hover .pp-btn { opacity: 1; pointer-events: auto; }
-@media (hover: none), (pointer: coarse) {
-  .pp-btn { opacity: .88; pointer-events: auto; }
+.video-wrap.is-mobile-player .pp-btn.paused {
+  display: grid; opacity: 1; pointer-events: auto;
 }
+/* 手机底部控制条: 点按出现, 无操作 1s 隐藏 */
+.m-ctrl {
+  display: none;
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 8;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(transparent, rgba(0,0,0,.72));
+  opacity: 0; pointer-events: none; transition: opacity .15s;
+}
+.video-wrap.is-mobile-player .m-ctrl { display: block; }
+.m-ctrl.show { opacity: 1; pointer-events: auto; }
+.m-ctrl-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.m-time { color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; min-width: 34px; opacity: .9; }
+.m-seek {
+  flex: 1; min-width: 0; height: 22px; margin: 0;
+  -webkit-appearance: none; appearance: none; background: transparent;
+}
+.m-seek::-webkit-slider-runnable-track {
+  height: 3px; border-radius: 99px; background: rgba(255,255,255,.28);
+}
+.m-seek::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; margin-top: -5.5px; border-radius: 50%;
+  background: #fff; border: none; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+}
+.m-seek::-moz-range-track { height: 3px; border-radius: 99px; background: rgba(255,255,255,.28); }
+.m-seek::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%; background: #fff; border: none;
+}
+.m-icon-btn {
+  flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.28); background: rgba(0,0,0,.35);
+  color: #fff; font-size: 15px; line-height: 1; padding: 0;
+  display: grid; place-items: center; cursor: pointer;
+}
+.m-icon-btn.on { border-color: var(--acc); color: var(--acc); }
 .video-wrap:fullscreen .gest-hud,
 .video-wrap:-webkit-full-screen .gest-hud,
 .video-wrap.fake-fs .gest-hud { z-index: 20; }
-.video-wrap:fullscreen .fs-exit-btn,
-.video-wrap:-webkit-full-screen .fs-exit-btn { display: block; z-index: 21; }
-.video-wrap.fake-fs .fs-exit-btn { z-index: 21; }
-.fs-exit-btn {
-  display: none; position: absolute; left: 10px; top: 10px; z-index: 8;
-  background: rgba(0,0,0,.5); color: #fff; border: 1px solid rgba(255,255,255,.35);
-  border-radius: 999px; padding: 5px 13px; font-size: 12.5px; cursor: pointer;
-  backdrop-filter: blur(6px);
-}
-.video-wrap.fake-fs .fs-exit-btn { display: block; }
+.fs-exit-btn { display: none !important; }
 /* 当前播放源角标 */
 .src-badge {
   position: absolute; right: 10px; top: 10px; z-index: 4;
