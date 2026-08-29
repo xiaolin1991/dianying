@@ -1118,52 +1118,43 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
 .toast.ok { border-color: var(--ok); } .toast.err { border-color: var(--danger); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-12px);} to { opacity: 1; transform: none; } }
 #backTop {
-  position: fixed; right: 20px; bottom: 28px; z-index: 80;
-  min-width: 52px; height: auto; padding: 10px 12px 9px;
-  border: none; border-radius: 18px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  position: fixed; right: 22px; bottom: 30px; z-index: 80;
+  width: 50px; height: 50px; padding: 0; border: none; border-radius: 50%;
+  display: grid; place-items: center;
   color: #fff;
-  background: linear-gradient(160deg, var(--acc) 0%, var(--acc2) 100%);
+  background: linear-gradient(145deg, var(--acc) 0%, var(--acc2) 100%);
   box-shadow:
-    0 12px 30px rgba(0, 0, 0, .2),
-    0 0 0 1px rgba(255, 255, 255, .2) inset;
+    0 10px 26px rgba(0, 0, 0, .2),
+    0 0 0 3px color-mix(in srgb, var(--acc) 22%, transparent);
   opacity: 0; pointer-events: none;
-  transform: translateY(16px) scale(.88);
+  transform: translateY(14px) scale(.88);
   transition: opacity .28s ease, transform .28s ease, box-shadow .28s ease, filter .28s ease;
   -webkit-tap-highlight-color: transparent;
   cursor: pointer;
 }
-#backTop .backTop-ico {
-  display: grid; place-items: center; line-height: 0;
-  animation: backTopBob 1.6s ease-in-out infinite;
-}
-#backTop .backTop-txt {
-  font-size: 11px; font-weight: 700; letter-spacing: .12em; line-height: 1.1;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .18);
-}
+#backTop svg { display: block; }
 #backTop.show {
   opacity: 1; pointer-events: auto;
   transform: translateY(0) scale(1);
 }
 #backTop:hover {
-  transform: translateY(-5px) scale(1.05);
-  filter: brightness(1.07);
+  transform: translateY(-4px) scale(1.08);
+  filter: brightness(1.08);
   box-shadow:
-    0 16px 36px rgba(0, 0, 0, .24),
-    0 0 0 1px rgba(255, 255, 255, .25) inset;
+    0 14px 32px rgba(0, 0, 0, .24),
+    0 0 0 4px color-mix(in srgb, var(--acc) 30%, transparent);
 }
-#backTop:hover .backTop-ico { animation: none; }
 #backTop:active {
-  transform: translateY(-1px) scale(.97);
+  transform: translateY(-1px) scale(.96);
   filter: brightness(.98);
 }
-@keyframes backTopBob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
-}
 @media (max-width: 640px) {
-  #backTop { right: 14px; bottom: 20px; min-width: 48px; padding: 9px 10px 8px; border-radius: 16px; }
-  #backTop .backTop-txt { font-size: 10px; }
+  #backTop { right: 16px; bottom: 22px; width: 46px; height: 46px; }
+}
+/* 不支持 color-mix 时仍有主阴影 */
+@supports not (background: color-mix(in srgb, red 50%, blue)) {
+  #backTop { box-shadow: 0 10px 26px rgba(0, 0, 0, .22), 0 0 0 3px rgba(255, 255, 255, .25) inset; }
+  #backTop:hover { box-shadow: 0 14px 32px rgba(0, 0, 0, .26), 0 0 0 3px rgba(255, 255, 255, .3) inset; }
 }
 .modal-mask { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,.72); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 24px; }
 .modal-box { position: relative; width: min(1020px, 96vw); max-height: 92vh; overflow-y: auto; background: var(--bg2); border: 1px solid var(--card-br); border-radius: 18px; padding: 18px; }
