@@ -58,6 +58,24 @@
 
 宝塔也可用计划任务每 10 分钟执行：`bash /网站目录/scripts/sync-app-branch.sh`
 
+### publish/app 分支红叉 /「领先又落后 main」要不要管？
+
+**不用管，也不要合并到 main。**
+
+- `publish/app` 是 **只装 APK 的独立分支**，故意和 `main` 不同步，所以 GitHub 会写「领先 1 / 落后 N」——正常。
+- 上面的红叉多半是 **Cloudflare Workers Builds** 扫了这个分支（分支里没有完整站点代码）失败。到 Cloudflare 控制台把构建分支限制为 **仅 `main`** 即可消掉。
+- **不要删除** 网站上的 `public/APP`。串联关系：
+
+```
+你推 main → Actions 打包 → 写入分支 publish/app
+                ↓
+        服务器自动同步（约 5 分钟）
+                ↓
+        网站 public/APP/*.apk
+                ↓
+        用户打开 /APP/xiaolintv-phone-latest.apk 下载
+```
+
 ## 三、本地手动发布（可选）
 
 本机已打出 APK 时：

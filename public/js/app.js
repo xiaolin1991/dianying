@@ -397,6 +397,8 @@
   }
   function buildThemePop() {
     const pop = $('#themePop');
+    if (!pop) return;
+    pop.classList.add('hidden');
     pop.innerHTML = THEME_META.map((t) => `
       <div class="theme-item ${store.get('theme') === t.id ? 'active' : ''}" data-tid="${t.id}">
         <span class="theme-dot" style="background:${t.bg}; box-shadow: inset 0 0 0 10px ${t.dot}"></span>
@@ -404,6 +406,7 @@
       </div>`).join('');
     $$('.theme-item', pop).forEach((el) => el.addEventListener('click', () => {
       applyTheme(el.dataset.tid);
+      pop.classList.add('hidden');
       toast('已切换主题：' + THEME_META.find((x) => x.id === el.dataset.tid).name, 'ok');
     }));
   }
@@ -4313,7 +4316,12 @@
     // 电视/盒子(无触摸屏): 启用 10-foot 大屏遥控器 UI
     if (isTvDevice()) document.body.classList.add('tv');
     // 静态事件
-    $('#themeBtn').addEventListener('click', (e) => { e.stopPropagation(); $('#themePop').classList.toggle('hidden'); });
+    $('#themeBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pop = $('#themePop');
+      if (!pop) return;
+      pop.classList.toggle('hidden');
+    });
     $('#announceClose').addEventListener('click', () => {
       store.set('annDismissed', $('#announceText').textContent);
       $('#announceBar').classList.add('hidden');

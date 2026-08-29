@@ -14,6 +14,7 @@ a { color: inherit; text-decoration: none; }
 button { font-family: inherit; cursor: pointer; }
 input, textarea, select { font-family: inherit; }
 img { display: block; }
+.hidden { display: none !important; }
 .dl-mode-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dl-mode-row .dl-mode-btn { cursor: pointer; }
 ::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -79,13 +80,14 @@ img { display: block; }
 .icon-btn .ico { width: 19px; height: 19px; fill: var(--dim); display: block; }
 .icon-btn:hover .ico { fill: var(--acc); }
 
-/* 主题弹出层 */
+/* 主题弹出层(默认隐藏; 点调色板按钮才显示) */
 .theme-pop {
-  position: absolute; right: 22px; top: 66px;
+  position: absolute; right: 22px; top: 66px; z-index: 100;
   background: var(--glass); backdrop-filter: blur(18px);
   border: 1px solid var(--card-br); border-radius: 16px; box-shadow: var(--shadow);
   padding: 14px; display: grid; grid-template-columns: repeat(3, 74px); gap: 10px;
 }
+.theme-pop.hidden { display: none !important; }
 .theme-item { display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; padding: 8px 4px; border-radius: 12px; border: 1.5px solid transparent; }
 .theme-item:hover { background: var(--card); }
 .theme-item.active { border-color: var(--acc); }
@@ -93,7 +95,7 @@ img { display: block; }
 .theme-item span { font-size: 11.5px; color: var(--dim); }
 .theme-item.active span { color: var(--txt); }
 
-/* 公告 */
+/* 公告(整条横幅; 点右侧 × 可关闭) */
 .announce {
   max-width: 1336px; margin: 14px auto 0; padding: 10px 16px;
   background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 16%, var(--card)), var(--card));
@@ -101,8 +103,16 @@ img { display: block; }
   display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--txt);
   font-weight: 500;
 }
-.announce #announceText { color: var(--txt); flex: 1; min-width: 0; line-height: 1.45; word-break: break-word; }
-.announce button { background: none; border: none; color: var(--dim); font-size: 18px; line-height: 1; flex-shrink: 0; }
+.announce.hidden { display: none !important; }
+.announce #announceText {
+  color: var(--txt); flex: 1; min-width: 0; line-height: 1.45; word-break: break-word;
+}
+.announce #announceText::before { content: "📢 "; }
+.announce button {
+  background: none; border: none; color: var(--dim); font-size: 20px; line-height: 1;
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
+}
+.announce button:hover { color: var(--txt); background: var(--bg2); }
 
 /* 浅色主题: 公告/顶栏对比度加强, 避免发白像「乱码」 */
 html[data-theme="ocean"] .announce,
@@ -1050,6 +1060,7 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
   border: 1px solid var(--card-br); border-radius: 14px; box-shadow: var(--shadow);
   padding: 10px; width: min(340px, 92vw); max-height: 330px; overflow-y: auto;
 }
+.search-pop.hidden { display: none !important; }
 .sp-head {
   display: flex; justify-content: space-between; align-items: center;
   color: var(--dim); font-size: 12px; padding: 2px 6px 8px;
