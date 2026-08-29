@@ -54,6 +54,10 @@ const DEFAULT_SETTINGS = {
   downloadUrlTv: '',    // 电视/机顶盒版 APK 下载地址, 空则下载页 TV 卡片显示占位
   adminPath: '',        // 后台入口自定义路径段(#/<adminPath>), 空则默认 'admin'
   playerOptimize: false, // 播放加载优化: false=保持现状, true=更快起播的 HLS 参数
+  wmEnabled: false,      // 播放器 PNG 水印开关
+  wmMode: 'corner',      // corner=右下角常显(播放中) | center=正中显示2秒
+  wmUrl: '',             // 水印图片 URL(建议 png)
+  wmOpacity: 0.55,       // 水印透明度 0.15-1
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -171,6 +175,22 @@ async function saveSettings(env, patch) {
     next.homeSources = [...new Set(patch.homeSources.filter((k) => typeof k === 'string' && k.trim()).map((k) => k.trim()))].slice(0, 12);
   }
   if (typeof patch.playerOptimize === 'boolean') next.playerOptimize = patch.playerOptimize;
+  if (typeof patch.wmEnabled === 'boolean') next.wmEnabled = patch.wmEnabled;
+  if (typeof patch.wmMode === 'string') {
+    next.wmMode = patch.wmMode === 'center' ? 'center' : 'corner';
+  }
+  if (typeof patch.wmUrl === 'string') {
+    const u = patch.wmUrl.trim().slice(0, 500);
+    if (u && !/^https?:\/\//i.test(u) && !u.startsWith('data:image/')) {
+      throw new Error('水印图片需为 http(s) 或 data:image 地址');
+    }
+    next.wmUrl = u;
+  }
+  if (patch.wmOpacity !== undefined) {
+    const o = Number(patch.wmOpacity);
+    if (!isFinite(o) || o < 0.15 || o > 1) throw new Error('水印透明度需为 0.15-1');
+    next.wmOpacity = Math.round(o * 100) / 100;
+  }
   if (Array.isArray(patch.configUrls)) {
     // 多采集源: 去空/去重/校验 http(s), 最多 10 条; 空数组 = 清空恢复默认
     const list = [...new Set(patch.configUrls
@@ -721,6 +741,10 @@ export default {
           downloadUrl: s.downloadUrl || '',
           downloadUrlTv: s.downloadUrlTv || '',
           playerOptimize: !!s.playerOptimize,
+          wmEnabled: !!s.wmEnabled,
+          wmMode: s.wmMode === 'center' ? 'center' : 'corner',
+          wmUrl: s.wmUrl || '',
+          wmOpacity: Number(s.wmOpacity == null ? 0.55 : s.wmOpacity),
         });
       }
       /* ---- 后台入口路径探测(只返回 是/否, 不泄露配置值; 用于自定义入口路由) ---- */
@@ -1060,6 +1084,10 @@ export default {
             adminPath: s.adminPath || '',
             homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
             playerOptimize: !!s.playerOptimize,
+            wmEnabled: !!s.wmEnabled,
+            wmMode: s.wmMode === 'center' ? 'center' : 'corner',
+            wmUrl: s.wmUrl || '',
+            wmOpacity: Number(s.wmOpacity == null ? 0.55 : s.wmOpacity),
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });
         }

@@ -1252,10 +1252,12 @@
                     <span class="m-time" id="mTimeCur">0:00</span>
                     <input class="m-seek" id="mSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="进度" />
                     <span class="m-time" id="mTimeDur">0:00</span>
+                    <button type="button" class="m-icon-btn" id="mOrientBtn" title="锁定横屏" aria-label="锁定转向">🔓</button>
                     <button type="button" class="m-icon-btn" id="mPpBtn" title="播放/暂停" aria-label="播放/暂停">❚❚</button>
                     <button type="button" class="m-icon-btn" id="mFsToggle" title="全屏" aria-label="全屏">⛶</button>
                   </div>
                 </div>
+                <img class="player-wm" id="playerWm" alt="" draggable="false" />
                 <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
                 <div class="video-tip hidden" id="videoTip"></div>
                 <div class="gest-hud" id="gestHud"></div>
@@ -1305,10 +1307,14 @@
     const mSeek = $('#mSeek');
     const mPpBtn = $('#mPpBtn');
     const mFsToggle = $('#mFsToggle');
+    const mOrientBtn = $('#mOrientBtn');
+    const playerWm = $('#playerWm');
     const mTimeCur = $('#mTimeCur');
     const mTimeDur = $('#mTimeDur');
     const stageHome = wrap && wrap.parentElement; // 假全屏结束后还原位置
     let autoFsByOrient = false;
+    let fakeFsHistPushed = false;
+    let orientLocked = !!store.get('orientLock', false);
     // 仅真手机/APK WebView 走假全屏与横屏自动全屏; 带触摸的笔记本不算手机
     const isMobilePlayer = (() => {
       const ua = navigator.userAgent || '';
@@ -1415,6 +1421,67 @@
       mSeek.addEventListener('change', endSeek);
       mSeek.addEventListener('pointerup', endSeek);
       mSeek.addEventListener('pointercancel', () => { mSeeking = false; bumpMCtrl(); });
+    }
+
+    // ---- 播放器 PNG 水印(电脑/手机共用, 后台开关与模式) ----
+    {
+      let wmHideT = null;
+      const wmCfg = () => {
+        const st = State.settings || {};
+        return {
+          on: !!st.wmEnabled && !!(st.wmUrl || '').trim(),
+          mode: st.wmMode === 'center' ? 'center' : 'corner',
+          url: String(st.wmUrl || '').trim(),
+          opacity: Math.min(1, Math.max(0.15, Number(st.wmOpacity == null ? 0.55 : st.wmOpacity) || 0.55)),
+        };
+      };
+      const hideWm = () => { if (playerWm) playerWm.classList.remove('show'); };
+      const flashCenterWm = () => {
+        const c = wmCfg();
+        if (!playerWm || !c.on || c.mode !== 'center') return;
+        playerWm.classList.add('show');
+        clearTimeout(wmHideT);
+        wmHideT = setTimeout(hideWm, 2000);
+      };
+      const syncCornerWm = () => {
+        const c = wmCfg();
+        if (!playerWm || !c.on || c.mode !== 'corner') { hideWm(); return; }
+        if (!video.paused) playerWm.classList.add('show');
+        else hideWm();
+      };
+      const applyWm = () => {
+        if (!playerWm) return;
+        const c = wmCfg();
+        playerWm.classList.toggle('mode-center', c.mode === 'center');
+        playerWm.classList.toggle('mode-corner', c.mode === 'corner');
+        playerWm.style.opacity = String(c.opacity);
+        if (!c.on) {
+          playerWm.removeAttribute('src');
+          playerWm.classList.add('off');
+          hideWm();
+          return;
+        }
+        playerWm.classList.remove('off');
+        if (playerWm.getAttribute('src') !== c.url) playerWm.src = c.url;
+        if (c.mode === 'corner') syncCornerWm();
+        else hideWm();
+      };
+      applyWm();
+      video.addEventListener('playing', () => {
+        const c = wmCfg();
+        if (!c.on) return;
+        if (c.mode === 'center') flashCenterWm();
+        else syncCornerWm();
+      });
+      video.addEventListener('play', () => {
+        const c = wmCfg();
+        if (c.on && c.mode === 'center') flashCenterWm();
+        if (c.on && c.mode === 'corner') syncCornerWm();
+      });
+      video.addEventListener('pause', () => {
+        const c = wmCfg();
+        if (c.mode === 'corner') hideWm();
+      });
     }
 
     // 右侧「同类推荐」栏高度 = 播放器实际渲染高度(含窗口缩放自适应; ≤1080px 横排模式自动解除)
@@ -1578,6 +1645,40 @@
       else toast('当前浏览器不支持全屏', 'err');
     });
     if (mFsToggle) mFsToggle.addEventListener('click', (e) => { e.stopPropagation(); if (isMobilePlayer) toggleFakeFs(); });
+
+    const syncOrientBtn = () => {
+      if (!mOrientBtn) return;
+      mOrientBtn.textContent = orientLocked ? '🔒' : '🔓';
+      mOrientBtn.classList.toggle('on', orientLocked);
+      mOrientBtn.title = orientLocked ? '已锁定横屏（点按解锁）' : '锁定横屏（点按锁定）';
+    };
+    const applyOrientLock = () => {
+      try {
+        if (!screen.orientation) return;
+        if (orientLocked && screen.orientation.lock) {
+          screen.orientation.lock('landscape').catch(() => {});
+        } else if (!orientLocked && !wrap.classList.contains('fake-fs') && screen.orientation.unlock) {
+          screen.orientation.unlock();
+        }
+      } catch (e) {}
+    };
+    if (isMobilePlayer && mOrientBtn) {
+      syncOrientBtn();
+      applyOrientLock();
+      mOrientBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        orientLocked = !orientLocked;
+        store.set('orientLock', orientLocked);
+        syncOrientBtn();
+        applyOrientLock();
+        if (orientLocked) toast('已锁定横屏', 'ok');
+        else toast('已解锁转向');
+        bumpMCtrl();
+      });
+    } else if (mOrientBtn) {
+      mOrientBtn.style.display = 'none';
+    }
+
     function enterFakeFs() {
       const wrapEl = $('#videoWrap');
       if (!wrapEl || wrapEl.classList.contains('fake-fs')) return;
@@ -1587,18 +1688,50 @@
       document.documentElement.classList.add('player-fs');
       applyBrightFilter(getSavedBright());
       try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); } catch (e) {}
+      // 压入一层历史: 系统/浏览器返回键先退出全屏, 不离开播放页
+      if (isMobilePlayer && !fakeFsHistPushed) {
+        try { history.pushState({ ntvFakeFs: 1 }, ''); fakeFsHistPushed = true; } catch (e) {}
+      }
       bumpMCtrl();
+      syncPpBtn();
     }
-    function exitFakeFs() {
+    function exitFakeFs(fromPopstate) {
       const wrapEl = $('#videoWrap');
       if (!wrapEl) return;
+      const wasFs = wrapEl.classList.contains('fake-fs');
       wrapEl.classList.remove('fake-fs');
       document.body.style.overflow = '';
       document.documentElement.classList.remove('player-fs');
       if (stageHome && wrapEl.parentElement !== stageHome) stageHome.insertBefore(wrapEl, stageHome.firstChild);
       applyBrightFilter();
-      try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
+      if (orientLocked) applyOrientLock();
+      else {
+        try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
+      }
+      // 点按钮退出时回退刚才压入的历史, 避免多点一次返回
+      if (wasFs && fakeFsHistPushed && !fromPopstate) {
+        fakeFsHistPushed = false;
+        try { history.back(); } catch (e) {}
+      } else {
+        fakeFsHistPushed = false;
+      }
+      syncPpBtn();
     }
+    // App / 浏览器返回键: 全屏中优先退出全屏
+    const onFakeFsPop = () => {
+      if (!alive() || !video.isConnected || !isMobilePlayer) return;
+      if (wrap && wrap.classList.contains('fake-fs')) {
+        autoFsByOrient = false;
+        exitFakeFs(true);
+      }
+    };
+    window.addEventListener('popstate', onFakeFsPop);
+    window.__ntvExitFs = () => {
+      if (!wrap || !wrap.classList.contains('fake-fs')) return false;
+      autoFsByOrient = false;
+      exitFakeFs(true);
+      return true;
+    };
     const onFsChange = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
       // 手机: 原生全屏钮在假全屏中再点 → 退出假全屏; 非假全屏时点原生 → 改走假全屏
@@ -3596,6 +3729,27 @@
               </div>
               <label class="switch"><input type="checkbox" id="playOptSw" ${s.playerOptimize ? 'checked' : ''}><span class="track"></span></label>
             </div>
+          </div>
+          <div class="admin-card" id="wmCard">
+            <h3>💧 播放器水印</h3>
+            <p class="hint">电脑 / 手机 / App 共用。建议使用透明底 <b>PNG</b> 图片（外链 URL）。关闭则不显示。</p>
+            <div class="admin-row">
+              <div class="admin-label">启用水印
+                <small>当前：<b id="wmEnLabel" style="color:${s.wmEnabled ? 'var(--ok)' : 'var(--dim)'}">${s.wmEnabled ? '已开启' : '已关闭'}</b></small>
+              </div>
+              <label class="switch"><input type="checkbox" id="wmEnSw" ${s.wmEnabled ? 'checked' : ''}><span class="track"></span></label>
+            </div>
+            <label class="field-label" style="margin-top:10px">显示方式</label>
+            <select class="field-input" id="wmModeSel">
+              <option value="corner" ${s.wmMode !== 'center' ? 'selected' : ''}>右下角 · 播放中一直显示</option>
+              <option value="center" ${s.wmMode === 'center' ? 'selected' : ''}>正中间 · 开始播放时显示 2 秒</option>
+            </select>
+            <label class="field-label" style="margin-top:10px">水印图片 URL（png 推荐）</label>
+            <input class="field-input" id="wmUrlInput" value="${esc(s.wmUrl || '')}" placeholder="https://example.com/logo.png" maxlength="500">
+            <label class="field-label" style="margin-top:10px">透明度（0.15–1，默认 0.55）</label>
+            <input class="field-input" id="wmOpacityInput" type="number" min="0.15" max="1" step="0.05" value="${esc(String(s.wmOpacity == null ? 0.55 : s.wmOpacity))}">
+            ${s.wmUrl ? `<div style="margin-top:12px"><img src="${esc(s.wmUrl)}" alt="预览" style="max-height:64px;max-width:180px;object-fit:contain;background:rgba(0,0,0,.35);padding:8px;border-radius:8px" onerror="this.style.display='none'"></div>` : ''}
+            <button class="btn primary" id="wmSaveBtn" style="margin-top:14px">保存水印设置</button>
           </div>`;
         $('#adultSwitch').addEventListener('change', async (e) => {
           const on = e.target.checked;
@@ -3649,6 +3803,44 @@
             e.target.checked = !on;
             toast('保存失败：' + err.message, 'err');
           }
+        });
+        $('#wmSaveBtn').addEventListener('click', async () => {
+          const enabled = $('#wmEnSw').checked;
+          const mode = $('#wmModeSel').value === 'center' ? 'center' : 'corner';
+          const url = $('#wmUrlInput').value.trim();
+          const opacity = Number($('#wmOpacityInput').value);
+          if (enabled && !url) return toast('开启水印时请填写 PNG 图片地址', 'err');
+          if (url && !/^https?:\/\//i.test(url) && !url.startsWith('data:image/')) return toast('图片地址需为 http(s) 或 data:image', 'err');
+          try {
+            const res = await API.adminSaveSettings({ wmEnabled: enabled, wmMode: mode, wmUrl: url, wmOpacity: opacity });
+            const st = res.settings || {};
+            State.settings = {
+              ...State.settings,
+              wmEnabled: !!st.wmEnabled,
+              wmMode: st.wmMode === 'center' ? 'center' : 'corner',
+              wmUrl: st.wmUrl || '',
+              wmOpacity: Number(st.wmOpacity == null ? 0.55 : st.wmOpacity),
+            };
+            if (lastSettings) {
+              lastSettings.wmEnabled = State.settings.wmEnabled;
+              lastSettings.wmMode = State.settings.wmMode;
+              lastSettings.wmUrl = State.settings.wmUrl;
+              lastSettings.wmOpacity = State.settings.wmOpacity;
+            }
+            const lb = $('#wmEnLabel');
+            if (lb) {
+              lb.textContent = State.settings.wmEnabled ? '已开启' : '已关闭';
+              lb.style.color = State.settings.wmEnabled ? 'var(--ok)' : 'var(--dim)';
+            }
+            toast('水印设置已保存（新打开影片生效）', 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+        $('#wmEnSw').addEventListener('change', () => {
+          const lb = $('#wmEnLabel');
+          if (!lb) return;
+          const on = $('#wmEnSw').checked;
+          lb.textContent = on ? '已开启（记得点保存）' : '已关闭（记得点保存）';
+          lb.style.color = on ? 'var(--ok)' : 'var(--dim)';
         });
       }
 

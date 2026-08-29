@@ -89,12 +89,21 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (customView != null) {           // 视频全屏中: 先退全屏
+        if (customView != null) {           // 系统视频全屏中: 先退全屏
             hideCustomView();
             return;
         }
-        if (web.canGoBack()) {              // 网页内后退(SPA hash 路由)
-            web.goBack();
+        // 网页假全屏: 优先通知页面退出全屏(不离开播放页)
+        if (web != null) {
+            web.evaluateJavascript(
+                    "(function(){try{if(window.__ntvExitFs&&window.__ntvExitFs())return 1;return 0;}catch(e){return 0;}})()",
+                    value -> {
+                        if ("1".equals(value) || "\"1\"".equals(value)) return;
+                        runOnUiThread(() -> {
+                            if (web.canGoBack()) web.goBack();
+                            else MainActivity.super.onBackPressed();
+                        });
+                    });
             return;
         }
         super.onBackPressed();

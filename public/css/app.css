@@ -574,6 +574,26 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
   display: grid; place-items: center; cursor: pointer;
 }
 .m-icon-btn.on { border-color: var(--acc); color: var(--acc); }
+/* 播放器 PNG 水印 */
+.player-wm {
+  position: absolute; z-index: 6; pointer-events: none;
+  max-width: min(42%, 280px); max-height: 22%;
+  object-fit: contain; opacity: 0;
+  transition: opacity .25s ease; user-select: none;
+}
+.player-wm.off { display: none !important; }
+.player-wm.mode-corner {
+  right: 12px; bottom: 52px; left: auto; top: auto; transform: none;
+}
+.player-wm.mode-center {
+  left: 50%; top: 46%; right: auto; bottom: auto;
+  transform: translate(-50%, -50%);
+  max-width: min(48%, 320px); max-height: 28%;
+}
+.player-wm.show { opacity: 1; }
+.video-wrap.fake-fs .player-wm.mode-corner,
+.video-wrap:fullscreen .player-wm.mode-corner,
+.video-wrap:-webkit-full-screen .player-wm.mode-corner { bottom: 64px; right: 16px; }
 .video-wrap:fullscreen .gest-hud,
 .video-wrap:-webkit-full-screen .gest-hud,
 .video-wrap.fake-fs .gest-hud { z-index: 20; }
