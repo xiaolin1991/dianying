@@ -1258,12 +1258,12 @@
                   </div>
                 </div>
                 <img class="player-wm" id="playerWm" alt="" draggable="false" />
-                <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
                 <div class="video-tip hidden" id="videoTip"></div>
                 <div class="gest-hud" id="gestHud"></div>
               </div>
             </div>
             <div class="play-actions">
+              <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
               <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
               <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
               <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>

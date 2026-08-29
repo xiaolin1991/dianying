@@ -619,16 +619,16 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 .video-wrap:-webkit-full-screen .gest-hud,
 .video-wrap.fake-fs .gest-hud { z-index: 20; }
 .fs-exit-btn { display: none !important; }
-/* 当前播放源角标(左上, 避免与右上水印重叠) */
+/* 当前播放源: 播放器下方操作行左侧(不挡画面) */
 .src-badge {
-  position: absolute; left: 10px; top: 10px; right: auto; z-index: 4;
-  display: inline-flex; align-items: center; gap: 5px; pointer-events: none;
-  background: rgba(0,0,0,.45); backdrop-filter: blur(6px); color: rgba(255,255,255,.92);
-  font-size: 11.5px; padding: 4px 11px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
-  max-width: 55%; overflow: hidden;
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-right: auto; flex-shrink: 1; min-width: 0;
+  background: var(--card); color: var(--dim);
+  font-size: 12px; padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--card-br); max-width: min(48%, 260px); overflow: hidden;
 }
 .src-badge span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.src-badge svg { width: 13px; height: 13px; flex-shrink: 0; }
+.src-badge svg { width: 13px; height: 13px; flex-shrink: 0; opacity: .85; }
 
 /* 选集面板(翻页 + 折叠) */
 #epsBody.hidden { display: none; }
