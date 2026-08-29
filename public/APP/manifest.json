@@ -1,14 +1,14 @@
 {
-  "versionCode": 65,
-  "versionName": "1.0.65",
-  "changelog": "",
-  "publishedAt": "2026-08-29T12:17:30.516Z",
+  "versionCode": 70,
+  "versionName": "1.0.70",
+  "changelog": "晓林影视 1.0.70\n- Actions逻辑有问题 没有自动封装APK",
+  "publishedAt": "2026-08-29T13:42:55.091Z",
   "phone": {
     "path": "/APP/xiaolintv-phone-latest.apk",
-    "versioned": "/APP/xiaolintv-phone-v1.0.65.apk"
+    "versioned": "/APP/xiaolintv-phone-v1.0.70.apk"
   },
   "tv": {
     "path": "/APP/xiaolintv-tv-latest.apk",
-    "versioned": "/APP/xiaolintv-tv-v1.0.65.apk"
+    "versioned": "/APP/xiaolintv-tv-v1.0.70.apk"
   }
 }
