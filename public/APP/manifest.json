@@ -1,14 +1,14 @@
 {
-  "versionCode": 70,
-  "versionName": "1.0.70",
-  "changelog": "晓林影视 1.0.70\n- Actions逻辑有问题 没有自动封装APK",
-  "publishedAt": "2026-08-29T13:42:55.091Z",
+  "versionCode": 74,
+  "versionName": "1.0.74",
+  "changelog": "晓林影视 1.0.74\n- 修复 Actions 工作流校验失败导致 APK/Docker 不触发\n- 升级回到顶部按钮样式以验证发布链路\n- 更新Actions构建规则 每次打包更新APK和Docker\n- 触发 APK 与 Docker 自动构建\n- 美化回到顶部按钮，便于验证整条发布链路\n- 后台APP自动推送更新",
+  "publishedAt": "2026-08-29T14:38:02.610Z",
   "phone": {
     "path": "/APP/xiaolintv-phone-latest.apk",
-    "versioned": "/APP/xiaolintv-phone-v1.0.70.apk"
+    "versioned": "/APP/xiaolintv-phone-v1.0.74.apk"
   },
   "tv": {
     "path": "/APP/xiaolintv-tv-latest.apk",
-    "versioned": "/APP/xiaolintv-tv-v1.0.70.apk"
+    "versioned": "/APP/xiaolintv-tv-v1.0.74.apk"
   }
 }
