@@ -36,13 +36,15 @@
 5. 若已配置 `SITE_URL` + `ADMIN_PASSWORD`：自动更新后台版本号字段（下载链接由「固定最新包」决定）。
 6. GitHub Releases / Artifacts 仍会上传，仅作备份。
 
-## 版本更新如何自动弹窗
+2. CI 打包后把 APK + `manifest.json` 推到独立分支 **`publish/app`**（**不再写 main**，避免和你本地推送打架）。
+3. 服务器同步 APK（二选一）：
+   - `bash scripts/sync-app-branch.sh`（从 `publish/app` 检出到 `public/APP`）
+   - 或宝塔计划任务：每次 `git pull` 后再跑上面脚本
+4. 站点 `/api/settings` **默认自动读取** `/APP/manifest.json` 作为最新版本（后台保持「自动识别」）。
+5. 官方 App 对比本地 versionCode，更低则弹「立即更新」。
+6. 可选 Secrets：`SITE_URL` + `ADMIN_PASSWORD`（把版本号写入后台 KV，双保险）。
 
-1. CI 打包后写入 `public/APP/manifest.json`（含 `versionCode` / `versionName` / `changelog`）。
-2. 站点 `/api/settings` **默认自动读取**该文件作为最新版本（后台「App 版本更新」保持「自动识别」即可）。
-3. 官方 App 对比本地 versionCode，更低则弹「立即更新」，下载走固定 `/APP/xiaolintv-phone-latest.apk`。
-4. 可选：配置 `SITE_URL` + `ADMIN_PASSWORD` 时，CI 还会把版本写入后台 KV（双保险）；不配也能靠 manifest 生效。
-5. 仅当需要临时关掉自动、手填版本时，后台切到「手动填写」。
+> 本地推送若再提示「远程有更新」：在项目根运行 `.\scripts\git-push.ps1`（先 rebase 再推），或 Desktop 先点「拉取」再「推送」。打包机器人已不再改 main，这类提示会少很多。
 
 ## 三、本地手动发布（可选）
 

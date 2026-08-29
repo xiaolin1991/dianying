@@ -79,7 +79,7 @@ jobs:
           cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-tv-latest.apk"
           ls -la out
 
-      # 写入 public/APP、删旧包；若配置 SITE_URL + ADMIN_PASSWORD 则同步后台下载地址与版本号
+      # 写入工作区 public/APP（供本 job 后续使用）；版本信息写入 manifest.json
       - name: Publish APK to public/APP
         env:
           SITE_URL: ${{ secrets.SITE_URL }}
@@ -93,17 +93,28 @@ jobs:
             --name "1.0.$RUN_NO" \
             --changelog "$NOTES"
 
-      - name: Commit public/APP back to main
+      # 不写 main（避免与本地开发推送互相挡住）；APK 推到独立分支 publish/app
+      - name: Push APP to publish/app branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_NO: ${{ github.run_number }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -e
+          STAGE=/tmp/apppub-$RUN_NO
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          cp -a public/APP/. "$STAGE/"
+          WORK=/tmp/appbranch-$RUN_NO
+          rm -rf "$WORK" && mkdir -p "$WORK" && cd "$WORK"
+          git init -b publish/app
+          mkdir -p public/APP
+          cp -a "$STAGE"/. public/APP/
           git add public/APP
-          if git diff --cached --quiet; then
-            echo "No APP changes to commit"
-            exit 0
-          fi
-          git commit -m "chore(app): publish APK v1.0.${{ github.run_number }} to public/APP [skip ci]"
-          git push origin HEAD:main
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "chore(app): APK v1.0.${RUN_NO}"
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push -f origin publish/app
+          echo "published to branch publish/app (main unchanged)"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
