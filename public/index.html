@@ -16,7 +16,7 @@
 <meta name="theme-color" content="#0b1020">
 <link rel="stylesheet" href="./css/themes.css?v=20260829y">
 <!-- 改动 js/css 后必须递增 v= 版本号, 否则手机浏览器/APK WebView 会一直用旧缓存 -->
-<link rel="stylesheet" href="./css/app.css?v=20260829y">
+<link rel="stylesheet" href="./css/app.css?v=20260829ab">
 <link rel="stylesheet" href="./css/tv.css?v=20260826m">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
 </head>
@@ -73,7 +73,12 @@
 </div>
 
 <div id="toastWrap"></div>
-<button id="backTop" title="回到顶部">↑</button>
+<button id="backTop" type="button" title="回到顶部" aria-label="回到顶部">
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+    <path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M6 14.5 12 8.5l6 6"/>
+    <path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="M12 9.2v7.3"/>
+  </svg>
+</button>
 
 <script src="./js/api.js?v=20260829z"></script>
 <script src="./js/player.js?v=20260829a"></script>
