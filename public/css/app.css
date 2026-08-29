@@ -608,23 +608,6 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 .video-wrap:fullscreen .gest-hud,
 .video-wrap:-webkit-full-screen .gest-hud,
 .video-wrap.fake-fs .gest-hud { z-index: 20; }
-/* 桌面右下角自绘全屏: 盖住失效的原生全屏钮位置 */
-.player-fs-fab {
-  display: none;
-  position: absolute; right: 44px; bottom: 4px; z-index: 25;
-  width: 38px; height: 38px; padding: 0; margin: 0;
-  border: none; border-radius: 6px;
-  background: rgba(0,0,0,.01); color: #fff; font-size: 17px; line-height: 1;
-  cursor: pointer;
-  align-items: center; justify-content: center;
-  text-shadow: 0 1px 3px rgba(0,0,0,.85);
-}
-.video-wrap:not(.is-mobile-player) .player-fs-fab { display: inline-flex; }
-.video-wrap:fullscreen .player-fs-fab,
-.video-wrap:-webkit-full-screen .player-fs-fab,
-.video-wrap.fake-fs .player-fs-fab { right: 16px; bottom: 12px; background: rgba(0,0,0,.4); }
-.player-fs-fab:hover { background: rgba(255,255,255,.14); }
-.player-fs-fab.on { color: var(--acc); }
 .fs-exit-btn { display: none !important; }
 /* 当前播放源角标 */
 .src-badge {
