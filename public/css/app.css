@@ -1118,37 +1118,52 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
 .toast.ok { border-color: var(--ok); } .toast.err { border-color: var(--danger); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-12px);} to { opacity: 1; transform: none; } }
 #backTop {
-  position: fixed; right: 22px; bottom: 28px; z-index: 80;
-  width: 48px; height: 48px; padding: 0; border: none; border-radius: 16px;
-  display: grid; place-items: center;
+  position: fixed; right: 20px; bottom: 28px; z-index: 80;
+  min-width: 52px; height: auto; padding: 10px 12px 9px;
+  border: none; border-radius: 18px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   color: #fff;
-  background: linear-gradient(145deg, var(--acc) 0%, var(--acc2) 100%);
+  background: linear-gradient(160deg, var(--acc) 0%, var(--acc2) 100%);
   box-shadow:
-    0 10px 28px rgba(0, 0, 0, .18),
-    0 0 0 1px rgba(255, 255, 255, .18) inset;
+    0 12px 30px rgba(0, 0, 0, .2),
+    0 0 0 1px rgba(255, 255, 255, .2) inset;
   opacity: 0; pointer-events: none;
-  transform: translateY(14px) scale(.9);
+  transform: translateY(16px) scale(.88);
   transition: opacity .28s ease, transform .28s ease, box-shadow .28s ease, filter .28s ease;
   -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
 }
-#backTop svg { display: block; }
+#backTop .backTop-ico {
+  display: grid; place-items: center; line-height: 0;
+  animation: backTopBob 1.6s ease-in-out infinite;
+}
+#backTop .backTop-txt {
+  font-size: 11px; font-weight: 700; letter-spacing: .12em; line-height: 1.1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+}
 #backTop.show {
   opacity: 1; pointer-events: auto;
   transform: translateY(0) scale(1);
 }
 #backTop:hover {
-  transform: translateY(-4px) scale(1.06);
-  filter: brightness(1.06);
+  transform: translateY(-5px) scale(1.05);
+  filter: brightness(1.07);
   box-shadow:
-    0 14px 32px rgba(0, 0, 0, .22),
-    0 0 0 1px rgba(255, 255, 255, .22) inset;
+    0 16px 36px rgba(0, 0, 0, .24),
+    0 0 0 1px rgba(255, 255, 255, .25) inset;
 }
+#backTop:hover .backTop-ico { animation: none; }
 #backTop:active {
   transform: translateY(-1px) scale(.97);
   filter: brightness(.98);
 }
+@keyframes backTopBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
 @media (max-width: 640px) {
-  #backTop { right: 16px; bottom: 22px; width: 44px; height: 44px; border-radius: 14px; }
+  #backTop { right: 14px; bottom: 20px; min-width: 48px; padding: 9px 10px 8px; border-radius: 16px; }
+  #backTop .backTop-txt { font-size: 10px; }
 }
 .modal-mask { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,.72); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 24px; }
 .modal-box { position: relative; width: min(1020px, 96vw); max-height: 92vh; overflow-y: auto; background: var(--bg2); border: 1px solid var(--card-br); border-radius: 18px; padding: 18px; }
