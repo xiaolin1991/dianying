@@ -231,7 +231,8 @@ img { display: block; }
 /* ---------------- 播放器弹窗/页内 ---------------- */
 .video-wrap { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 14px; overflow: hidden; }
 .video-wrap video { position: relative; z-index: 1; width: 100%; height: 100%; background: #000; outline: none; object-fit: contain; display: block; }
-.video-tip { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); font-size: 14px; text-align: center; padding: 20px; }
+.video-tip { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); font-size: 14px; text-align: center; padding: 20px; pointer-events: none; z-index: 8; }
+.video-tip:not(.hidden) { pointer-events: auto; }
 
 /* ---- 播放页布局: 标题/按钮在播放器上方, 换源/选集在下方 ---- */
 html, body { overflow-x: hidden; }
@@ -574,57 +575,39 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
   display: grid; place-items: center; cursor: pointer;
 }
 .m-icon-btn.on { border-color: var(--acc); color: var(--acc); }
-/* 播放器 PNG 水印(须高于 video 层; 用 --wm-op 控制显示透明度, 避免内联 opacity 导致无法隐藏) */
-.player-wm-slot {
-  position: absolute; inset: 0; z-index: 30; pointer-events: none; overflow: hidden;
-  transform: translateZ(0); -webkit-transform: translateZ(0);
-}
+/* 播放器 PNG 水印(不铺满遮罩, 避免挡住点击暂停; pointer-events 全关) */
 .player-wm {
-  position: absolute; z-index: 30; pointer-events: none;
+  position: absolute; z-index: 12; pointer-events: none !important;
   max-width: min(42%, 280px); max-height: 22%;
   object-fit: contain;
   opacity: 0; visibility: hidden;
   transition: opacity .25s ease, visibility .25s ease;
   user-select: none; -webkit-user-drag: none;
-  transform: translateZ(0); -webkit-transform: translateZ(0);
-  will-change: opacity;
 }
 .player-wm.off { display: none !important; }
 .player-wm.mode-corner {
   right: 12px; bottom: 52px; left: auto; top: auto;
-  transform: translateZ(0); -webkit-transform: translateZ(0);
 }
 .player-wm.mode-center {
   left: 50%; top: 46%; right: auto; bottom: auto;
-  transform: translate(-50%, -50%) translateZ(0);
-  -webkit-transform: translate(-50%, -50%) translateZ(0);
+  transform: translate(-50%, -50%);
   max-width: min(48%, 320px); max-height: 28%;
 }
 .player-wm.show {
   opacity: var(--wm-op, 0.55);
   visibility: visible;
 }
-.video-wrap.fake-fs .player-wm-slot { z-index: 40; }
-.video-wrap.fake-fs .player-wm.mode-corner { bottom: 72px; right: 18px; }
-.video-wrap.fake-fs .player-wm.mode-center {
+.video-wrap.fake-fs .player-wm.mode-corner,
+.video-wrap:fullscreen .player-wm.mode-corner,
+.video-wrap:-webkit-full-screen .player-wm.mode-corner { bottom: 72px; right: 18px; }
+.video-wrap.fake-fs .player-wm.mode-center,
+.video-wrap:fullscreen .player-wm.mode-center,
+.video-wrap:-webkit-full-screen .player-wm.mode-center {
   max-width: min(46vw, 380px); max-height: 28vh;
 }
-.video-wrap.fake-fs .gest-hud { z-index: 35; }
-/* 桌面右下角自绘全屏钮(替代原生 controls 全屏) */
-.player-fs-fab {
-  display: none;
-  position: absolute; right: 10px; bottom: 46px; z-index: 32;
-  width: 36px; height: 36px; padding: 0;
-  border: 1px solid rgba(255,255,255,.35);
-  border-radius: 8px;
-  background: rgba(0,0,0,.45); color: #fff; font-size: 16px; line-height: 1;
-  cursor: pointer; backdrop-filter: blur(6px);
-  align-items: center; justify-content: center;
-}
-.video-wrap:not(.is-mobile-player) .player-fs-fab { display: inline-flex; }
-.video-wrap.fake-fs .player-fs-fab { bottom: 18px; right: 16px; background: rgba(0,0,0,.55); }
-.player-fs-fab.on { border-color: var(--acc); color: var(--acc); }
-.player-fs-fab:hover { background: rgba(0,0,0,.65); }
+.video-wrap:fullscreen .gest-hud,
+.video-wrap:-webkit-full-screen .gest-hud,
+.video-wrap.fake-fs .gest-hud { z-index: 20; }
 .fs-exit-btn { display: none !important; }
 /* 当前播放源角标 */
 .src-badge {
