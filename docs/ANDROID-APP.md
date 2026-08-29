@@ -17,14 +17,13 @@
 2. 让 APK 知道你的网站地址：
    - 仓库 → Settings → Secrets and variables → Actions → **Variables**
    - New repository variable：名称 `START_URL`，值填线上地址（如 `https://tv.example.com/`，末尾带 `/`）
-3. （推荐）自动改后台「下载地址 + 版本号」：
+3. （推荐）自动同步 App **版本号**：
    - 同一页 → **Secrets** → 新建：
      - `SITE_URL`：站点根地址，如 `https://tv.example.com`（无尾斜杠也可）
      - `ADMIN_PASSWORD`：与线上后台管理密码一致
-4. 不配 Secrets 时：APK 仍会写入仓库 `public/APP/`，部署后可用；请在后台「APP推广」**手填一次**：
-   - 手机：`/APP/xiaolintv-phone-latest.apk`
-   - TV：`/APP/xiaolintv-tv-latest.apk`  
-   之后固定文件名不变，一般不用再改链接；只需关心 versionCode 是否由 CI 同步。
+   - 后台「APP推广」默认 **固定最新包**（`/APP/xiaolintv-phone-latest.apk`），CI 只覆盖文件并更新 versionCode，**不必再改下载链接**。
+   - 若要用蓝奏云等外链：后台切到「自定义」再填地址。TV 包未上线时保持「关闭」。
+4. 不配 Secrets 时：APK 仍会写入仓库 `public/APP/`；手机下载在固定模式下部署后即可用。
 
 ## 二、每次更新如何出包
 
@@ -37,7 +36,7 @@
    - 删除同目录其它旧的 `xiaolintv-*-v*.apk`
    - 写入 `public/APP/manifest.json`
 3. Actions **commit 回 main**（`[skip ci]` + `paths-ignore: public/APP/**`，不会死循环）。
-4. 若已配置 `SITE_URL` + `ADMIN_PASSWORD`：自动更新后台 `downloadUrl` / `downloadUrlTv` / `appVersionCode` / `appVersionName` / `appChangelog`。
+4. 若已配置 `SITE_URL` + `ADMIN_PASSWORD`：自动更新后台 `appVersionCode` / `appVersionName` / `appChangelog`（下载链接由「固定最新包」模式决定，无需改）。
 5. 服务器 `git pull`（或你的同步方式）后，用户即可访问：
    - `https://你的域名/APP/xiaolintv-phone-latest.apk`
 6. GitHub Releases / Artifacts 仍会上传，仅作备份（私有仓国内常需代理，**不以它作主下载**）。

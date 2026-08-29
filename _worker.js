@@ -50,8 +50,10 @@ const DEFAULT_SETTINGS = {
   allowRegister: true,  // 开放前台注册
   homeSources: [],      // 首页默认加载的影视源 key 顺序列表(空=内置精选)
   appPromoEnabled: true, // 手机访问弹「下载APP」引导弹窗(后台可关)
-  downloadUrl: '',      // 手机版 APK 下载地址(推荐 /APP/xiaolintv-phone-latest.apk), 空则只显示教程
-  downloadUrlTv: '',    // 电视/机顶盒版 APK 下载地址(推荐 /APP/xiaolintv-tv-latest.apk)
+  downloadUrlMode: 'fixed', // fixed=站内最新包 | custom=自定义 downloadUrl
+  downloadUrl: '',      // 自定义手机 APK 地址(仅 custom 模式生效)
+  downloadUrlTvMode: 'off', // off=不提供 | fixed=站内最新 | custom=自定义
+  downloadUrlTv: '',    // 自定义 TV APK 地址(仅 custom 模式生效)
   appVersionCode: 0,     // 最新 App versionCode(整数); 0=不检查更新
   appVersionName: '',    // 最新版本号展示名, 如 1.0.5
   appForceUpdate: false, // 强制更新: App 内不可关闭弹窗
@@ -141,6 +143,31 @@ async function getSettings(env) {
   if ((env.ADULT_ENABLED || '').toLowerCase() === 'true') s.adultEnabled = true;
   return s;
 }
+
+/** 站内固定最新包路径(CI 覆盖同名文件, 链接永不变) */
+const FIXED_PHONE_APK = '/APP/xiaolintv-phone-latest.apk';
+const FIXED_TV_APK = '/APP/xiaolintv-tv-latest.apk';
+
+function phoneDlMode(s) {
+  return s && s.downloadUrlMode === 'custom' ? 'custom' : 'fixed';
+}
+function tvDlMode(s) {
+  const m = s && s.downloadUrlTvMode;
+  if (m === 'fixed' || m === 'custom') return m;
+  return 'off';
+}
+/** 对外生效的下载地址(固定模式忽略自定义字段) */
+function effectiveDownloadUrls(s) {
+  const phone = phoneDlMode(s) === 'custom'
+    ? String(s.downloadUrl || '').trim()
+    : FIXED_PHONE_APK;
+  let tv = '';
+  const tm = tvDlMode(s);
+  if (tm === 'fixed') tv = FIXED_TV_APK;
+  else if (tm === 'custom') tv = String(s.downloadUrlTv || '').trim();
+  return { downloadUrl: phone, downloadUrlTv: tv };
+}
+
 async function saveSettings(env, patch) {
   const cur = await getSettings(env);
   const next = { ...cur };
@@ -166,7 +193,14 @@ async function saveSettings(env, patch) {
   }
   if (typeof patch.allowRegister === 'boolean') next.allowRegister = patch.allowRegister;
   if (typeof patch.appPromoEnabled === 'boolean') next.appPromoEnabled = patch.appPromoEnabled;
+  if (typeof patch.downloadUrlMode === 'string') {
+    next.downloadUrlMode = patch.downloadUrlMode === 'custom' ? 'custom' : 'fixed';
+  }
   if (typeof patch.downloadUrl === 'string') next.downloadUrl = patch.downloadUrl.trim().slice(0, 300);
+  if (typeof patch.downloadUrlTvMode === 'string') {
+    const m = String(patch.downloadUrlTvMode);
+    next.downloadUrlTvMode = (m === 'fixed' || m === 'custom') ? m : 'off';
+  }
   if (typeof patch.downloadUrlTv === 'string') next.downloadUrlTv = patch.downloadUrlTv.trim().slice(0, 300);
   if (patch.appVersionCode !== undefined) {
     const c = Math.round(Number(patch.appVersionCode));
@@ -747,6 +781,7 @@ export default {
       /* ---- 公开设置 ---- */
       if (path === '/api/settings' && request.method === 'GET') {
         const s = await getSettings(env);
+        const dl = effectiveDownloadUrls(s);
         return json({
           siteName: s.siteName,
           defaultTheme: s.defaultTheme,
@@ -756,8 +791,10 @@ export default {
           allowRegister: s.allowRegister !== false,
           homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
           appPromoEnabled: s.appPromoEnabled !== false,
-          downloadUrl: s.downloadUrl || '',
-          downloadUrlTv: s.downloadUrlTv || '',
+          downloadUrl: dl.downloadUrl,
+          downloadUrlTv: dl.downloadUrlTv,
+          downloadUrlMode: phoneDlMode(s),
+          downloadUrlTvMode: tvDlMode(s),
           appVersionCode: Math.max(0, Math.round(Number(s.appVersionCode == null ? 0 : s.appVersionCode)) || 0),
           appVersionName: s.appVersionName || '',
           appForceUpdate: !!s.appForceUpdate,
@@ -1081,6 +1118,7 @@ export default {
           const s = await getSettings(env);
           const { sources: remote } = await loadSources(env, ctx, s);
           const { all } = mergeSources(remote, s);
+          const dl = effectiveDownloadUrls(s);
           return json({
             siteName: s.siteName,
             adultEnabled: s.adultEnabled,
@@ -1102,8 +1140,12 @@ export default {
             trialMinutes: Number(s.trialMinutes === undefined ? 20 : s.trialMinutes),
             allowRegister: s.allowRegister !== false,
             appPromoEnabled: s.appPromoEnabled !== false,
+            downloadUrlMode: phoneDlMode(s),
             downloadUrl: s.downloadUrl || '',
+            downloadUrlEffective: dl.downloadUrl,
+            downloadUrlTvMode: tvDlMode(s),
             downloadUrlTv: s.downloadUrlTv || '',
+            downloadUrlTvEffective: dl.downloadUrlTv,
             appVersionCode: Math.max(0, Math.round(Number(s.appVersionCode == null ? 0 : s.appVersionCode)) || 0),
             appVersionName: s.appVersionName || '',
             appForceUpdate: !!s.appForceUpdate,

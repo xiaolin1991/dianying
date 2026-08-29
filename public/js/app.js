@@ -4009,23 +4009,56 @@
 
       /* ---------------- 📲 APP推广 / 版本更新 ---------------- */
       else if (admTab === 'app') {
+        const phoneMode = s.downloadUrlMode === 'custom' ? 'custom' : 'fixed';
+        const tvMode = (s.downloadUrlTvMode === 'fixed' || s.downloadUrlTvMode === 'custom') ? s.downloadUrlTvMode : 'off';
+        const fixedPhone = '/APP/xiaolintv-phone-latest.apk';
+        const fixedTv = '/APP/xiaolintv-tv-latest.apk';
         main.innerHTML = `
           <div class="admin-card">
             <h3>📲 APP下载弹窗</h3>
-            <p class="hint">手机端<b>已注册且注册满 2 小时</b>的用户会弹出下载引导（游客不弹）；点 × 后 <b>10 天内不再打扰</b>，「不再提示」永久关闭。已在 App 内的用户自动隐藏下载入口。<br>推荐站内直链 <code>/APP/xiaolintv-phone-latest.apk</code>；配置 CI 的 <code>SITE_URL</code> + <code>ADMIN_PASSWORD</code> 后，每次打包会自动写入本页地址与版本号。</p>
+            <p class="hint">手机端<b>已注册且注册满 2 小时</b>的用户会弹出下载引导（游客不弹）。默认用站内<strong>固定最新包</strong>：CI 每次覆盖同名文件，链接不用改。需要蓝奏云等外链时再开「自定义」。</p>
             <label style="display:flex;align-items:center;gap:10px;margin:10px 0;cursor:pointer">
               <span class="switch"><input type="checkbox" id="promoSw" ${s.appPromoEnabled !== false ? 'checked' : ''}><span class="track"></span></span>
               <b>启用下载引导弹窗</b>
             </label>
-            <label class="field-label">📱 手机版 APK 下载地址（留空则下载页仅显示教程；也用于 App 内更新）</label>
-            <input class="field-input" id="dlUrlInput" value="${esc(s.downloadUrl || '')}" placeholder="/APP/xiaolintv-phone-latest.apk 或 https://你的域名/APP/xiaolintv-phone-latest.apk">
-            <label class="field-label" style="margin-top:14px">📺 TV / 机顶盒版 APK 下载地址</label>
-            <input class="field-input" id="dlUrlTvInput" value="${esc(s.downloadUrlTv || '')}" placeholder="/APP/xiaolintv-tv-latest.apk">
-            <button class="btn primary" id="savePromoBtn" style="margin-top:12px">保存弹窗设置</button>
+
+            <h4 style="margin:18px 0 8px;font-size:14px">📱 手机版 APK</h4>
+            <div class="dl-mode-row" id="phoneModeRow">
+              <button type="button" class="chip dl-mode-btn ${phoneMode === 'fixed' ? 'on' : ''}" data-mode="fixed">固定最新包</button>
+              <button type="button" class="chip dl-mode-btn ${phoneMode === 'custom' ? 'on' : ''}" data-mode="custom">自定义</button>
+            </div>
+            <div id="phoneFixedBox" class="${phoneMode === 'fixed' ? '' : 'hidden'}" style="margin-top:10px">
+              <div class="field-input" style="opacity:.85;cursor:default;user-select:all">${esc(fixedPhone)}</div>
+              <p class="hint" style="margin-top:6px">每次打包自动覆盖此文件 → 用户始终下到最新版。生效地址：<code>${esc(location.origin + fixedPhone)}</code></p>
+            </div>
+            <div id="phoneCustomBox" class="${phoneMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
+              <label class="field-label">自定义下载地址（留空则下载页不显示安装按钮）</label>
+              <input class="field-input" id="dlUrlInput" value="${esc(s.downloadUrl || '')}" placeholder="https://… 或 /APP/xxx.apk">
+            </div>
+
+            <h4 style="margin:22px 0 8px;font-size:14px">📺 TV / 机顶盒版 APK</h4>
+            <div class="dl-mode-row" id="tvModeRow">
+              <button type="button" class="chip dl-mode-btn ${tvMode === 'off' ? 'on' : ''}" data-mode="off">关闭</button>
+              <button type="button" class="chip dl-mode-btn ${tvMode === 'fixed' ? 'on' : ''}" data-mode="fixed">固定最新包</button>
+              <button type="button" class="chip dl-mode-btn ${tvMode === 'custom' ? 'on' : ''}" data-mode="custom">自定义</button>
+            </div>
+            <div id="tvOffHint" class="${tvMode === 'off' ? '' : 'hidden'}" style="margin-top:10px">
+              <p class="hint">已关闭：下载页不显示 TV 安装按钮（TV 包未上线时可保持关闭）。</p>
+            </div>
+            <div id="tvFixedBox" class="${tvMode === 'fixed' ? '' : 'hidden'}" style="margin-top:10px">
+              <div class="field-input" style="opacity:.85;cursor:default;user-select:all">${esc(fixedTv)}</div>
+              <p class="hint" style="margin-top:6px">对应文件：<code>${esc(location.origin + fixedTv)}</code></p>
+            </div>
+            <div id="tvCustomBox" class="${tvMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
+              <label class="field-label">自定义 TV 下载地址</label>
+              <input class="field-input" id="dlUrlTvInput" value="${esc(s.downloadUrlTv || '')}" placeholder="https://… 或 /APP/xxx.apk">
+            </div>
+
+            <button class="btn primary" id="savePromoBtn" style="margin-top:16px">保存弹窗设置</button>
           </div>
           <div class="admin-card" style="margin-top:16px">
             <h3>🔄 App 版本更新</h3>
-            <p class="hint">官方 App 启动时对比本地 <b>versionCode</b> 与下方配置；有新版本则弹窗「立即更新」。CI 发布到 <code>public/APP</code> 时会自动同步 versionCode。填 <b>0</b> 表示关闭检查。</p>
+            <p class="hint">官方 App 启动时对比本地 <b>versionCode</b> 与下方配置；有新版本则弹窗「立即更新」（下载走上方手机版生效地址）。CI 发布时会自动同步 versionCode。填 <b>0</b> 表示关闭检查。</p>
             <label class="field-label">最新 versionCode（整数，与 Android 打包 verCode 一致）</label>
             <input class="field-input" id="appVerCodeInput" type="number" min="0" step="1" value="${esc(String(s.appVersionCode == null ? 0 : s.appVersionCode))}" placeholder="例如 2">
             <label class="field-label" style="margin-top:12px">版本名称（展示用，如 1.0.2）</label>
@@ -4038,14 +4071,53 @@
             </label>
             <button class="btn primary" id="saveAppVerBtn">保存版本更新设置</button>
           </div>`;
+
+        let curPhoneMode = phoneMode;
+        let curTvMode = tvMode;
+        const syncPhoneUi = () => {
+          $$('#phoneModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curPhoneMode));
+          $('#phoneFixedBox').classList.toggle('hidden', curPhoneMode !== 'fixed');
+          $('#phoneCustomBox').classList.toggle('hidden', curPhoneMode !== 'custom');
+        };
+        const syncTvUi = () => {
+          $$('#tvModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curTvMode));
+          $('#tvOffHint').classList.toggle('hidden', curTvMode !== 'off');
+          $('#tvFixedBox').classList.toggle('hidden', curTvMode !== 'fixed');
+          $('#tvCustomBox').classList.toggle('hidden', curTvMode !== 'custom');
+        };
+        $$('#phoneModeRow .dl-mode-btn').forEach((btn) => {
+          btn.addEventListener('click', () => { curPhoneMode = btn.dataset.mode; syncPhoneUi(); });
+        });
+        $$('#tvModeRow .dl-mode-btn').forEach((btn) => {
+          btn.addEventListener('click', () => { curTvMode = btn.dataset.mode; syncTvUi(); });
+        });
+
         $('#savePromoBtn').addEventListener('click', async () => {
-          const url = $('#dlUrlInput').value.trim();
-          const urlTv = $('#dlUrlTvInput').value.trim();
-          if (!isValidDownloadUrlInput(url)) return toast('手机版地址需为 http(s) 或站内路径 /APP/...', 'err');
-          if (!isValidDownloadUrlInput(urlTv)) return toast('TV 版地址需为 http(s) 或站内路径 /APP/...', 'err');
+          const url = ($('#dlUrlInput') && $('#dlUrlInput').value.trim()) || '';
+          const urlTv = ($('#dlUrlTvInput') && $('#dlUrlTvInput').value.trim()) || '';
+          if (curPhoneMode === 'custom' && !isValidDownloadUrlInput(url)) {
+            return toast('手机自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
+          }
+          if (curTvMode === 'custom' && !isValidDownloadUrlInput(urlTv)) {
+            return toast('TV 自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
+          }
           try {
-            await API.adminSaveSettings({ appPromoEnabled: $('#promoSw').checked, downloadUrl: url, downloadUrlTv: urlTv });
-            State.settings = { ...State.settings, appPromoEnabled: $('#promoSw').checked, downloadUrl: url, downloadUrlTv: urlTv };
+            const patch = {
+              appPromoEnabled: $('#promoSw').checked,
+              downloadUrlMode: curPhoneMode,
+              downloadUrl: url,
+              downloadUrlTvMode: curTvMode,
+              downloadUrlTv: urlTv,
+            };
+            await API.adminSaveSettings(patch);
+            const effPhone = curPhoneMode === 'custom' ? url : fixedPhone;
+            const effTv = curTvMode === 'fixed' ? fixedTv : (curTvMode === 'custom' ? urlTv : '');
+            State.settings = {
+              ...State.settings,
+              ...patch,
+              downloadUrl: effPhone,
+              downloadUrlTv: effTv,
+            };
             toast('弹窗与下载链接已保存', 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });

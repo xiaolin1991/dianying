@@ -57,7 +57,7 @@ function cleanOldVersioned(keepNames) {
   }
 }
 
-async function syncAdminSettings({ siteUrl, password, phoneUrl, tvUrl, code, name, changelog }) {
+async function syncAdminSettings({ siteUrl, password, code, name, changelog }) {
   const base = normalizeSiteUrl(siteUrl);
   if (!base || !password) {
     console.log('[publish-apk] skip admin sync (SITE_URL / ADMIN_PASSWORD 未设置)');
@@ -73,9 +73,8 @@ async function syncAdminSettings({ siteUrl, password, phoneUrl, tvUrl, code, nam
     throw new Error('admin login failed: ' + (loginData.error || loginRes.status));
   }
   const token = loginData.token;
+  // 下载地址由后台「固定最新包」模式决定，CI 只同步版本号，不覆盖自定义链接
   const patch = {
-    downloadUrl: phoneUrl,
-    downloadUrlTv: tvUrl,
     appVersionCode: code,
     appVersionName: name,
     appChangelog: changelog || '',
@@ -93,9 +92,7 @@ async function syncAdminSettings({ siteUrl, password, phoneUrl, tvUrl, code, nam
   if (!saveRes.ok) {
     throw new Error('admin settings failed: ' + (saveData.error || saveRes.status));
   }
-  console.log('[publish-apk] admin settings updated:', {
-    downloadUrl: phoneUrl,
-    downloadUrlTv: tvUrl,
+  console.log('[publish-apk] admin version synced:', {
     appVersionCode: code,
     appVersionName: name,
   });
@@ -138,8 +135,6 @@ async function main() {
   const siteUrl = normalizeSiteUrl(process.env.SITE_URL || '');
   const phonePath = '/APP/' + phoneLatest;
   const tvPath = '/APP/' + tvLatest;
-  const phoneAbs = siteUrl ? siteUrl + phonePath : phonePath;
-  const tvAbs = siteUrl ? siteUrl + tvPath : tvPath;
 
   const manifest = {
     versionCode: args.code,
@@ -154,8 +149,6 @@ async function main() {
   await syncAdminSettings({
     siteUrl,
     password: process.env.ADMIN_PASSWORD || '',
-    phoneUrl: phoneAbs,
-    tvUrl: tvAbs,
     code: args.code,
     name: verName,
     changelog: args.changelog || '',
