@@ -1326,12 +1326,17 @@
       return window.matchMedia('(max-width: 820px) and (hover: none) and (pointer: coarse)').matches;
     })();
     if (!isMobilePlayer) {
-      // 电脑: 原生控件(音量/画中画/进度) + 用 controlsList 去掉原生全屏, 自绘一个真全屏
+      // 电脑: 原生音量/画中画/进度; 去掉原生全屏(无法改成真全屏+水印); 右下角上方一个自绘真全屏
       video.setAttribute('controls', '');
-      try {
-        video.setAttribute('controlsList', 'nofullscreen');
-        if (video.controlsList && video.controlsList.add) video.controlsList.add('nofullscreen');
-      } catch (e) {}
+      const lockNoNativeFs = () => {
+        try {
+          video.setAttribute('controlsList', 'nofullscreen');
+          if (video.controlsList && video.controlsList.add) video.controlsList.add('nofullscreen');
+        } catch (e) {}
+      };
+      lockNoNativeFs();
+      video.addEventListener('loadedmetadata', lockNoNativeFs);
+      video.addEventListener('play', lockNoNativeFs);
       try { video.disablePictureInPicture = false; } catch (e) {}
       if (wrap) wrap.classList.add('is-desktop-player');
       if (deskFsBtn) deskFsBtn.hidden = false;
