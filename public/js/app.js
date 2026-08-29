@@ -1258,7 +1258,6 @@
                   </div>
                 </div>
                 <img class="player-wm" id="playerWm" alt="" draggable="false" />
-                <button type="button" class="player-fs-fab" id="deskFsBtn" title="全屏" aria-label="全屏">⛶</button>
                 <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
                 <div class="video-tip hidden" id="videoTip"></div>
                 <div class="gest-hud" id="gestHud"></div>
@@ -1308,7 +1307,6 @@
     const mSeek = $('#mSeek');
     const mPpBtn = $('#mPpBtn');
     const mFsToggle = $('#mFsToggle');
-    const deskFsBtn = $('#deskFsBtn');
     const mOrientBtn = $('#mOrientBtn');
     const playerWm = $('#playerWm');
     const mTimeCur = $('#mTimeCur');
@@ -1326,25 +1324,14 @@
       return window.matchMedia('(max-width: 820px) and (hover: none) and (pointer: coarse)').matches;
     })();
     if (!isMobilePlayer) {
-      // 电脑: 原生音量/画中画/进度; 去掉原生全屏(无法改成真全屏+水印); 右下角上方一个自绘真全屏
+      // 电脑: 完整原生控件(含原生全屏/音量/画中画); 双击与下方「全屏」走容器真全屏
       video.setAttribute('controls', '');
-      const lockNoNativeFs = () => {
-        try {
-          video.setAttribute('controlsList', 'nofullscreen');
-          if (video.controlsList && video.controlsList.add) video.controlsList.add('nofullscreen');
-        } catch (e) {}
-      };
-      lockNoNativeFs();
-      video.addEventListener('loadedmetadata', lockNoNativeFs);
-      video.addEventListener('play', lockNoNativeFs);
+      video.removeAttribute('controlsList');
       try { video.disablePictureInPicture = false; } catch (e) {}
-      if (wrap) wrap.classList.add('is-desktop-player');
-      if (deskFsBtn) deskFsBtn.hidden = false;
     } else {
       video.removeAttribute('controls');
       video.removeAttribute('controlsList');
       if (wrap) wrap.classList.add('is-mobile-player');
-      if (deskFsBtn) deskFsBtn.hidden = true;
     }
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
     const getSavedBright = () => Math.min(2.2, Math.max(0.25, Number(store.get('vidBright', 1)) || 1));
@@ -1399,11 +1386,6 @@
       }
       if (mPpBtn) mPpBtn.textContent = video.paused ? '▶' : '❚❚';
       if (mFsToggle) mFsToggle.classList.toggle('on', isPlayerFs());
-      if (deskFsBtn) {
-        deskFsBtn.classList.toggle('on', isPlayerFs());
-        deskFsBtn.title = isPlayerFs() ? '退出全屏' : '全屏';
-        deskFsBtn.setAttribute('aria-label', deskFsBtn.title);
-      }
       if (isMobilePlayer) bumpMCtrl();
     };
     const togglePlay = () => {
@@ -1714,33 +1696,11 @@
     if (mFsToggle && isMobilePlayer) {
       mFsToggle.addEventListener('click', (e) => { e.stopPropagation(); togglePlayerFs(); });
     }
-    // 电脑: 唯一自绘全屏钮 → 真全屏(原生条保留音量/画中画, 已用 nofullscreen 去掉原生全屏)
-    if (deskFsBtn && !isMobilePlayer) {
-      const doDeskFs = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-        autoFsByOrient = false;
-        if (wrap && wrap.classList.contains('fake-fs')) exitFakeFs();
-        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-        if (fsEl === wrap) {
-          const exit = document.exitFullscreen || document.webkitExitFullscreen;
-          if (exit) exit.call(document);
-        } else if (wrap && wrap.requestFullscreen) {
-          wrap.requestFullscreen().then(() => requestAnimationFrame(() => refreshPlayerWm())).catch(() => {});
-        } else if (wrap && wrap.webkitRequestFullscreen) {
-          try { wrap.webkitRequestFullscreen(); } catch (err) {}
-        }
-        syncPpBtn();
-      };
-      deskFsBtn.addEventListener('pointerdown', doDeskFs);
-      deskFsBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
-    }
-    // 桌面单击画面暂停/播放(避开原生控件条)
+    // 桌面单击画面暂停/播放(避开原生控件条); 双击另走真全屏
     if (wrap && !isMobilePlayer) {
       let deskClickT = null;
       wrap.addEventListener('click', (e) => {
-        if (e.target.closest('.player-fs-fab, .m-ctrl, button, a, input, select')) return;
+        if (e.target.closest('.m-ctrl, button, a, input, select')) return;
         const rect = wrap.getBoundingClientRect();
         if (e.clientY > rect.bottom - 52) return;
         e.preventDefault();
@@ -1856,32 +1816,16 @@
     document.addEventListener('keydown', onFsEsc);
     const onFsChange = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      // 万一仍进入 video 原生全屏: 静默退出(勿弹提示); 电脑不再假全屏兜底
-      if (fsEl === video && wrap) {
-        wrap._ntvFsConvert = true;
-        try {
-          if (wrap.requestFullscreen) await wrap.requestFullscreen();
-          else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen();
-          else {
-            const exit = document.exitFullscreen || document.webkitExitFullscreen;
-            if (exit) await exit.call(document);
-            if (isMobilePlayer) enterFakeFs();
-          }
-        } catch (e) {
-          try {
-            const exit = document.exitFullscreen || document.webkitExitFullscreen;
-            if (exit) await exit.call(document);
-          } catch (e2) {}
-          if (isMobilePlayer) enterFakeFs();
-        }
-        wrap._ntvFsConvert = false;
+      // 电脑原生全屏钮: 保持 video 全屏, 不拦截、不转假全屏
+      // 双击 / 下方「全屏」走的是容器真全屏(wrap), 此处仅同步状态
+      if (fsEl === video) {
+        applyBrightFilter();
         syncPpBtn();
         refreshPlayerWm();
         return;
       }
       if (!fsEl) {
         const wrapEl = $('#videoWrap');
-        if (wrapEl && wrapEl._ntvFsConvert) return;
         if (wrapEl && !wrapEl.classList.contains('fake-fs')) {
           document.body.style.overflow = '';
           document.documentElement.classList.remove('player-fs');

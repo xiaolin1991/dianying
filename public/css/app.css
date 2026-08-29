@@ -586,7 +586,7 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 }
 .player-wm.off { display: none !important; }
 .player-wm.mode-corner {
-  right: 12px; bottom: 100px; left: auto; top: auto;
+  right: 12px; bottom: 56px; left: auto; top: auto;
 }
 .player-wm.mode-center {
   left: 50%; top: 46%; right: auto; bottom: auto;
@@ -608,42 +608,6 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 .video-wrap:fullscreen .gest-hud,
 .video-wrap:-webkit-full-screen .gest-hud,
 .video-wrap.fake-fs .gest-hud { z-index: 20; }
-/*
- * 原生 video 全屏无法改成「带水印的容器真全屏」, 必须去掉原生全屏入口。
- * controlsList=nofullscreen 在部分 Chrome 仍会画出全屏图标, 再用伪元素去掉,
- * 自绘钮放在控件条上方, 避免和原生条叠成两个。
- */
-.video-wrap.is-desktop-player video::-webkit-media-controls-fullscreen-button {
-  display: none !important;
-  width: 0 !important;
-  min-width: 0 !important;
-  max-width: 0 !important;
-  height: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  left: -9999px !important;
-}
-.player-fs-fab {
-  display: none;
-  position: absolute; right: 10px; bottom: 54px; z-index: 30;
-  width: 40px; height: 40px; padding: 0; margin: 0;
-  border: 1px solid rgba(255,255,255,.28); border-radius: 10px;
-  background: rgba(0,0,0,.55); color: #fff; font-size: 18px; line-height: 1;
-  cursor: pointer;
-  align-items: center; justify-content: center;
-  backdrop-filter: blur(6px);
-  box-shadow: 0 2px 10px rgba(0,0,0,.35);
-}
-.video-wrap.is-desktop-player .player-fs-fab { display: inline-flex; }
-.video-wrap:fullscreen .player-fs-fab,
-.video-wrap:-webkit-full-screen .player-fs-fab {
-  right: 18px; bottom: 18px;
-}
-.player-fs-fab:hover { background: rgba(0,0,0,.72); border-color: rgba(255,255,255,.45); }
-.player-fs-fab.on { border-color: var(--acc); color: var(--acc); }
 .fs-exit-btn { display: none !important; }
 /* 当前播放源角标 */
 .src-badge {
