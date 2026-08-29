@@ -1,14 +1,14 @@
 {
-  "versionCode": 75,
-  "versionName": "1.0.75",
-  "changelog": "晓林影视 1.0.75\n- 圆形渐变回到顶部按钮，验证整条发布链路",
-  "publishedAt": "2026-08-29T14:43:04.117Z",
+  "versionCode": 76,
+  "versionName": "1.0.76",
+  "changelog": "晓林影视 1.0.76\n- Actions构建APK和Docker发布修复",
+  "publishedAt": "2026-08-29T14:49:36.214Z",
   "phone": {
     "path": "/APP/xiaolintv-phone-latest.apk",
-    "versioned": "/APP/xiaolintv-phone-v1.0.75.apk"
+    "versioned": "/APP/xiaolintv-phone-v1.0.76.apk"
   },
   "tv": {
     "path": "/APP/xiaolintv-tv-latest.apk",
-    "versioned": "/APP/xiaolintv-tv-v1.0.75.apk"
+    "versioned": "/APP/xiaolintv-tv-v1.0.76.apk"
   }
 }
