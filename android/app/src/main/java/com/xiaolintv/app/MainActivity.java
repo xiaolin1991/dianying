@@ -2,11 +2,14 @@ package com.xiaolintv.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -44,13 +47,43 @@ public class MainActivity extends Activity {
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         // 卡片是 target=_blank: 关闭多窗口后, 新窗口导航会落到当前 WebView, 不弹出外部浏览器
         s.setSupportMultipleWindows(false);
-        // 专属 UA 标识: 网站据此识别"已在官方 App 内", 自动隐藏下载入口与推广弹窗
-        s.setUserAgentString(s.getUserAgentString() + " XIAOLIN-TV-APP/" + android.os.Build.VERSION.RELEASE);
+        // 专属 UA: 网站识别官方 App, 并读取版本做更新检查
+        // 格式: XIAOLIN-TV-APP/<versionName>/<versionCode>
+        s.setUserAgentString(
+                s.getUserAgentString()
+                        + " XIAOLIN-TV-APP/"
+                        + BuildConfig.VERSION_NAME
+                        + "/"
+                        + BuildConfig.VERSION_CODE);
 
         web.setWebViewClient(new WebViewClient() {
+            private boolean openExternal(String url) {
+                if (url == null) return false;
+                String u = url.toLowerCase();
+                // APK / 应用市场链接 → 系统下载或安装器(应用内更新)
+                if (u.contains(".apk") || u.startsWith("market:") || u.startsWith("intent:")) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                        return true;
+                    } catch (Exception e) {
+                        return false;
+                    }
+                }
+                return false;
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return false; // 全部站内加载
+                if (openExternal(url)) return true;
+                return false;
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (request != null && request.getUrl() != null) {
+                    if (openExternal(request.getUrl().toString())) return true;
+                }
+                return false;
             }
         });
 

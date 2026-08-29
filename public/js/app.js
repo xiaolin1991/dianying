@@ -3019,8 +3019,14 @@
 
   /* ---- APP 下载引导弹窗: 首次访问弹出; 永久关闭 or 10天后再弹; 后台可整体关闭 ---- */
   // 已在官方 App 内? (安卓壳 WebView 专属UA / iOS PWA standalone 模式)
+  // UA: … XIAOLIN-TV-APP/<versionName>/<versionCode>
   function inApp() {
     return /XIAOLIN-TV-APP/i.test(navigator.userAgent || '') || isStandalone();
+  }
+  function parseAppClient() {
+    const m = (navigator.userAgent || '').match(/XIAOLIN-TV-APP\/([^/\s]+)(?:\/(\d+))?/i);
+    if (!m) return null;
+    return { name: String(m[1] || ''), code: Math.max(0, parseInt(m[2] || '0', 10) || 0) };
   }
   function isMobileUA() { return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || ''); }
   function isStandalone() {
@@ -3074,6 +3080,73 @@
       if (st.lastShown && Date.now() - st.lastShown < TEN_DAYS) return;        // 10天内不重复
       store.set('appPromoState', { ...st, lastShown: Date.now() });
       setTimeout(openAppPromoModal, 1500);                                     // 等首屏渲染完再弹
+    } catch (e) { /* ignore */ }
+  }
+
+  /* ---- App 内版本更新弹窗 ---- */
+  function openAppUpdateModal(opts) {
+    const { latestName, latestCode, force, changelog, apkUrl } = opts;
+    if (document.getElementById('appUpdateMask')) return;
+    const client = parseAppClient();
+    const box = document.createElement('div');
+    box.id = 'appUpdateMask';
+    box.className = 'modal-mask app-update-mask';
+    const notes = (changelog || '').trim()
+      ? `<div class="upd-notes">${esc(changelog).replace(/\n/g, '<br>')}</div>`
+      : '<div class="upd-notes dim">修复问题并提升稳定性，建议立即更新。</div>';
+    box.innerHTML = `<div class="modal-box promo-box upd-box">
+        ${force ? '' : '<button type="button" class="modal-close promo-x" aria-label="关闭">×</button>'}
+        <div class="promo-hero">
+          <img class="promo-icon" src="./icons/icon-192.png" alt="App">
+          <div class="promo-title-wrap">
+            <h3 class="promo-title">发现新版本</h3>
+            <div class="promo-sub">v${esc(latestName || String(latestCode))}${client && client.name ? ` · 当前 ${esc(client.name)}` : ''}</div>
+          </div>
+        </div>
+        ${notes}
+        <a class="btn primary promo-go" id="updGoBtn" href="${esc(apkUrl)}" rel="noopener">⬇️ 立即更新</a>
+        ${force ? '<div class="upd-force-tip">此版本为强制更新，请安装后再继续使用</div>' : '<button type="button" class="promo-skip" id="updLater">稍后提醒</button>'}
+      </div>`;
+    const close = () => {
+      if (force) return;
+      store.set('appUpdateState', { ...(store.get('appUpdateState', {}) || {}), skipCode: latestCode, skipAt: Date.now() });
+      box.remove();
+    };
+    if (!force) {
+      box.addEventListener('click', (ev) => { if (ev.target === box) close(); });
+      const x = $('.promo-x', box);
+      if (x) x.addEventListener('click', close);
+      const later = $('#updLater', box);
+      if (later) later.addEventListener('click', close);
+    } else {
+      box.addEventListener('click', (ev) => { if (ev.target === box) ev.stopPropagation(); });
+    }
+    document.body.appendChild(box);
+  }
+  function maybeAppUpdate() {
+    try {
+      if (!inApp()) return;
+      // 仅安卓壳带 versionCode; PWA/旧壳无 code 时不弹
+      const client = parseAppClient();
+      if (!client || !client.code) return;
+      const st = State.settings || {};
+      const latestCode = Math.max(0, Math.round(Number(st.appVersionCode || 0)) || 0);
+      if (!latestCode || client.code >= latestCode) return;
+      const apkUrl = String(st.downloadUrl || '').trim();
+      if (!apkUrl || !/^https?:\/\//i.test(apkUrl)) return;
+      const force = !!st.appForceUpdate;
+      if (!force) {
+        const skip = store.get('appUpdateState', {}) || {};
+        // 同一 versionCode 点「稍后」后 12 小时内不重复
+        if (skip.skipCode === latestCode && skip.skipAt && Date.now() - skip.skipAt < 12 * 3600 * 1000) return;
+      }
+      setTimeout(() => openAppUpdateModal({
+        latestName: st.appVersionName || String(latestCode),
+        latestCode,
+        force,
+        changelog: st.appChangelog || '',
+        apkUrl,
+      }), 1200);
     } catch (e) { /* ignore */ }
   }
 
@@ -3919,21 +3992,36 @@
         });
       }
 
-      /* ---------------- 📲 APP推广 ---------------- */
+      /* ---------------- 📲 APP推广 / 版本更新 ---------------- */
       else if (admTab === 'app') {
         main.innerHTML = `
           <div class="admin-card">
             <h3>📲 APP下载弹窗</h3>
-            <p class="hint">手机端<b>已注册且注册满 2 小时</b>的用户会弹出下载引导（游客不弹）；点 × 后 <b>10 天内不再打扰</b>，「不再提示」永久关闭。已在 App 内的用户自动隐藏全部入口。</p>
+            <p class="hint">手机端<b>已注册且注册满 2 小时</b>的用户会弹出下载引导（游客不弹）；点 × 后 <b>10 天内不再打扰</b>，「不再提示」永久关闭。已在 App 内的用户自动隐藏下载入口。</p>
             <label style="display:flex;align-items:center;gap:10px;margin:10px 0;cursor:pointer">
               <span class="switch"><input type="checkbox" id="promoSw" ${s.appPromoEnabled !== false ? 'checked' : ''}><span class="track"></span></span>
               <b>启用下载引导弹窗</b>
             </label>
-            <label class="field-label">📱 手机版 APK 下载地址（留空则下载页仅显示教程）</label>
+            <label class="field-label">📱 手机版 APK 下载地址（留空则下载页仅显示教程；也用于 App 内更新）</label>
             <input class="field-input" id="dlUrlInput" value="${esc(s.downloadUrl || '')}" placeholder="https://github.com/你的用户名/仓库名/releases/latest/download/xiaolintv-phone-latest.apk">
             <label class="field-label" style="margin-top:14px">📺 TV / 机顶盒版 APK 下载地址</label>
             <input class="field-input" id="dlUrlTvInput" value="${esc(s.downloadUrlTv || '')}" placeholder="https://github.com/你的用户名/仓库名/releases/latest/download/xiaolintv-tv-latest.apk">
             <button class="btn primary" id="savePromoBtn" style="margin-top:12px">保存弹窗设置</button>
+          </div>
+          <div class="admin-card" style="margin-top:16px">
+            <h3>🔄 App 版本更新</h3>
+            <p class="hint">官方 App 启动时对比本地 <b>versionCode</b> 与下方配置；有新版本则弹窗「立即更新」。需重新打包带版本号的 APK，并把 versionCode 填成<strong>大于</strong>旧包。填 <b>0</b> 表示关闭检查。</p>
+            <label class="field-label">最新 versionCode（整数，与 Android 打包 verCode 一致）</label>
+            <input class="field-input" id="appVerCodeInput" type="number" min="0" step="1" value="${esc(String(s.appVersionCode == null ? 0 : s.appVersionCode))}" placeholder="例如 2">
+            <label class="field-label" style="margin-top:12px">版本名称（展示用，如 1.0.2）</label>
+            <input class="field-input" id="appVerNameInput" value="${esc(s.appVersionName || '')}" placeholder="1.0.2">
+            <label class="field-label" style="margin-top:12px">更新说明</label>
+            <textarea class="field-input" id="appChangelogInput" rows="4" placeholder="1. 修复若干问题&#10;2. 性能优化">${esc(s.appChangelog || '')}</textarea>
+            <label style="display:flex;align-items:center;gap:10px;margin:14px 0;cursor:pointer">
+              <span class="switch"><input type="checkbox" id="appForceSw" ${s.appForceUpdate ? 'checked' : ''}><span class="track"></span></span>
+              <b>强制更新</b><span style="color:var(--dim);font-size:12px">（不可关闭弹窗，须先更新）</span>
+            </label>
+            <button class="btn primary" id="saveAppVerBtn">保存版本更新设置</button>
           </div>`;
         $('#savePromoBtn').addEventListener('click', async () => {
           const url = $('#dlUrlInput').value.trim();
@@ -3944,6 +4032,23 @@
             await API.adminSaveSettings({ appPromoEnabled: $('#promoSw').checked, downloadUrl: url, downloadUrlTv: urlTv });
             State.settings = { ...State.settings, appPromoEnabled: $('#promoSw').checked, downloadUrl: url, downloadUrlTv: urlTv };
             toast('弹窗与下载链接已保存', 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+        $('#saveAppVerBtn').addEventListener('click', async () => {
+          const code = Math.round(Number($('#appVerCodeInput').value));
+          const name = $('#appVerNameInput').value.trim();
+          const log = $('#appChangelogInput').value.trim();
+          if (!isFinite(code) || code < 0) return toast('versionCode 需为 ≥0 的整数', 'err');
+          try {
+            const patch = {
+              appVersionCode: code,
+              appVersionName: name,
+              appChangelog: log,
+              appForceUpdate: $('#appForceSw').checked,
+            };
+            await API.adminSaveSettings(patch);
+            State.settings = { ...State.settings, ...patch };
+            toast(code > 0 ? '版本更新设置已保存' : '已关闭 App 版本检查', 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
       }
@@ -4225,7 +4330,8 @@
     document.title = State.settings.siteName || '晓林影视';
     applyAnnouncement(State.settings.announcement);
     route();
-    maybeAppPromo(); // 首屏就绪后判断是否弹下载引导
+    maybeAppPromo();  // 首屏就绪后判断是否弹下载引导
+    maybeAppUpdate(); // App 内版本更新检查
     // 游客试看: 拉取剩余时长; 试看到期由接口 401 事件触发注册框
     initGuest();
     window.addEventListener('xl:need-login', () => showTrialModal(true));

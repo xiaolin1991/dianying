@@ -446,6 +446,16 @@ html, body { overflow-x: hidden; }
   background: rgba(255, 255, 255, .22) !important; border: none !important;
   color: #fff !important; font-size: 15px; line-height: 1;
 }
+.upd-box .upd-notes {
+  padding: 14px 18px 4px; font-size: 13px; line-height: 1.65; color: var(--txt);
+  max-height: 160px; overflow-y: auto;
+}
+.upd-box .upd-notes.dim { color: var(--dim); }
+.upd-force-tip {
+  text-align: center; color: var(--danger, #f66); font-size: 12px;
+  padding: 0 16px 16px; margin-top: 4px;
+}
+.app-update-mask { z-index: 180; }
 .pb-title { font-size: 17px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .pb-title span { color: var(--acc); font-size: 13px; font-weight: 400; margin-left: 6px; }
 .play-fav.on:hover { box-shadow: 0 0 14px rgba(245, 181, 10, .35); }

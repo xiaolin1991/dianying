@@ -52,6 +52,10 @@ const DEFAULT_SETTINGS = {
   appPromoEnabled: true, // 手机访问弹「下载APP」引导弹窗(后台可关)
   downloadUrl: '',      // 手机版 APK 下载地址(GitHub Releases 直链), 空则只显示教程
   downloadUrlTv: '',    // 电视/机顶盒版 APK 下载地址, 空则下载页 TV 卡片显示占位
+  appVersionCode: 0,     // 最新 App versionCode(整数); 0=不检查更新
+  appVersionName: '',    // 最新版本号展示名, 如 1.0.5
+  appForceUpdate: false, // 强制更新: App 内不可关闭弹窗
+  appChangelog: '',      // 更新说明(弹窗展示)
   adminPath: '',        // 后台入口自定义路径段(#/<adminPath>), 空则默认 'admin'
   playerOptimize: false, // 播放加载优化: false=保持现状, true=更快起播的 HLS 参数
   wmEnabled: false,      // 播放器 PNG 水印开关
@@ -164,6 +168,14 @@ async function saveSettings(env, patch) {
   if (typeof patch.appPromoEnabled === 'boolean') next.appPromoEnabled = patch.appPromoEnabled;
   if (typeof patch.downloadUrl === 'string') next.downloadUrl = patch.downloadUrl.trim().slice(0, 300);
   if (typeof patch.downloadUrlTv === 'string') next.downloadUrlTv = patch.downloadUrlTv.trim().slice(0, 300);
+  if (patch.appVersionCode !== undefined) {
+    const c = Math.round(Number(patch.appVersionCode));
+    if (!isFinite(c) || c < 0 || c > 999999999) throw new Error('App versionCode 需为 0-999999999 的整数');
+    next.appVersionCode = c;
+  }
+  if (typeof patch.appVersionName === 'string') next.appVersionName = patch.appVersionName.trim().slice(0, 40);
+  if (typeof patch.appForceUpdate === 'boolean') next.appForceUpdate = patch.appForceUpdate;
+  if (typeof patch.appChangelog === 'string') next.appChangelog = patch.appChangelog.trim().slice(0, 2000);
   if (typeof patch.adminPath === 'string') {
     const ap = patch.adminPath.trim().toLowerCase();
     if (ap && !/^[a-z0-9][a-z0-9-_]{1,39}$/.test(ap)) {
@@ -746,6 +758,10 @@ export default {
           appPromoEnabled: s.appPromoEnabled !== false,
           downloadUrl: s.downloadUrl || '',
           downloadUrlTv: s.downloadUrlTv || '',
+          appVersionCode: Math.max(0, Math.round(Number(s.appVersionCode == null ? 0 : s.appVersionCode)) || 0),
+          appVersionName: s.appVersionName || '',
+          appForceUpdate: !!s.appForceUpdate,
+          appChangelog: s.appChangelog || '',
           playerOptimize: !!s.playerOptimize,
           wmEnabled: !!s.wmEnabled,
           wmMode: s.wmMode === 'center' ? 'center' : 'corner',
@@ -1088,6 +1104,10 @@ export default {
             appPromoEnabled: s.appPromoEnabled !== false,
             downloadUrl: s.downloadUrl || '',
             downloadUrlTv: s.downloadUrlTv || '',
+            appVersionCode: Math.max(0, Math.round(Number(s.appVersionCode == null ? 0 : s.appVersionCode)) || 0),
+            appVersionName: s.appVersionName || '',
+            appForceUpdate: !!s.appForceUpdate,
+            appChangelog: s.appChangelog || '',
             adminPath: s.adminPath || '',
             homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
             playerOptimize: !!s.playerOptimize,
