@@ -1,28 +1,30 @@
 name: Build & Publish (APK + Docker)
 
-# 每次 push 到 main: ① 打包 APK → public/APP + Releases ② 构建 Docker 镜像发布到 GHCR
-# public/APP 的回写提交不会再触发本工作流(paths-ignore + [skip ci])
-# 注意: 仓库首页绿勾里的「Workers Builds」是 Cloudflare，不是本工作流；请到 Actions 页查看本任务
+# 每次 push 到 main：打包 APK + 发布 Releases + 构建 Docker 推 GHCR
+# 机器人回写 APK 的提交带 [skip ci]，不会再次触发
+# 仓库首页的「Workers Builds」是 Cloudflare，不是本工作流 → 请看 Actions 页本任务
 on:
   push:
-    branches: [ main ]
-    paths-ignore:
-      - 'public/APP/**'
-      - 'docs/**'
+    branches: [main]
   workflow_dispatch: {}
 
+concurrency:
+  group: apk-docker-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write   # Release 上传 + 回写 public/APP
-  packages: write   # GHCR 镜像推送
+  contents: write
+  packages: write
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
-  build:
+  build-apk:
+    name: Build APK
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
     runs-on: ubuntu-latest
     steps:
-      # 完整历史+标签: 用于生成版本号与「距上一版」的更新日志
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -45,9 +47,6 @@ jobs:
         with:
           node-version: '20'
 
-      # 可选: 在仓库 Settings → Secrets and variables → Actions → Variables 里
-      # 添加变量 START_URL = https://你的域名/ , APK 将自动装载该地址
-      # 版本号自动递增: v1.0.<构建编号>
       - name: Build Debug APK
         env:
           START_URL: ${{ vars.START_URL }}
@@ -60,7 +59,6 @@ jobs:
           set -o pipefail
           gradle -p android assembleDebug --no-daemon --stacktrace $ARGS 2>&1 | tee build-log.txt
 
-      # 无论成败都保存完整构建日志, 失败时直接下载看 "What went wrong" 全文
       - name: Upload build log (always)
         if: always()
         uses: actions/upload-artifact@v4
@@ -74,12 +72,10 @@ jobs:
           mkdir -p out
           cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-phone-v1.0.${{ github.run_number }}.apk"
           cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-tv-v1.0.${{ github.run_number }}.apk"
-          # 固定文件名副本: 网站下载按钮可永远指向同一个直链
           cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-phone-latest.apk"
           cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-tv-latest.apk"
           ls -la out
 
-      # 写入工作区 public/APP；版本说明自动取「距上一版」提交摘要
       - name: Publish APK to public/APP
         env:
           SITE_URL: ${{ secrets.SITE_URL }}
@@ -88,25 +84,21 @@ jobs:
         run: |
           PREV=$(git describe --tags --abbrev=0 --match 'v1.0.*' 2>/dev/null || echo "")
           if [ -n "$PREV" ]; then
-            RAW=$(git log --pretty=format:'%s' "${PREV}..HEAD")
+            RAW=$(git log --pretty=format:'%s' "${PREV}..HEAD" || true)
           else
-            RAW=$(git log --pretty=format:'%s' -15)
+            RAW=$(git log --pretty=format:'%s' -15 || true)
           fi
-          # 过滤机器人/同步类提交，整理成用户可读更新说明
-          NOTES=$(printf '%s\n' "$RAW" | grep -vE '^(chore\(app\)|ci:|Merge |自动|fix: stop CI)' | head -12 | sed 's/^/- /')
+          NOTES=$(printf '%s\n' "$RAW" | grep -vE '^(chore\(app\)|ci:|Merge |自动|fix: stop CI)' | head -12 | sed 's/^/- /' || true)
           if [ -z "$NOTES" ]; then
-            NOTES="- 版本更新至 1.0.${RUN_NO}
-- 优化体验与稳定性"
+            NOTES="- 版本更新至 1.0.${RUN_NO}"$'\n'"- 优化体验与稳定性"
           fi
-          NOTES="晓林影视 1.0.${RUN_NO}
-${NOTES}"
+          NOTES="晓林影视 1.0.${RUN_NO}"$'\n'"${NOTES}"
           node scripts/publish-apk.mjs \
             --apk "android/app/build/outputs/apk/debug/app-debug.apk" \
             --code "$RUN_NO" \
             --name "1.0.$RUN_NO" \
             --changelog "$NOTES"
 
-      # 备份分支：仅 APK（不改代码历史）
       - name: Push APP to publish/app branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -129,7 +121,6 @@ ${NOTES}"
           git push -f origin publish/app
           echo "published to branch publish/app"
 
-      # 同步回 main：网站 git pull / Cloudflare 静态资源才能下到最新包
       - name: Sync public/APP onto main
         env:
           RUN_NO: ${{ github.run_number }}
@@ -144,10 +135,13 @@ ${NOTES}"
           fi
           git commit -m "chore(app): sync APK v1.0.${RUN_NO} to main [skip ci]"
           for i in 1 2 3 4 5 6; do
-            git pull --rebase origin main || { git rebase --abort 2>/dev/null || true; sleep 2; continue; }
-            if git push origin HEAD:main; then
-              echo "synced APP to main"
-              exit 0
+            if git pull --rebase origin main; then
+              if git push origin HEAD:main; then
+                echo "synced APP to main"
+                exit 0
+              fi
+            else
+              git rebase --abort 2>/dev/null || true
             fi
             echo "push rejected, retry $i"
             sleep 4
@@ -162,17 +156,14 @@ ${NOTES}"
           path: out/*.apk
           if-no-files-found: error
 
-      # 每次构建发布为独立版本号 Release(v1.0.<构建号>) —— 历史版本全部保留可回滚;
-      # GitHub 会自动把最新创建的 Release 标记为 Latest 置顶展示。
-      # 固定文件名副本(xiaolintv-*-latest.apk)保证网站下载直链永远指向当前最新版。
       - name: Collect changelog since previous release
         id: notes
         run: |
           PREV=$(git describe --tags --abbrev=0 --match 'v1.0.*' 2>/dev/null || echo "")
           if [ -n "$PREV" ]; then
-            LOG=$(git log --pretty=format:'- %s (%h)' "${PREV}..HEAD" | head -20)
+            LOG=$(git log --pretty=format:'- %s (%h)' "${PREV}..HEAD" | head -20 || true)
           else
-            LOG=$(git log --pretty=format:'- %s (%h)' -8)
+            LOG=$(git log --pretty=format:'- %s (%h)' -8 || true)
           fi
           {
             echo 'LOG<<CHANGELOG_EOF'
@@ -186,26 +177,23 @@ ${NOTES}"
           tag_name: v1.0.${{ github.run_number }}
           name: 晓林影视 v1.0.${{ github.run_number }}
           body: |
-            ## 📦 晓林影视 v1.0.${{ github.run_number }}
+            ## 晓林影视 v1.0.${{ github.run_number }}
 
-            自动构建 · commit [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) · 构建 #${{ github.run_number }}
+            自动构建 · commit `${{ github.sha }}` · 构建 #${{ github.run_number }}
 
-            ### 📥 安装说明
+            ### 安装说明
+            - 安卓手机: 站点 `/APP/xiaolintv-phone-latest.apk`
+            - 电视/盒子: `/APP/xiaolintv-tv-latest.apk`
+            - Docker: `docker pull ghcr.io/${{ github.repository }}:latest`
 
-            📱 **安卓手机**: 优先从你的站点下载 `/APP/xiaolintv-phone-latest.apk`（国内直链）
-            📺 **电视/盒子**: `/APP/xiaolintv-tv-latest.apk`（同一通用包）
-            🍎 **iPhone/iPad**: 无需下载！Safari 打开网站 → 分享 → **添加到主屏幕**(PWA)
-            🐳 **Docker**: `docker pull ghcr.io/${{ github.repository }}:latest`
-
-            > 🔗 站点永久最新直链：\`{你的域名}/APP/xiaolintv-phone-latest.apk\`
-            > 🕘 本 Release 附件为备份（私有仓国内可能需代理）
-
-            ### 📝 本次更新内容
+            ### 本次更新
             ${{ steps.notes.outputs.LOG }}
           files: out/*.apk
           make_latest: true
 
   docker:
+    name: Build Docker
+    if: ${{ !contains(github.event.head_commit.message || '', '[skip ci]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
