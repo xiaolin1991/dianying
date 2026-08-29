@@ -50,8 +50,8 @@ const DEFAULT_SETTINGS = {
   allowRegister: true,  // 开放前台注册
   homeSources: [],      // 首页默认加载的影视源 key 顺序列表(空=内置精选)
   appPromoEnabled: true, // 手机访问弹「下载APP」引导弹窗(后台可关)
-  downloadUrl: '',      // 手机版 APK 下载地址(GitHub Releases 直链), 空则只显示教程
-  downloadUrlTv: '',    // 电视/机顶盒版 APK 下载地址, 空则下载页 TV 卡片显示占位
+  downloadUrl: '',      // 手机版 APK 下载地址(推荐 /APP/xiaolintv-phone-latest.apk), 空则只显示教程
+  downloadUrlTv: '',    // 电视/机顶盒版 APK 下载地址(推荐 /APP/xiaolintv-tv-latest.apk)
   appVersionCode: 0,     // 最新 App versionCode(整数); 0=不检查更新
   appVersionName: '',    // 最新版本号展示名, 如 1.0.5
   appForceUpdate: false, // 强制更新: App 内不可关闭弹窗

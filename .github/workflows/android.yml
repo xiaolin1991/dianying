@@ -1,13 +1,17 @@
 name: Build & Publish (APK + Docker)
 
-# 每次 push 到 main: ① 打包 APK 发布到 Releases ② 构建 Docker 镜像发布到 GHCR
+# 每次 push 到 main: ① 打包 APK → public/APP + Releases ② 构建 Docker 镜像发布到 GHCR
+# public/APP 的回写提交不会再触发本工作流(paths-ignore + [skip ci])
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'public/APP/**'
+      - 'docs/**'
   workflow_dispatch: {}
 
 permissions:
-  contents: write   # Release 上传
+  contents: write   # Release 上传 + 回写 public/APP
   packages: write   # GHCR 镜像推送
 
 env:
@@ -35,6 +39,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.7'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       # 可选: 在仓库 Settings → Secrets and variables → Actions → Variables 里
       # 添加变量 START_URL = https://你的域名/ , APK 将自动装载该地址
@@ -69,6 +77,32 @@ jobs:
           cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-phone-latest.apk"
           cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-tv-latest.apk"
           ls -la out
+
+      # 写入 public/APP、删旧包；若配置 SITE_URL + ADMIN_PASSWORD 则同步后台下载地址与版本号
+      - name: Publish APK to public/APP
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          RUN_NO: ${{ github.run_number }}
+        run: |
+          NOTES=$(git log --pretty=format:'- %s' -8 | head -20)
+          node scripts/publish-apk.mjs \
+            --apk "android/app/build/outputs/apk/debug/app-debug.apk" \
+            --code "$RUN_NO" \
+            --name "1.0.$RUN_NO" \
+            --changelog "$NOTES"
+
+      - name: Commit public/APP back to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/APP
+          if git diff --cached --quiet; then
+            echo "No APP changes to commit"
+            exit 0
+          fi
+          git commit -m "chore(app): publish APK v1.0.${{ github.run_number }} to public/APP [skip ci]"
+          git push origin HEAD:main
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -107,13 +141,13 @@ jobs:
 
             ### 📥 安装说明
 
-            📱 **安卓手机**: 下载 `xiaolintv-phone-v*.apk` 安装（首次允许「未知来源」）
-            📺 **电视/盒子**: 下载 `xiaolintv-tv-v*.apk`（同一通用包，已带 TV 启动器，遥控器可操作）
+            📱 **安卓手机**: 优先从你的站点下载 `/APP/xiaolintv-phone-latest.apk`（国内直链）
+            📺 **电视/盒子**: `/APP/xiaolintv-tv-latest.apk`（同一通用包）
             🍎 **iPhone/iPad**: 无需下载！Safari 打开网站 → 分享 → **添加到主屏幕**(PWA)
             🐳 **Docker**: `docker pull ghcr.io/${{ github.repository }}:latest`
 
-            > 🔗 永久最新直链：`https://github.com/${{ github.repository }}/releases/latest/download/xiaolintv-phone-latest.apk`
-            > 🕘 历史版本：本页下方或 [Releases 列表](https://github.com/${{ github.repository }}/releases) 随时回滚下载
+            > 🔗 站点永久最新直链：\`{你的域名}/APP/xiaolintv-phone-latest.apk\`
+            > 🕘 本 Release 附件为备份（私有仓国内可能需代理）
 
             ### 📝 本次更新内容
             ${{ steps.notes.outputs.LOG }}
