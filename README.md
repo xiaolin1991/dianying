@@ -1,4 +1,4 @@
-# 星河影视 NebulaTV 🌌
+# 🚀 晓林影视 xiaolinTV
 
 基于 [hafrey1/LunaTV-config](https://github.com/hafrey1/LunaTV-config) 公开采集源配置的**影视聚合站 + 电视直播**,零构建、纯静态前端 + 单文件 Cloudflare Worker 后端,可一键部署到 **Cloudflare Workers** 或 **Cloudflare Pages**。
 

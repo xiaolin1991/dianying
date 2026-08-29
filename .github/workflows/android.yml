@@ -1,11 +1,16 @@
 name: Build & Publish (APK + Docker)
 
-# 每次 push 到 main：打包 APK + 发布 Releases + 构建 Docker 推 GHCR
-# 机器人回写 APK 的提交带 [skip ci]，不会再次触发
-# 仓库首页的「Workers Builds」是 Cloudflare，不是本工作流 → 请看 Actions 页本任务
+# 你改站点并 push 到 main → 本工作流必跑：① APK + Release ② Docker → GHCR
+# 仓库首页「Workers Builds」= Cloudflare 部署站点，不是本任务；请到 Actions 页查看本工作流
+#
+# 不会触发的唯一情况：
+#   1) 本次 push 里「改动的文件全部」只在 public/APP/（机器人回写安装包）
+#   2) 提交说明里含有 GitHub 保留跳过词（见下方 bot 提交；你自己写说明时不要抄）
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'public/APP/**'
   workflow_dispatch: {}
 
 concurrency:
@@ -19,8 +24,6 @@ permissions:
 env:
   REGISTRY: ghcr.io
 
-# 跳过规则：仅当提交说明里带「skip ci」方括号标记时，由 GitHub 原生跳过整次 workflow
-# （机器人回写 public/APP 的提交会带该标记；普通功能提交说明正文不要写这个标记，否则 Actions 整次不跑）
 jobs:
   build-apk:
     name: Build APK
@@ -122,6 +125,7 @@ jobs:
           git push -f origin publish/app
           echo "published to branch publish/app"
 
+      # 只改 public/APP → 被上方 paths-ignore 挡住，不会再次触发本工作流（无需再写跳过标记）
       - name: Sync public/APP onto main
         env:
           RUN_NO: ${{ github.run_number }}
@@ -134,7 +138,7 @@ jobs:
             echo "No APP changes"
             exit 0
           fi
-          git commit -m "chore(app): sync APK v1.0.${RUN_NO} to main [skip ci]"
+          git commit -m "chore(app): sync APK v1.0.${RUN_NO} to main"
           for i in 1 2 3 4 5 6; do
             if git pull --rebase origin main; then
               if git push origin HEAD:main; then
@@ -150,8 +154,8 @@ jobs:
           echo "::warning::未能推送到 main，请服务器执行 sync-app-branch 或稍后重试"
           exit 0
 
-      # Cloudflare Workers：bot 提交带 [skip ci] 时，若 Build watch paths 排除了 public/APP，线上不会更新。
-      # 在仓库 Secrets 添加 CF_DEPLOY_HOOK = Cloudflare Deploy Hook URL，打包后强制重建。
+      # 可选：仓库 Settings → Secrets → Actions 添加 CF_DEPLOY_HOOK（Cloudflare Deploy Hook URL）
+      # 用于强制 Workers 带上最新 public/APP（若 CF Build watch paths 未包含 APP）
       - name: Trigger Cloudflare deploy hook
         if: ${{ secrets.CF_DEPLOY_HOOK }}
         env:

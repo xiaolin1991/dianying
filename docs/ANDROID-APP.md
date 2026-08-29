@@ -27,21 +27,35 @@
 
 ## 二、每次更新如何出包
 
-只要 push 到 `main`（或 Actions 页手动 Run workflow）：
+改站点后 **push 到 `main`**（或到 Actions 页手动 **Run workflow**），会并行跑两个任务：
+
+| 任务 | 产物 |
+|------|------|
+| **Build APK** | `public/APP`、GitHub Release、`publish/app` |
+| **Build Docker** | `ghcr.io/<你的仓库>:latest` 与 `v1.0.<构建号>` |
+
+流程细节：
 
 1. 构建 Debug APK，版本号 `1.0.<构建编号>` / `versionCode=<构建编号>`。
 2. 写入 `public/APP/`（`*-latest.apk` + 版本号包 + `manifest.json`）。
 3. **更新说明**自动取「距上一版」的提交摘要（过滤机器人提交），写入 manifest。
-4. 推到备份分支 `publish/app`，并**同步回 `main` 的 `public/APP`**（网站 `git pull` 即更新）。
+4. 推到备份分支 `publish/app`，并**同步回 `main` 的 `public/APP`**。
 5. 若配置了 `SITE_URL` + `ADMIN_PASSWORD`：额外把版本写入后台 KV。
-6. GitHub Releases / Artifacts 仍会上传作备份。
+6. 若配置了 `CF_DEPLOY_HOOK`：额外触发 Cloudflare 重新部署（让线上静态资源带上最新 APK）。
+
+**一定会跑 / 不会跑：**
+
+- ✅ 你改了 `public/`、`_worker.js`、`android/`、工作流等任意非 APP 目录文件并 push → **必跑 APK + Docker**
+- ⏭ 仅机器人回写 `public/APP/**` 的那次 push → 跳过（避免打包死循环）
+- ⚠️ 提交说明里不要写 GitHub 保留的跳过词（如方括号包起来的 skip ci / ci skip 等），否则整次 Actions 会被跳过
+- 仓库首页绿勾里的 **Workers Builds** 是 Cloudflare，**不是** APK/Docker；请到 **Actions → Build & Publish (APK + Docker)** 查看
 
 串联关系：
 
 ```
-你推 main → Actions 打包 → publish/app + main/public/APP
+你推 main → Actions 打包 → publish/app + main/public/APP + GHCR 镜像
                               ↓
-                   网站 git pull / 重新部署
+                   Cloudflare 部署 / 网站 git pull
                               ↓
                    /APP/manifest.json + latest.apk
                               ↓
