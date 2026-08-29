@@ -19,8 +19,8 @@ permissions:
 env:
   REGISTRY: ghcr.io
 
-# 跳过规则：仅当提交说明里带 [skip ci] 时，由 GitHub 原生跳过整次 workflow
-# （机器人回写 public/APP 的提交会带此标记；不要把 [skip ci] 写进普通功能提交的说明正文）
+# 跳过规则：仅当提交说明里带「skip ci」方括号标记时，由 GitHub 原生跳过整次 workflow
+# （机器人回写 public/APP 的提交会带该标记；普通功能提交说明正文不要写这个标记，否则 Actions 整次不跑）
 jobs:
   build-apk:
     name: Build APK
