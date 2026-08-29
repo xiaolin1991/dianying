@@ -535,10 +535,11 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
   place-items: center; padding: 0;
   opacity: 0; pointer-events: none; transition: opacity .18s;
 }
-.video-wrap.is-mobile-player .pp-btn.paused {
+.video-wrap.is-mobile-player .pp-btn.paused,
+.video-wrap.is-desktop-player .pp-btn.paused {
   display: grid; opacity: 1; pointer-events: auto;
 }
-/* 手机底部控制条: 点按出现, 无操作 1s 隐藏 */
+/* 自绘底部控制条(电脑/手机共用; 无原生 controls → 无原生全屏钮) */
 .m-ctrl {
   display: none;
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 8;
@@ -546,7 +547,8 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
   background: linear-gradient(transparent, rgba(0,0,0,.72));
   opacity: 0; pointer-events: none; transition: opacity .15s;
 }
-.video-wrap.is-mobile-player .m-ctrl { display: block; }
+.video-wrap.is-mobile-player .m-ctrl,
+.video-wrap.is-desktop-player .m-ctrl { display: block; }
 .m-ctrl.show { opacity: 1; pointer-events: auto; }
 .m-ctrl-row {
   display: flex; align-items: center; gap: 8px;
@@ -567,6 +569,23 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 .m-seek::-moz-range-track { height: 3px; border-radius: 99px; background: rgba(255,255,255,.28); }
 .m-seek::-moz-range-thumb {
   width: 14px; height: 14px; border-radius: 50%; background: #fff; border: none;
+}
+.m-vol {
+  width: 72px; flex-shrink: 0; height: 22px; margin: 0;
+  -webkit-appearance: none; appearance: none; background: transparent;
+}
+.m-vol.hidden { display: none !important; }
+.m-vol::-webkit-slider-runnable-track {
+  height: 3px; border-radius: 99px; background: rgba(255,255,255,.28);
+}
+.m-vol::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; margin-top: -4.5px; border-radius: 50%;
+  background: #fff; border: none;
+}
+.m-vol::-moz-range-track { height: 3px; border-radius: 99px; background: rgba(255,255,255,.28); }
+.m-vol::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%; background: #fff; border: none;
 }
 .m-icon-btn {
   flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
@@ -608,22 +627,6 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 .video-wrap:fullscreen .gest-hud,
 .video-wrap:-webkit-full-screen .gest-hud,
 .video-wrap.fake-fs .gest-hud { z-index: 20; }
-/* 桌面全屏钮: 贴合原生控件条样式, 替代已禁用的原生全屏(nofullscreen) */
-.player-fs-fab {
-  display: none;
-  position: absolute; right: 42px; bottom: 8px; z-index: 30;
-  width: 32px; height: 32px; padding: 0; margin: 0;
-  border: none; border-radius: 4px;
-  background: transparent; color: #eee; font-size: 16px; line-height: 1;
-  cursor: pointer;
-  align-items: center; justify-content: center;
-  opacity: .92;
-}
-.video-wrap:not(.is-mobile-player) .player-fs-fab { display: inline-flex; }
-.video-wrap:fullscreen .player-fs-fab,
-.video-wrap:-webkit-full-screen .player-fs-fab { right: 16px; bottom: 14px; }
-.player-fs-fab:hover { background: rgba(255,255,255,.12); color: #fff; opacity: 1; }
-.player-fs-fab.on { color: #fff; }
 .fs-exit-btn { display: none !important; }
 /* 当前播放源角标 */
 .src-badge {

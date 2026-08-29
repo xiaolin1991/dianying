@@ -1249,16 +1249,16 @@
                 <button class="pp-btn" id="ppBtn" type="button" title="播放" aria-label="播放">▶</button>
                 <div class="m-ctrl" id="mCtrl">
                   <div class="m-ctrl-row">
+                    <button type="button" class="m-icon-btn" id="mPpBtn" title="播放/暂停" aria-label="播放/暂停">❚❚</button>
                     <span class="m-time" id="mTimeCur">0:00</span>
                     <input class="m-seek" id="mSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="进度" />
                     <span class="m-time" id="mTimeDur">0:00</span>
+                    <input class="m-vol" id="mVol" type="range" min="0" max="100" value="100" step="1" aria-label="音量" title="音量" />
                     <button type="button" class="m-icon-btn" id="mOrientBtn" title="锁定横屏" aria-label="锁定转向">🔓</button>
-                    <button type="button" class="m-icon-btn" id="mPpBtn" title="播放/暂停" aria-label="播放/暂停">❚❚</button>
                     <button type="button" class="m-icon-btn" id="mFsToggle" title="全屏" aria-label="全屏">⛶</button>
                   </div>
                 </div>
                 <img class="player-wm" id="playerWm" alt="" draggable="false" />
-                <button type="button" class="player-fs-fab" id="deskFsBtn" title="全屏" aria-label="全屏">⛶</button>
                 <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
                 <div class="video-tip hidden" id="videoTip"></div>
                 <div class="gest-hud" id="gestHud"></div>
@@ -1308,8 +1308,8 @@
     const mSeek = $('#mSeek');
     const mPpBtn = $('#mPpBtn');
     const mFsToggle = $('#mFsToggle');
-    const deskFsBtn = $('#deskFsBtn');
     const mOrientBtn = $('#mOrientBtn');
+    const mVol = $('#mVol');
     const playerWm = $('#playerWm');
     const mTimeCur = $('#mTimeCur');
     const mTimeDur = $('#mTimeDur');
@@ -1325,19 +1325,13 @@
       if (/Android/i.test(ua) && Math.min(screen.width, screen.height) <= 820) return true;
       return window.matchMedia('(max-width: 820px) and (hover: none) and (pointer: coarse)').matches;
     })();
-    if (!isMobilePlayer) {
-      video.setAttribute('controls', '');
-      // 关掉原生 video 全屏(会丢水印且难转成真全屏); 控件条位置用自绘钮走容器真全屏
-      try {
-        video.setAttribute('controlsList', 'nofullscreen');
-        if (video.controlsList && video.controlsList.add) video.controlsList.add('nofullscreen');
-      } catch (e) {}
-      if (deskFsBtn) deskFsBtn.hidden = false;
-    } else {
-      video.removeAttribute('controls');
-      video.removeAttribute('controlsList');
-      if (wrap) wrap.classList.add('is-mobile-player');
-      if (deskFsBtn) deskFsBtn.hidden = true;
+    // 电脑/手机一律不用原生 controls → 彻底没有原生全屏钮; 只用自绘条里的一个全屏
+    video.removeAttribute('controls');
+    video.removeAttribute('controlsList');
+    if (wrap) wrap.classList.add(isMobilePlayer ? 'is-mobile-player' : 'is-desktop-player');
+    if (mVol) {
+      mVol.value = String(Math.round((Number(store.get('vidVol', 1)) || 1) * 100));
+      if (isMobilePlayer) mVol.classList.add('hidden');
     }
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
     const getSavedBright = () => Math.min(2.2, Math.max(0.25, Number(store.get('vidBright', 1)) || 1));
@@ -1362,6 +1356,7 @@
     const applyPlayerPrefs = () => {
       const vol = getSavedVol();
       try { video.volume = vol; if (vol > 0) video.muted = false; } catch (e) {}
+      if (mVol && !isMobilePlayer) mVol.value = String(Math.round(vol * 100));
       applyBrightFilter();
     };
     const fmtClock = (sec) => {
@@ -1372,12 +1367,12 @@
     let mCtrlHideT = null;
     let mSeeking = false;
     const bumpMCtrl = () => {
-      if (!isMobilePlayer || !mCtrl) return;
+      if (!mCtrl) return;
       mCtrl.classList.add('show');
       clearTimeout(mCtrlHideT);
-      // 暂停时保持进度条; 播放中无操作 1s 后隐藏
+      // 暂停时保持进度条; 播放中无操作后隐藏
       if (video.paused || mSeeking) return;
-      mCtrlHideT = setTimeout(() => { if (!video.paused && !mSeeking) mCtrl.classList.remove('show'); }, 1000);
+      mCtrlHideT = setTimeout(() => { if (!video.paused && !mSeeking) mCtrl.classList.remove('show'); }, isMobilePlayer ? 1000 : 2200);
     };
     const syncMSeek = () => {
       if (!mSeek || !video.duration) return;
@@ -1393,12 +1388,7 @@
       }
       if (mPpBtn) mPpBtn.textContent = video.paused ? '▶' : '❚❚';
       if (mFsToggle) mFsToggle.classList.toggle('on', isPlayerFs());
-      if (deskFsBtn) {
-        deskFsBtn.classList.toggle('on', isPlayerFs());
-        deskFsBtn.title = isPlayerFs() ? '退出全屏' : '全屏';
-        deskFsBtn.setAttribute('aria-label', deskFsBtn.title);
-      }
-      if (isMobilePlayer) bumpMCtrl();
+      bumpMCtrl();
     };
     const togglePlay = () => {
       if (video.paused) video.play().catch(() => {});
@@ -1437,6 +1427,18 @@
       mSeek.addEventListener('change', endSeek);
       mSeek.addEventListener('pointerup', endSeek);
       mSeek.addEventListener('pointercancel', () => { mSeeking = false; bumpMCtrl(); });
+    }
+    if (mVol && !isMobilePlayer) {
+      mVol.addEventListener('input', () => {
+        const vol = Math.min(1, Math.max(0, Number(mVol.value) / 100));
+        try { video.volume = vol; video.muted = vol <= 0; } catch (e) {}
+        store.set('vidVol', Number(vol.toFixed(2)));
+        bumpMCtrl();
+      });
+    }
+    if (wrap && !isMobilePlayer) {
+      wrap.addEventListener('mousemove', () => bumpMCtrl());
+      wrap.addEventListener('mouseenter', () => bumpMCtrl());
     }
 
     // ---- 播放器 PNG 水印: 始终挂在 #videoWrap 内(真全屏/假全屏都能看见) ----
@@ -1704,17 +1706,16 @@
     };
     const toggleFakeFs = () => { togglePlayerFs(); };
     $('#fsBtn').addEventListener('click', (e) => { e.preventDefault(); togglePlayerFs(); });
-    if (mFsToggle) mFsToggle.addEventListener('click', (e) => { e.stopPropagation(); togglePlayerFs(); });
-    // 桌面控件条全屏钮: 同步 requestFullscreen, 一次点中真全屏
-    if (deskFsBtn) {
-      deskFsBtn.addEventListener('pointerdown', (e) => {
+    // 自绘唯一全屏钮: 电脑真全屏 / 手机假全屏
+    if (mFsToggle) {
+      const onFsPointer = (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-      });
-      deskFsBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+        if (isMobilePlayer) {
+          togglePlayerFs();
+          return;
+        }
         autoFsByOrient = false;
         if (wrap && wrap.classList.contains('fake-fs')) exitFakeFs();
         const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
@@ -1727,15 +1728,15 @@
           try { wrap.webkitRequestFullscreen(); } catch (err) {}
         }
         syncPpBtn();
-      });
+      };
+      mFsToggle.addEventListener('pointerdown', onFsPointer);
+      mFsToggle.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
     }
     // 桌面单击画面暂停/播放
     if (wrap && !isMobilePlayer) {
       let deskClickT = null;
       wrap.addEventListener('click', (e) => {
-        if (e.target.closest('.player-fs-fab, .m-ctrl, button, a, input, select')) return;
-        const rect = wrap.getBoundingClientRect();
-        if (e.clientY > rect.bottom - 52) return;
+        if (e.target.closest('.m-ctrl, .pp-btn, button, a, input, select')) return;
         e.preventDefault();
         e.stopPropagation();
         clearTimeout(deskClickT);
