@@ -154,13 +154,15 @@ jobs:
           echo "::warning::未能推送到 main，请服务器执行 sync-app-branch 或稍后重试"
           exit 0
 
-      # 可选：仓库 Settings → Secrets → Actions 添加 CF_DEPLOY_HOOK（Cloudflare Deploy Hook URL）
-      # 用于强制 Workers 带上最新 public/APP（若 CF Build watch paths 未包含 APP）
+      # 可选 Secret：CF_DEPLOY_HOOK（不要写在 if: 里，secrets 不能用于 if，会导致整份工作流校验失败）
       - name: Trigger Cloudflare deploy hook
-        if: ${{ secrets.CF_DEPLOY_HOOK }}
         env:
           CF_DEPLOY_HOOK: ${{ secrets.CF_DEPLOY_HOOK }}
         run: |
+          if [ -z "$CF_DEPLOY_HOOK" ]; then
+            echo "未配置 CF_DEPLOY_HOOK，跳过"
+            exit 0
+          fi
           code=$(curl -sS -o /tmp/cf-hook.out -w "%{http_code}" -X POST "$CF_DEPLOY_HOOK" || echo "000")
           echo "deploy hook HTTP $code"
           head -c 400 /tmp/cf-hook.out 2>/dev/null || true
