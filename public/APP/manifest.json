@@ -1,0 +1,13 @@
+{
+  "versionCode": 64,
+  "versionName": "1.0.64",
+  "publishedAt": "2026-08-29T12:02:04.137Z",
+  "phone": {
+    "path": "/APP/xiaolintv-phone-latest.apk",
+    "versioned": "/APP/xiaolintv-phone-v1.0.64.apk"
+  },
+  "tv": {
+    "path": "/APP/xiaolintv-tv-latest.apk",
+    "versioned": "/APP/xiaolintv-tv-v1.0.64.apk"
+  }
+}
