@@ -55,9 +55,10 @@ const DEFAULT_SETTINGS = {
   adminPath: '',        // 后台入口自定义路径段(#/<adminPath>), 空则默认 'admin'
   playerOptimize: false, // 播放加载优化: false=保持现状, true=更快起播的 HLS 参数
   wmEnabled: false,      // 播放器 PNG 水印开关
-  wmMode: 'corner',      // corner=右下角常显(播放中) | center=正中显示2秒
+  wmMode: 'corner',      // corner=右下角常显(播放中) | center=正中短暂显示
   wmUrl: '',             // 水印图片 URL(建议 png)
   wmOpacity: 0.55,       // 水印透明度 0.15-1
+  wmDuration: 2,         // 正中模式显示秒数(1-60)
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -190,6 +191,11 @@ async function saveSettings(env, patch) {
     const o = Number(patch.wmOpacity);
     if (!isFinite(o) || o < 0.15 || o > 1) throw new Error('水印透明度需为 0.15-1');
     next.wmOpacity = Math.round(o * 100) / 100;
+  }
+  if (patch.wmDuration !== undefined) {
+    const d = Math.round(Number(patch.wmDuration));
+    if (!isFinite(d) || d < 1 || d > 60) throw new Error('水印显示时长需为 1-60 秒');
+    next.wmDuration = d;
   }
   if (Array.isArray(patch.configUrls)) {
     // 多采集源: 去空/去重/校验 http(s), 最多 10 条; 空数组 = 清空恢复默认
@@ -745,6 +751,7 @@ export default {
           wmMode: s.wmMode === 'center' ? 'center' : 'corner',
           wmUrl: s.wmUrl || '',
           wmOpacity: Number(s.wmOpacity == null ? 0.55 : s.wmOpacity),
+          wmDuration: Math.min(60, Math.max(1, Number(s.wmDuration == null ? 2 : s.wmDuration) || 2)),
         });
       }
       /* ---- 后台入口路径探测(只返回 是/否, 不泄露配置值; 用于自定义入口路由) ---- */
@@ -1088,6 +1095,7 @@ export default {
             wmMode: s.wmMode === 'center' ? 'center' : 'corner',
             wmUrl: s.wmUrl || '',
             wmOpacity: Number(s.wmOpacity == null ? 0.55 : s.wmOpacity),
+            wmDuration: Math.min(60, Math.max(1, Number(s.wmDuration == null ? 2 : s.wmDuration) || 2)),
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });
         }

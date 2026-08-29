@@ -230,7 +230,7 @@ img { display: block; }
 
 /* ---------------- 播放器弹窗/页内 ---------------- */
 .video-wrap { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 14px; overflow: hidden; }
-.video-wrap video { width: 100%; height: 100%; background: #000; outline: none; object-fit: contain; display: block; }
+.video-wrap video { position: relative; z-index: 1; width: 100%; height: 100%; background: #000; outline: none; object-fit: contain; display: block; }
 .video-tip { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.55); font-size: 14px; text-align: center; padding: 20px; }
 
 /* ---- 播放页布局: 标题/按钮在播放器上方, 换源/选集在下方 ---- */
@@ -574,12 +574,14 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
   display: grid; place-items: center; cursor: pointer;
 }
 .m-icon-btn.on { border-color: var(--acc); color: var(--acc); }
-/* 播放器 PNG 水印 */
+/* 播放器 PNG 水印(须高于 video 层; 用 --wm-op 控制显示透明度, 避免内联 opacity 导致无法隐藏) */
 .player-wm {
-  position: absolute; z-index: 6; pointer-events: none;
+  position: absolute; z-index: 15; pointer-events: none;
   max-width: min(42%, 280px); max-height: 22%;
-  object-fit: contain; opacity: 0;
-  transition: opacity .25s ease; user-select: none;
+  object-fit: contain;
+  opacity: 0; visibility: hidden;
+  transition: opacity .25s ease, visibility .25s ease;
+  user-select: none; -webkit-user-drag: none;
 }
 .player-wm.off { display: none !important; }
 .player-wm.mode-corner {
@@ -590,10 +592,21 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
   transform: translate(-50%, -50%);
   max-width: min(48%, 320px); max-height: 28%;
 }
-.player-wm.show { opacity: 1; }
+.player-wm.show {
+  opacity: var(--wm-op, 0.55);
+  visibility: visible;
+}
+.video-wrap.fake-fs .player-wm,
+.video-wrap:fullscreen .player-wm,
+.video-wrap:-webkit-full-screen .player-wm { z-index: 25; }
 .video-wrap.fake-fs .player-wm.mode-corner,
 .video-wrap:fullscreen .player-wm.mode-corner,
 .video-wrap:-webkit-full-screen .player-wm.mode-corner { bottom: 64px; right: 16px; }
+.video-wrap.fake-fs .player-wm.mode-center,
+.video-wrap:fullscreen .player-wm.mode-center,
+.video-wrap:-webkit-full-screen .player-wm.mode-center {
+  max-width: min(40%, 360px); max-height: 26%;
+}
 .video-wrap:fullscreen .gest-hud,
 .video-wrap:-webkit-full-screen .gest-hud,
 .video-wrap.fake-fs .gest-hud { z-index: 20; }

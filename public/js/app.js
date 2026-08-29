@@ -1424,28 +1424,33 @@
     }
 
     // ---- 播放器 PNG 水印(电脑/手机共用, 后台开关与模式) ----
+    let refreshPlayerWm = () => {};
     {
       let wmHideT = null;
       const wmCfg = () => {
         const st = State.settings || {};
+        const dur = Math.min(60, Math.max(1, Number(st.wmDuration == null ? 2 : st.wmDuration) || 2));
         return {
           on: !!st.wmEnabled && !!(st.wmUrl || '').trim(),
           mode: st.wmMode === 'center' ? 'center' : 'corner',
           url: String(st.wmUrl || '').trim(),
           opacity: Math.min(1, Math.max(0.15, Number(st.wmOpacity == null ? 0.55 : st.wmOpacity) || 0.55)),
+          durationMs: dur * 1000,
         };
       };
       const hideWm = () => { if (playerWm) playerWm.classList.remove('show'); };
       const flashCenterWm = () => {
         const c = wmCfg();
         if (!playerWm || !c.on || c.mode !== 'center') return;
+        playerWm.style.setProperty('--wm-op', String(c.opacity));
         playerWm.classList.add('show');
         clearTimeout(wmHideT);
-        wmHideT = setTimeout(hideWm, 2000);
+        wmHideT = setTimeout(hideWm, c.durationMs);
       };
       const syncCornerWm = () => {
         const c = wmCfg();
         if (!playerWm || !c.on || c.mode !== 'corner') { hideWm(); return; }
+        playerWm.style.setProperty('--wm-op', String(c.opacity));
         if (!video.paused) playerWm.classList.add('show');
         else hideWm();
       };
@@ -1454,7 +1459,8 @@
         const c = wmCfg();
         playerWm.classList.toggle('mode-center', c.mode === 'center');
         playerWm.classList.toggle('mode-corner', c.mode === 'corner');
-        playerWm.style.opacity = String(c.opacity);
+        playerWm.style.setProperty('--wm-op', String(c.opacity));
+        playerWm.style.opacity = ''; // 清掉旧内联 opacity, 改由 .show + CSS 变量控制
         if (!c.on) {
           playerWm.removeAttribute('src');
           playerWm.classList.add('off');
@@ -1464,7 +1470,11 @@
         playerWm.classList.remove('off');
         if (playerWm.getAttribute('src') !== c.url) playerWm.src = c.url;
         if (c.mode === 'corner') syncCornerWm();
+        else if (!video.paused) flashCenterWm();
         else hideWm();
+      };
+      refreshPlayerWm = () => {
+        applyWm();
       };
       applyWm();
       video.addEventListener('playing', () => {
@@ -1694,6 +1704,8 @@
       }
       bumpMCtrl();
       syncPpBtn();
+      // 全屏后重刷水印(避免被视频合成层盖住 / 正中模式再闪一次)
+      requestAnimationFrame(() => refreshPlayerWm());
     }
     function exitFakeFs(fromPopstate) {
       const wrapEl = $('#videoWrap');
@@ -1716,6 +1728,7 @@
         fakeFsHistPushed = false;
       }
       syncPpBtn();
+      requestAnimationFrame(() => refreshPlayerWm());
     }
     // App / 浏览器返回键: 全屏中优先退出全屏
     const onFakeFsPop = () => {
@@ -1754,6 +1767,7 @@
       }
       applyBrightFilter();
       syncPpBtn();
+      refreshPlayerWm();
     };
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
@@ -3742,8 +3756,10 @@
             <label class="field-label" style="margin-top:10px">显示方式</label>
             <select class="field-input" id="wmModeSel">
               <option value="corner" ${s.wmMode !== 'center' ? 'selected' : ''}>右下角 · 播放中一直显示</option>
-              <option value="center" ${s.wmMode === 'center' ? 'selected' : ''}>正中间 · 开始播放时显示 2 秒</option>
+              <option value="center" ${s.wmMode === 'center' ? 'selected' : ''}>正中间 · 开始播放时短暂显示</option>
             </select>
+            <label class="field-label" style="margin-top:10px">正中模式显示时长（秒，1–60，默认 2）</label>
+            <input class="field-input" id="wmDurationInput" type="number" min="1" max="60" step="1" value="${esc(String(Math.min(60, Math.max(1, Number(s.wmDuration == null ? 2 : s.wmDuration) || 2))))}">
             <label class="field-label" style="margin-top:10px">水印图片 URL（png 推荐）</label>
             <input class="field-input" id="wmUrlInput" value="${esc(s.wmUrl || '')}" placeholder="https://example.com/logo.png" maxlength="500">
             <label class="field-label" style="margin-top:10px">透明度（0.15–1，默认 0.55）</label>
@@ -3809,10 +3825,12 @@
           const mode = $('#wmModeSel').value === 'center' ? 'center' : 'corner';
           const url = $('#wmUrlInput').value.trim();
           const opacity = Number($('#wmOpacityInput').value);
+          const duration = Math.round(Number($('#wmDurationInput').value));
           if (enabled && !url) return toast('开启水印时请填写 PNG 图片地址', 'err');
           if (url && !/^https?:\/\//i.test(url) && !url.startsWith('data:image/')) return toast('图片地址需为 http(s) 或 data:image', 'err');
+          if (!isFinite(duration) || duration < 1 || duration > 60) return toast('显示时长需为 1-60 秒', 'err');
           try {
-            const res = await API.adminSaveSettings({ wmEnabled: enabled, wmMode: mode, wmUrl: url, wmOpacity: opacity });
+            const res = await API.adminSaveSettings({ wmEnabled: enabled, wmMode: mode, wmUrl: url, wmOpacity: opacity, wmDuration: duration });
             const st = res.settings || {};
             State.settings = {
               ...State.settings,
@@ -3820,12 +3838,14 @@
               wmMode: st.wmMode === 'center' ? 'center' : 'corner',
               wmUrl: st.wmUrl || '',
               wmOpacity: Number(st.wmOpacity == null ? 0.55 : st.wmOpacity),
+              wmDuration: Math.min(60, Math.max(1, Number(st.wmDuration == null ? 2 : st.wmDuration) || 2)),
             };
             if (lastSettings) {
               lastSettings.wmEnabled = State.settings.wmEnabled;
               lastSettings.wmMode = State.settings.wmMode;
               lastSettings.wmUrl = State.settings.wmUrl;
               lastSettings.wmOpacity = State.settings.wmOpacity;
+              lastSettings.wmDuration = State.settings.wmDuration;
             }
             const lb = $('#wmEnLabel');
             if (lb) {
