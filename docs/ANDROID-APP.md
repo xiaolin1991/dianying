@@ -30,51 +30,31 @@
 只要 push 到 `main`（或 Actions 页手动 Run workflow）：
 
 1. 构建 Debug APK，版本号 `1.0.<构建编号>` / `versionCode=<构建编号>`。
-2. 脚本 [`scripts/publish-apk.mjs`](../scripts/publish-apk.mjs) 写入工作区 `public/APP/`（latest + 版本号包 + manifest）。
-3. Actions 把 `public/APP` **强制推送到分支 `publish/app`**（**不改 main**，避免和你本地推送冲突）。
-4. 服务器执行 `bash scripts/sync-app-branch.sh` 同步 APK 到线上 `public/APP`。
-5. 若已配置 `SITE_URL` + `ADMIN_PASSWORD`：自动更新后台版本号字段（下载链接由「固定最新包」决定）。
-6. GitHub Releases / Artifacts 仍会上传，仅作备份。
+2. 写入 `public/APP/`（`*-latest.apk` + 版本号包 + `manifest.json`）。
+3. **更新说明**自动取「距上一版」的提交摘要（过滤机器人提交），写入 manifest。
+4. 推到备份分支 `publish/app`，并**同步回 `main` 的 `public/APP`**（网站 `git pull` 即更新）。
+5. 若配置了 `SITE_URL` + `ADMIN_PASSWORD`：额外把版本写入后台 KV。
+6. GitHub Releases / Artifacts 仍会上传作备份。
 
-2. CI 打包后把 APK + `manifest.json` 推到独立分支 **`publish/app`**（**不再写 main**，避免和你本地推送打架）。
-3. 服务器同步 APK（二选一）：
-   - `bash scripts/sync-app-branch.sh`（从 `publish/app` 检出到 `public/APP`）
-   - 或宝塔计划任务：每次 `git pull` 后再跑上面脚本
-4. 站点 `/api/settings` **默认自动读取** `/APP/manifest.json` 作为最新版本（后台保持「自动识别」）。
-5. 官方 App 对比本地 versionCode，更低则弹「立即更新」。
-6. 可选 Secrets：`SITE_URL` + `ADMIN_PASSWORD`（把版本号写入后台 KV，双保险）。
-
-> 本地推送若再提示「远程有更新」：在项目根运行 `.\scripts\git-push.ps1`（先 rebase 再推），或 Desktop 先点「拉取」再「推送」。
-
-### 网站自动拿到最新 APK（不用你手动同步）
-
-自托管 Node 服务**默认开启**自动同步：每隔约 5 分钟从 `publish/app` 拉取到 `public/APP`。
-
-- 环境变量 `AUTO_SYNC_APP=1`（默认，可省略）
-- 关闭：`AUTO_SYNC_APP=0`
-- 间隔：`AUTO_SYNC_APP_MS=300000`（毫秒）
-
-前提：服务器项目目录是 git 仓库，且能 `git fetch origin`。重启一次 `node-server` 后看日志有 `[sync-app]`。
-
-宝塔也可用计划任务每 10 分钟执行：`bash /网站目录/scripts/sync-app-branch.sh`
-
-### publish/app 分支红叉 /「领先又落后 main」要不要管？
-
-**不用管，也不要合并到 main。**
-
-- `publish/app` 是 **只装 APK 的独立分支**，故意和 `main` 不同步，所以 GitHub 会写「领先 1 / 落后 N」——正常。
-- 上面的红叉多半是 **Cloudflare Workers Builds** 扫了这个分支（分支里没有完整站点代码）失败。到 Cloudflare 控制台把构建分支限制为 **仅 `main`** 即可消掉。
-- **不要删除** 网站上的 `public/APP`。串联关系：
+串联关系：
 
 ```
-你推 main → Actions 打包 → 写入分支 publish/app
-                ↓
-        服务器自动同步（约 5 分钟）
-                ↓
-        网站 public/APP/*.apk
-                ↓
-        用户打开 /APP/xiaolintv-phone-latest.apk 下载
+你推 main → Actions 打包 → publish/app + main/public/APP
+                              ↓
+                   网站 git pull / 重新部署
+                              ↓
+                   /APP/manifest.json + latest.apk
+                              ↓
+                   后台「自动识别」+ 用户下载
 ```
+
+> Desktop 若提示远程有更新：先「拉取」再推（CI 回写 APK 到 main 时偶尔发生），或运行 `.\scripts\git-push.ps1`。
+
+自托管 Node 还可开启定时从 `publish/app` 同步（`AUTO_SYNC_APP=1`，默认开）。后台也可点「立即从 publish/app 同步 APK」。
+
+### publish/app 分支红叉 /「领先又落后 main」？
+
+**不用合并。** `publish/app` 故意只装 APK。Cloudflare 红叉：把构建分支限制为仅 `main`。
 
 ## 三、本地手动发布（可选）
 

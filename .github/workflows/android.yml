@@ -79,21 +79,34 @@ jobs:
           cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-tv-latest.apk"
           ls -la out
 
-      # 写入工作区 public/APP（供本 job 后续使用）；版本信息写入 manifest.json
+      # 写入工作区 public/APP；版本说明自动取「距上一版」提交摘要
       - name: Publish APK to public/APP
         env:
           SITE_URL: ${{ secrets.SITE_URL }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           RUN_NO: ${{ github.run_number }}
         run: |
-          NOTES=$(git log --pretty=format:'- %s' -8 | head -20)
+          PREV=$(git describe --tags --abbrev=0 --match 'v1.0.*' 2>/dev/null || echo "")
+          if [ -n "$PREV" ]; then
+            RAW=$(git log --pretty=format:'%s' "${PREV}..HEAD")
+          else
+            RAW=$(git log --pretty=format:'%s' -15)
+          fi
+          # 过滤机器人/同步类提交，整理成用户可读更新说明
+          NOTES=$(printf '%s\n' "$RAW" | grep -vE '^(chore\(app\)|ci:|Merge |自动|fix: stop CI)' | head -12 | sed 's/^/- /')
+          if [ -z "$NOTES" ]; then
+            NOTES="- 版本更新至 1.0.${RUN_NO}
+- 优化体验与稳定性"
+          fi
+          NOTES="晓林影视 1.0.${RUN_NO}
+${NOTES}"
           node scripts/publish-apk.mjs \
             --apk "android/app/build/outputs/apk/debug/app-debug.apk" \
             --code "$RUN_NO" \
             --name "1.0.$RUN_NO" \
             --changelog "$NOTES"
 
-      # 不写 main（避免与本地开发推送互相挡住）；APK 推到独立分支 publish/app
+      # 备份分支：仅 APK（不改代码历史）
       - name: Push APP to publish/app branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -114,7 +127,33 @@ jobs:
               commit -m "chore(app): APK v1.0.${RUN_NO}"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push -f origin publish/app
-          echo "published to branch publish/app (main unchanged)"
+          echo "published to branch publish/app"
+
+      # 同步回 main：网站 git pull / Cloudflare 静态资源才能下到最新包
+      - name: Sync public/APP onto main
+        env:
+          RUN_NO: ${{ github.run_number }}
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/APP
+          if git diff --cached --quiet; then
+            echo "No APP changes"
+            exit 0
+          fi
+          git commit -m "chore(app): sync APK v1.0.${RUN_NO} to main [skip ci]"
+          for i in 1 2 3 4 5 6; do
+            git pull --rebase origin main || { git rebase --abort 2>/dev/null || true; sleep 2; continue; }
+            if git push origin HEAD:main; then
+              echo "synced APP to main"
+              exit 0
+            fi
+            echo "push rejected, retry $i"
+            sleep 4
+          done
+          echo "::warning::未能推送到 main，请服务器执行 sync-app-branch 或稍后重试"
+          exit 0
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

@@ -75,6 +75,7 @@ async function syncAdminSettings({ siteUrl, password, code, name, changelog }) {
   const token = loginData.token;
   // 下载地址由后台「固定最新包」模式决定，CI 只同步版本号，不覆盖自定义链接
   const patch = {
+    appVersionAuto: true,
     appVersionCode: code,
     appVersionName: name,
     appChangelog: changelog || '',

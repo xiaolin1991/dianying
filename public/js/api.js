@@ -84,6 +84,8 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       }),
+    adminSyncApp: () =>
+      jfetch('/api/admin/sync-app', { method: 'POST' }, 120000),
     adminChangePassword: (oldPassword, newPassword) =>
       jfetch('/api/admin/password', {
         method: 'POST',

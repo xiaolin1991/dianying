@@ -1277,6 +1277,23 @@ export default {
           const { passwordHash, salt, ...safeSettings } = saved;
           return json({ ok: true, settings: safeSettings, storage: kv(env) ? 'kv' : 'memory' });
         }
+        /* ---- 从 publish/app 同步 APK 到本机 public/APP（自托管 Node 可用） ---- */
+        if (path === '/api/admin/sync-app' && request.method === 'POST') {
+          if (typeof env.syncAppFromPublishBranch !== 'function') {
+            return json({
+              ok: false,
+              error: '当前托管环境不支持 git 同步。请等 CI 把 APK 同步进 main 后，重新部署/拉取网站代码。',
+            }, 400);
+          }
+          try {
+            await env.syncAppFromPublishBranch();
+            const m = await loadAppManifest(env, request);
+            const ver = effectiveAppVersion(await getSettings(env), m);
+            return json({ ok: true, manifest: m, ...ver });
+          } catch (e) {
+            return json({ ok: false, error: e.message || String(e) }, 500);
+          }
+        }
         /* ---- 后台修改管理密码 ---- */
         if (path === '/api/admin/password' && request.method === 'POST') {
           let body = {};

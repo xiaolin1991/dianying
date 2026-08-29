@@ -167,6 +167,7 @@ async function syncAppFromPublishBranch() {
     }
   }
 }
+env.syncAppFromPublishBranch = syncAppFromPublishBranch;
 
 if (String(process.env.AUTO_SYNC_APP || '1') !== '0') {
   const every = Math.max(60_000, Number(process.env.AUTO_SYNC_APP_MS || 300_000) || 300_000);
