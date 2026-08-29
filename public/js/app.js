@@ -1258,6 +1258,7 @@
                   </div>
                 </div>
                 <img class="player-wm" id="playerWm" alt="" draggable="false" />
+                <button type="button" class="player-fs-fab" id="deskFsBtn" title="全屏" aria-label="全屏">⛶</button>
                 <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
                 <div class="video-tip hidden" id="videoTip"></div>
                 <div class="gest-hud" id="gestHud"></div>
@@ -1307,6 +1308,7 @@
     const mSeek = $('#mSeek');
     const mPpBtn = $('#mPpBtn');
     const mFsToggle = $('#mFsToggle');
+    const deskFsBtn = $('#deskFsBtn');
     const mOrientBtn = $('#mOrientBtn');
     const playerWm = $('#playerWm');
     const mTimeCur = $('#mTimeCur');
@@ -1325,12 +1327,17 @@
     })();
     if (!isMobilePlayer) {
       video.setAttribute('controls', '');
-      // 保留原生控件全屏钮; 进入后切换为容器全屏以保留水印(见 onFsChange)
-      video.removeAttribute('controlsList');
+      // 关掉原生 video 全屏(会丢水印且难转成真全屏); 控件条位置用自绘钮走容器真全屏
+      try {
+        video.setAttribute('controlsList', 'nofullscreen');
+        if (video.controlsList && video.controlsList.add) video.controlsList.add('nofullscreen');
+      } catch (e) {}
+      if (deskFsBtn) deskFsBtn.hidden = false;
     } else {
       video.removeAttribute('controls');
       video.removeAttribute('controlsList');
       if (wrap) wrap.classList.add('is-mobile-player');
+      if (deskFsBtn) deskFsBtn.hidden = true;
     }
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
     const getSavedBright = () => Math.min(2.2, Math.max(0.25, Number(store.get('vidBright', 1)) || 1));
@@ -1386,6 +1393,11 @@
       }
       if (mPpBtn) mPpBtn.textContent = video.paused ? '▶' : '❚❚';
       if (mFsToggle) mFsToggle.classList.toggle('on', isPlayerFs());
+      if (deskFsBtn) {
+        deskFsBtn.classList.toggle('on', isPlayerFs());
+        deskFsBtn.title = isPlayerFs() ? '退出全屏' : '全屏';
+        deskFsBtn.setAttribute('aria-label', deskFsBtn.title);
+      }
       if (isMobilePlayer) bumpMCtrl();
     };
     const togglePlay = () => {
@@ -1693,41 +1705,35 @@
     const toggleFakeFs = () => { togglePlayerFs(); };
     $('#fsBtn').addEventListener('click', (e) => { e.preventDefault(); togglePlayerFs(); });
     if (mFsToggle) mFsToggle.addEventListener('click', (e) => { e.stopPropagation(); togglePlayerFs(); });
-    // 桌面: 拦截原生控件「全屏」热区, 用真实点击手势直接容器真全屏(避免 video 全屏后再转换失败落入假全屏)
-    if (wrap && !isMobilePlayer) {
-      const isNativeFsHotspot = (e) => {
-        const rect = wrap.getBoundingClientRect();
-        const fromRight = rect.right - e.clientX;
-        const fromBottom = rect.bottom - e.clientY;
-        // Chromium 控件条: 最右≈菜单, 其左≈全屏, 再左≈音量 (约 36–96px)
-        return fromBottom >= 0 && fromBottom <= 48 && fromRight >= 36 && fromRight <= 96;
-      };
-      wrap.addEventListener('pointerdown', (e) => {
-        if (e.button != null && e.button !== 0) return;
-        if (!isNativeFsHotspot(e)) return;
+    // 桌面控件条全屏钮: 同步 requestFullscreen, 一次点中真全屏
+    if (deskFsBtn) {
+      deskFsBtn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      });
+      deskFsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         autoFsByOrient = false;
-        if (wrap.classList.contains('fake-fs')) exitFakeFs();
+        if (wrap && wrap.classList.contains('fake-fs')) exitFakeFs();
         const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
         if (fsEl === wrap) {
           const exit = document.exitFullscreen || document.webkitExitFullscreen;
           if (exit) exit.call(document);
-        } else if (wrap.requestFullscreen) {
-          wrap.requestFullscreen().then(() => requestAnimationFrame(() => refreshPlayerWm())).catch(() => toast('当前浏览器无法进入全屏', 'err'));
-        } else if (wrap.webkitRequestFullscreen) {
-          try { wrap.webkitRequestFullscreen(); } catch (err) { toast('当前浏览器无法进入全屏', 'err'); }
+        } else if (wrap && wrap.requestFullscreen) {
+          wrap.requestFullscreen().then(() => requestAnimationFrame(() => refreshPlayerWm())).catch(() => {});
+        } else if (wrap && wrap.webkitRequestFullscreen) {
+          try { wrap.webkitRequestFullscreen(); } catch (err) {}
         }
         syncPpBtn();
-      }, true);
+      });
     }
-    // 桌面单击画面暂停/播放: 现代浏览器带 controls 时单击画面往往不切换, 需自管
-    // 延迟执行以免与双击全屏抢第一次单击; 底部控件条区域留给原生控件
+    // 桌面单击画面暂停/播放
     if (wrap && !isMobilePlayer) {
       let deskClickT = null;
       wrap.addEventListener('click', (e) => {
-        if (e.target.closest('.m-ctrl, button, a, input, select')) return;
+        if (e.target.closest('.player-fs-fab, .m-ctrl, button, a, input, select')) return;
         const rect = wrap.getBoundingClientRect();
         if (e.clientY > rect.bottom - 52) return;
         e.preventDefault();
@@ -1843,30 +1849,23 @@
     document.addEventListener('keydown', onFsEsc);
     const onFsChange = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      // 若原生仍把 video 拉进全屏: 电脑只切到容器真全屏, 绝不回退假全屏
+      // 万一仍进入 video 原生全屏: 静默退出(勿弹提示); 电脑不再假全屏兜底
       if (fsEl === video && wrap) {
         wrap._ntvFsConvert = true;
-        if (wrap.classList.contains('fake-fs')) exitFakeFs();
-        let ok = false;
         try {
-          if (wrap.requestFullscreen) { await wrap.requestFullscreen(); ok = true; }
-          else if (wrap.webkitRequestFullscreen) { wrap.webkitRequestFullscreen(); ok = true; }
-        } catch (e) { ok = false; }
-        if (!ok) {
+          if (wrap.requestFullscreen) await wrap.requestFullscreen();
+          else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen();
+          else {
+            const exit = document.exitFullscreen || document.webkitExitFullscreen;
+            if (exit) await exit.call(document);
+            if (isMobilePlayer) enterFakeFs();
+          }
+        } catch (e) {
           try {
             const exit = document.exitFullscreen || document.webkitExitFullscreen;
             if (exit) await exit.call(document);
-          } catch (e) {}
-          if (isMobilePlayer) {
-            enterFakeFs();
-          } else {
-            try {
-              if (wrap.requestFullscreen) await wrap.requestFullscreen();
-              else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen();
-            } catch (e2) {
-              toast('请再点一次全屏，或使用下方「全屏」按钮', 'err');
-            }
-          }
+          } catch (e2) {}
+          if (isMobilePlayer) enterFakeFs();
         }
         wrap._ntvFsConvert = false;
         syncPpBtn();
