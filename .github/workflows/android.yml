@@ -2,6 +2,7 @@ name: Build & Publish (APK + Docker)
 
 # 每次 push 到 main: ① 打包 APK → public/APP + Releases ② 构建 Docker 镜像发布到 GHCR
 # public/APP 的回写提交不会再触发本工作流(paths-ignore + [skip ci])
+# 注意: 仓库首页绿勾里的「Workers Builds」是 Cloudflare，不是本工作流；请到 Actions 页查看本任务
 on:
   push:
     branches: [ main ]
