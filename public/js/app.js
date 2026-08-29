@@ -1257,7 +1257,9 @@
                     <button type="button" class="m-icon-btn" id="mFsToggle" title="全屏" aria-label="全屏">⛶</button>
                   </div>
                 </div>
-                <img class="player-wm" id="playerWm" alt="" draggable="false" />
+                <div class="player-wm-slot" id="playerWmSlot">
+                  <img class="player-wm" id="playerWm" alt="" draggable="false" />
+                </div>
                 <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
                 <div class="video-tip hidden" id="videoTip"></div>
                 <div class="gest-hud" id="gestHud"></div>
@@ -1309,6 +1311,7 @@
     const mFsToggle = $('#mFsToggle');
     const mOrientBtn = $('#mOrientBtn');
     const playerWm = $('#playerWm');
+    const playerWmSlot = $('#playerWmSlot');
     const mTimeCur = $('#mTimeCur');
     const mTimeDur = $('#mTimeDur');
     const stageHome = wrap && wrap.parentElement; // 假全屏结束后还原位置
@@ -1424,6 +1427,7 @@
     }
 
     // ---- 播放器 PNG 水印(电脑/手机共用, 后台开关与模式) ----
+    // 全屏时视频常被提升为独立合成层盖住容器内 DOM, 故全屏改挂到 body 固定层
     let refreshPlayerWm = () => {};
     {
       let wmHideT = null;
@@ -1439,9 +1443,25 @@
         };
       };
       const hideWm = () => { if (playerWm) playerWm.classList.remove('show'); };
+      const placeWmLayer = () => {
+        if (!playerWm) return;
+        const fs = video.isConnected && isPlayerFs();
+        if (fs) {
+          if (playerWm.parentElement !== document.body) document.body.appendChild(playerWm);
+          playerWm.classList.add('wm-body-fs');
+        } else {
+          playerWm.classList.remove('wm-body-fs');
+          if (playerWmSlot && playerWmSlot.isConnected) {
+            if (playerWm.parentElement !== playerWmSlot) playerWmSlot.appendChild(playerWm);
+          } else if (playerWm.parentElement === document.body) {
+            try { playerWm.remove(); } catch (e) {}
+          }
+        }
+      };
       const flashCenterWm = () => {
         const c = wmCfg();
         if (!playerWm || !c.on || c.mode !== 'center') return;
+        placeWmLayer();
         playerWm.style.setProperty('--wm-op', String(c.opacity));
         playerWm.classList.add('show');
         clearTimeout(wmHideT);
@@ -1450,6 +1470,7 @@
       const syncCornerWm = () => {
         const c = wmCfg();
         if (!playerWm || !c.on || c.mode !== 'corner') { hideWm(); return; }
+        placeWmLayer();
         playerWm.style.setProperty('--wm-op', String(c.opacity));
         if (!video.paused) playerWm.classList.add('show');
         else hideWm();
@@ -1460,22 +1481,22 @@
         playerWm.classList.toggle('mode-center', c.mode === 'center');
         playerWm.classList.toggle('mode-corner', c.mode === 'corner');
         playerWm.style.setProperty('--wm-op', String(c.opacity));
-        playerWm.style.opacity = ''; // 清掉旧内联 opacity, 改由 .show + CSS 变量控制
+        playerWm.style.opacity = '';
         if (!c.on) {
           playerWm.removeAttribute('src');
           playerWm.classList.add('off');
           hideWm();
+          placeWmLayer();
           return;
         }
         playerWm.classList.remove('off');
         if (playerWm.getAttribute('src') !== c.url) playerWm.src = c.url;
+        placeWmLayer();
         if (c.mode === 'corner') syncCornerWm();
         else if (!video.paused) flashCenterWm();
         else hideWm();
       };
-      refreshPlayerWm = () => {
-        applyWm();
-      };
+      refreshPlayerWm = () => { applyWm(); };
       applyWm();
       video.addEventListener('playing', () => {
         const c = wmCfg();
@@ -1747,15 +1768,22 @@
     };
     const onFsChange = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      // 手机: 原生全屏钮在假全屏中再点 → 退出假全屏; 非假全屏时点原生 → 改走假全屏
-      if (isMobilePlayer && fsEl === video) {
+      // 仅 video 全屏时页面内水印不可见: 退出后改走容器全屏/假全屏
+      if (fsEl === video) {
         try {
           const exit = document.exitFullscreen || document.webkitExitFullscreen;
           if (exit) await exit.call(document);
         } catch (e) {}
-        if (wrap.classList.contains('fake-fs')) { autoFsByOrient = false; exitFakeFs(); }
-        else enterFakeFs();
+        if (isMobilePlayer) {
+          if (wrap.classList.contains('fake-fs')) { autoFsByOrient = false; exitFakeFs(); }
+          else enterFakeFs();
+        } else if (wrap && wrap.requestFullscreen) {
+          wrap.requestFullscreen().catch(() => {});
+        } else if (wrap && wrap.webkitRequestFullscreen) {
+          try { wrap.webkitRequestFullscreen(); } catch (e) {}
+        }
         syncPpBtn();
+        refreshPlayerWm();
         return;
       }
       if (!fsEl) {
@@ -1772,15 +1800,19 @@
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
     video.addEventListener('webkitbeginfullscreen', () => {
-      if (!isMobilePlayer) return;
+      // iOS 原生 video 全屏: 立刻退出并改假全屏, 保留水印
       try { if (video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
       setTimeout(() => {
-        if (wrap.classList.contains('fake-fs')) { autoFsByOrient = false; exitFakeFs(); }
-        else enterFakeFs();
+        if (!alive() || !video.isConnected) return;
+        if (isMobilePlayer) {
+          if (wrap.classList.contains('fake-fs')) { autoFsByOrient = false; exitFakeFs(); }
+          else enterFakeFs();
+        }
         syncPpBtn();
+        refreshPlayerWm();
       }, 50);
     });
-    video.addEventListener('webkitendfullscreen', () => applyBrightFilter());
+    video.addEventListener('webkitendfullscreen', () => { applyBrightFilter(); refreshPlayerWm(); });
 
     // 仅手机横屏自动全屏; 电脑绝不触发
     const orientMq = window.matchMedia('(orientation: landscape)');
