@@ -44,7 +44,19 @@
 5. 官方 App 对比本地 versionCode，更低则弹「立即更新」。
 6. 可选 Secrets：`SITE_URL` + `ADMIN_PASSWORD`（把版本号写入后台 KV，双保险）。
 
-> 本地推送若再提示「远程有更新」：在项目根运行 `.\scripts\git-push.ps1`（先 rebase 再推），或 Desktop 先点「拉取」再「推送」。打包机器人已不再改 main，这类提示会少很多。
+> 本地推送若再提示「远程有更新」：在项目根运行 `.\scripts\git-push.ps1`（先 rebase 再推），或 Desktop 先点「拉取」再「推送」。
+
+### 网站自动拿到最新 APK（不用你手动同步）
+
+自托管 Node 服务**默认开启**自动同步：每隔约 5 分钟从 `publish/app` 拉取到 `public/APP`。
+
+- 环境变量 `AUTO_SYNC_APP=1`（默认，可省略）
+- 关闭：`AUTO_SYNC_APP=0`
+- 间隔：`AUTO_SYNC_APP_MS=300000`（毫秒）
+
+前提：服务器项目目录是 git 仓库，且能 `git fetch origin`。重启一次 `node-server` 后看日志有 `[sync-app]`。
+
+宝塔也可用计划任务每 10 分钟执行：`bash /网站目录/scripts/sync-app-branch.sh`
 
 ## 三、本地手动发布（可选）
 

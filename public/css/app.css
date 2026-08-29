@@ -35,9 +35,17 @@ img { display: block; }
 }
 .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .brand-logo { width: 32px; height: 32px; filter: drop-shadow(var(--glow)); }
-.brand-name { font-size: 19px; font-weight: 800; letter-spacing: .5px;
+.brand-name {
+  font-size: 19px; font-weight: 800; letter-spacing: .5px;
+  color: var(--acc); /* 无 background-clip 时的可读兜底, 避免透明字变成「乱码/空白」 */
   background: linear-gradient(120deg, var(--acc), var(--acc2));
-  -webkit-background-clip: text; background-clip: text; color: transparent; white-space: nowrap; }
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  white-space: nowrap;
+}
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .brand-name { background: none; -webkit-text-fill-color: unset; color: var(--acc); }
+}
 .nav { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .nav::-webkit-scrollbar { display: none; }
 .nav a {
@@ -91,8 +99,38 @@ img { display: block; }
   background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 16%, var(--card)), var(--card));
   border: 1px solid var(--card-br); border-radius: 12px;
   display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--txt);
+  font-weight: 500;
 }
-.announce button { background: none; border: none; color: var(--dim); font-size: 18px; line-height: 1; }
+.announce #announceText { color: var(--txt); flex: 1; min-width: 0; line-height: 1.45; word-break: break-word; }
+.announce button { background: none; border: none; color: var(--dim); font-size: 18px; line-height: 1; flex-shrink: 0; }
+
+/* 浅色主题: 公告/顶栏对比度加强, 避免发白像「乱码」 */
+html[data-theme="ocean"] .announce,
+html[data-theme="sakura"] .announce,
+html[data-theme="valentine"] .announce {
+  background: #fff;
+  border-color: color-mix(in srgb, var(--acc) 35%, #d0d8dc);
+  box-shadow: 0 2px 10px rgba(0,0,0,.06);
+}
+html[data-theme="ocean"] .hero-title,
+html[data-theme="sakura"] .hero-title,
+html[data-theme="valentine"] .hero-title {
+  color: #0f172a;
+  text-shadow: 0 1px 0 rgba(255,255,255,.65), 0 2px 12px rgba(0,0,0,.18);
+}
+html[data-theme="ocean"] .hero-desc,
+html[data-theme="sakura"] .hero-desc,
+html[data-theme="valentine"] .hero-desc {
+  color: rgba(15, 23, 42, .88);
+  text-shadow: 0 1px 0 rgba(255,255,255,.5);
+}
+html[data-theme="ocean"] .hero-content .tag,
+html[data-theme="sakura"] .hero-content .tag,
+html[data-theme="valentine"] .hero-content .tag {
+  background: rgba(255,255,255,.92);
+  color: #0f172a;
+  border-color: rgba(15,23,42,.12);
+}
 
 /* ---------------- 首页 Hero ---------------- */
 .hero {

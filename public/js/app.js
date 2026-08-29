@@ -372,24 +372,27 @@
 
   /* ------------------------------ 主题 ------------------------------ */
   const THEME_META = [
-    { id: 'midnight', name: '暗夜蓝', dot: '#5b8cff', bg: '#070b14' },
+    { id: 'midnight', name: '暗夜黑', dot: '#5b8cff', bg: '#070b14' },
     { id: 'emerald', name: '翡翠绿', dot: '#34d399', bg: '#06110d' },
     { id: 'sunset', name: '落日橙', dot: '#ff8a3d', bg: '#150e08' },
     { id: 'sakura', name: '樱花粉', dot: '#ff6b9d', bg: '#fdf4f7' },
-    { id: 'ocean', name: '海洋青', dot: '#0ea5b7', bg: '#f1f9fc' },
-    { id: 'royal', name: '鎏金紫', dot: '#a78bfa', bg: '#100c1c' },
+    { id: 'ocean', name: '薄荷蓝', dot: '#0ea5b7', bg: '#f1f9fc' },
+    { id: 'royal', name: '墨金紫', dot: '#a78bfa', bg: '#100c1c' },
     // 节日主题
-    { id: 'christmas', name: '圣诞夜 🎄', dot: '#e0393e', bg: '#071410' },
-    { id: 'spring', name: '新春红 🧨', dot: '#ffb347', bg: '#1c0808' },
-    { id: 'lantern', name: '元宵灯彩 🏮', dot: '#ff7ab6', bg: '#170b20' },
-    { id: 'halloween', name: '万圣夜 🎃', dot: '#ff8a3d', bg: '#140b1d' },
-    { id: 'valentine', name: '情人节 💝', dot: '#ff5d73', bg: '#fdf0f2' },
-    { id: 'midautumn', name: '中秋月 🌕', dot: '#f5c66d', bg: '#0a1224' },
+    { id: 'christmas', name: '圣诞夜', dot: '#e0393e', bg: '#071410' },
+    { id: 'spring', name: '新春红', dot: '#ffb347', bg: '#1c0808' },
+    { id: 'lantern', name: '元宵灯彩', dot: '#ff7ab6', bg: '#170b20' },
+    { id: 'halloween', name: '万圣夜', dot: '#ff8a3d', bg: '#140b1d' },
+    { id: 'valentine', name: '情人节', dot: '#ff5d73', bg: '#fdf0f2' },
+    { id: 'midautumn', name: '中秋月', dot: '#f5c66d', bg: '#0a1224' },
   ];
   function applyTheme(id) {
     if (!THEME_META.some((t) => t.id === id)) id = 'midnight';
     document.documentElement.setAttribute('data-theme', id);
     store.set('theme', id);
+    const meta = THEME_META.find((t) => t.id === id);
+    const themeColor = document.querySelector('meta[name="theme-color"]');
+    if (themeColor && meta) themeColor.setAttribute('content', meta.bg);
     $$('#themePop .theme-item').forEach((el) => el.classList.toggle('active', el.dataset.tid === id));
   }
   function buildThemePop() {

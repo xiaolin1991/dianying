@@ -9,12 +9,18 @@
  *   DATA_DIR        数据目录(kv.json 所在), 默认 ./data
  *   ADMIN_PASSWORD  初始管理密码
  *   ADULT_ENABLED   "true" 开启成人内容初始开关
+ *   AUTO_SYNC_APP   默认开启: 定时从 git 分支 publish/app 同步 public/APP；设为 0 关闭
+ *   AUTO_SYNC_APP_MS 同步间隔毫秒(默认 300000=5分钟)
  */
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const execFileAsync = promisify(execFile);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -131,6 +137,43 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  数据目录: ${DATA_DIR} (kv.json)`);
   console.log('==============================================');
 });
+
+/* ---- 自动从 publish/app 同步 APK（推 main → Actions 打包装到该分支 → 网站自动更新）----
+   关闭: AUTO_SYNC_APP=0
+   间隔: AUTO_SYNC_APP_MS=300000（默认 5 分钟） */
+async function syncAppFromPublishBranch() {
+  try {
+    await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: ROOT, timeout: 8000 });
+  } catch (e) {
+    return; // 非 git 目录则跳过
+  }
+  try {
+    await execFileAsync('git', ['fetch', 'origin', 'publish/app:refs/remotes/origin/publish/app'], {
+      cwd: ROOT,
+      timeout: 180000,
+    });
+    await execFileAsync('git', ['checkout', 'origin/publish/app', '--', 'public/APP'], {
+      cwd: ROOT,
+      timeout: 60000,
+    });
+    console.log('[sync-app] public/APP 已从 origin/publish/app 更新');
+  } catch (e) {
+    const msg = (e && (e.stderr || e.message)) ? String(e.stderr || e.message).trim() : String(e);
+    // 分支尚未创建时属正常（等第一次 Actions 打包）
+    if (/couldn't find remote ref|unknown revision|publish\/app/i.test(msg)) {
+      console.log('[sync-app] 暂无 publish/app（等 Actions 成功打包后再同步）');
+    } else {
+      console.warn('[sync-app]', msg.slice(0, 240));
+    }
+  }
+}
+
+if (String(process.env.AUTO_SYNC_APP || '1') !== '0') {
+  const every = Math.max(60_000, Number(process.env.AUTO_SYNC_APP_MS || 300_000) || 300_000);
+  setTimeout(() => { syncAppFromPublishBranch(); }, 8_000);
+  setInterval(() => { syncAppFromPublishBranch(); }, every);
+  console.log(`[sync-app] 已开启自动同步 publish/app → public/APP（每 ${Math.round(every / 60000)} 分钟）`);
+}
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
