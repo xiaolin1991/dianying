@@ -13,8 +13,8 @@ compatibility_date = "2025-01-01"
 [assets]
 directory = "./public"
 binding = "ASSETS"
-# /api/* 始终先进入 Worker, 其余路径直接走静态资源
-run_worker_first = ["/api/*"]
+# /api/* 与 /APP/* 先进入 Worker（APP 可在静态资源过期时从 GitHub 拉最新包）
+run_worker_first = ["/api/*", "/APP/*"]
 
 [[kv_namespaces]]
 binding = "CONFIG_KV"
@@ -27,3 +27,5 @@ ADMIN_PASSWORD = "admin123"
 ADULT_ENABLED = "false"
 # 影视源配置地址(LunaTV-config 每日自动更新)
 CONFIG_URL = "https://raw.githubusercontent.com/hafrey1/LunaTV-config/main/LunaTV-config.json"
+# 私有仓同步 APK 版本用（密钥 GITHUB_TOKEN 在 Dashboard 配置，勿写进仓库）
+GITHUB_REPO = "xiaolin1991/dianying"

@@ -4064,7 +4064,9 @@
           </div>
           <div class="admin-card" style="margin-top:16px">
             <h3>🔄 App 版本更新</h3>
-            <p class="hint">默认<strong>自动识别</strong>：读取网站上的 <code>/APP/manifest.json</code>。CI 打包后会写入 <code>publish/app</code> 并同步回 <code>main</code>；服务器 <code>git pull</code> 或点下方「立即同步」后，本页与下载链接即更新。更新说明由本次提交记录自动生成。</p>
+            <p class="hint">默认<strong>自动识别</strong>：读取 <code>/APP/manifest.json</code>（优先 KV / 最新版本）。CI 会写入 <code>publish/app</code> 并同步回 <code>main</code>。<br>
+            · <b>自托管 Node</b>：点下方同步 = <code>git</code> 拉取 <code>publish/app</code><br>
+            · <b>Cloudflare</b>：需配置 Worker 变量 <code>GITHUB_REPO</code> + 密钥 <code>GITHUB_TOKEN</code> 后点同步；或配置 Actions Secret <code>CF_DEPLOY_HOOK</code> 让 CI 触发重新部署。更新说明由提交记录自动生成。</p>
             <div class="dl-mode-row" id="verModeRow" style="margin:12px 0">
               <button type="button" class="chip dl-mode-btn ${(s.appVersionAuto !== false) ? 'on' : ''}" data-mode="auto">自动识别</button>
               <button type="button" class="chip dl-mode-btn ${(s.appVersionAuto === false) ? 'on' : ''}" data-mode="manual">手动填写</button>
@@ -4077,7 +4079,7 @@
               <div class="field-input" style="opacity:.85">${esc(s.appVersionName || '（暂无）')}</div>
               <label class="field-label" style="margin-top:12px">更新说明</label>
               <pre class="field-input" style="opacity:.85;white-space:pre-wrap;min-height:72px;margin:0">${esc(s.appChangelog || '（暂无，等下次 CI 发布）')}</pre>
-              <button class="btn ghost" id="syncAppBtn" style="margin-top:12px" type="button">⟳ 立即从 publish/app 同步 APK</button>
+              <button class="btn ghost" id="syncAppBtn" style="margin-top:12px" type="button">⟳ 立即同步最新 APK 版本</button>
             </div>
             <div id="verManualBox" class="${(s.appVersionAuto === false) ? '' : 'hidden'}">
               <label class="field-label">最新 versionCode（整数，与 Android 打包 verCode 一致；0=关闭检查）</label>
@@ -4137,7 +4139,7 @@
             } catch (err) {
               toast('同步失败：' + err.message, 'err');
               syncAppBtn.disabled = false;
-              syncAppBtn.textContent = '⟳ 立即从 publish/app 同步 APK';
+              syncAppBtn.textContent = '⟳ 立即同步最新 APK 版本';
             }
           });
         }

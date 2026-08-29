@@ -169,29 +169,176 @@ function effectiveDownloadUrls(s) {
   return { downloadUrl: phone, downloadUrlTv: tv };
 }
 
-/** 读取 CI 写入的 public/APP/manifest.json */
+const APP_MANIFEST_KEY = 'app_manifest';
+
+function githubRepo(env) {
+  return String((env && (env.GITHUB_REPO || env.GH_REPO)) || '').trim().replace(/^\/+|\/+$/g, '');
+}
+
+function githubToken(env) {
+  return String((env && (env.GITHUB_TOKEN || env.GH_TOKEN || env.GH_PAT)) || '').trim();
+}
+
+/** 从 GitHub Contents API 读取仓库文件（私有仓需配置 GITHUB_TOKEN） */
+async function githubReadFile(env, filePath, ref) {
+  const repo = githubRepo(env);
+  const token = githubToken(env);
+  if (!repo || !token) return null;
+  const url = `https://api.github.com/repos/${repo}/contents/${String(filePath).replace(/^\/+/, '')}?ref=${encodeURIComponent(ref || 'main')}`;
+  const r = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'User-Agent': 'xiaolin-tv-worker',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  if (!data || data.type !== 'file' || typeof data.content !== 'string') return null;
+  const b64 = data.content.replace(/\n/g, '');
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { bytes, sha: data.sha || '', name: data.name || '' };
+}
+
+async function readKvAppManifest(env) {
+  if (!kv(env)) return null;
+  try {
+    const raw = await env.CONFIG_KV.get(APP_MANIFEST_KEY);
+    if (!raw) return null;
+    const m = JSON.parse(raw);
+    return m && typeof m === 'object' ? m : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function writeKvAppManifest(env, manifest) {
+  if (!kv(env) || !manifest || typeof manifest !== 'object') return;
+  const code = Math.max(0, Math.round(Number(manifest.versionCode == null ? 0 : manifest.versionCode)) || 0);
+  if (!code) return;
+  const clean = {
+    versionCode: code,
+    versionName: String(manifest.versionName || ('1.0.' + code)).slice(0, 40),
+    changelog: String(manifest.changelog || '').slice(0, 2000),
+    publishedAt: String(manifest.publishedAt || new Date().toISOString()),
+    phone: manifest.phone && typeof manifest.phone === 'object' ? manifest.phone : undefined,
+    tv: manifest.tv && typeof manifest.tv === 'object' ? manifest.tv : undefined,
+  };
+  await env.CONFIG_KV.put(APP_MANIFEST_KEY, JSON.stringify(clean));
+}
+
+/** Cloudflare：从 GitHub main / publish/app 拉取 manifest 写入 KV（不依赖 git） */
+async function syncAppManifestFromGithub(env) {
+  const repo = githubRepo(env);
+  const token = githubToken(env);
+  if (!repo || !token) {
+    throw new Error(
+      'Cloudflare 环境请在 Worker 密钥中配置 GITHUB_TOKEN，并在变量中设置 GITHUB_REPO=owner/repo；或配置 Actions Secret CF_DEPLOY_HOOK 让 CI 触发重新部署。'
+    );
+  }
+  let lastErr = '';
+  for (const ref of ['publish/app', 'main']) {
+    try {
+      const file = await githubReadFile(env, 'public/APP/manifest.json', ref);
+      if (!file) {
+        lastErr = `ref ${ref} 无 manifest`;
+        continue;
+      }
+      const text = new TextDecoder().decode(file.bytes);
+      const m = JSON.parse(text);
+      if (!m || !m.versionCode) {
+        lastErr = `ref ${ref} manifest 无效`;
+        continue;
+      }
+      await writeKvAppManifest(env, m);
+      return { ...m, _syncedFrom: ref };
+    } catch (e) {
+      lastErr = (e && e.message) || String(e);
+    }
+  }
+  throw new Error('从 GitHub 同步失败：' + (lastErr || '未知错误'));
+}
+
+function manifestCode(m) {
+  return Math.max(0, Math.round(Number(m && m.versionCode != null ? m.versionCode : 0)) || 0);
+}
+
+/** 读取 CI 写入的 public/APP/manifest.json（磁盘 / KV / 静态资源，取 versionCode 最新者） */
 async function loadAppManifest(env, request) {
+  const cands = [];
   if (env && typeof env.getAppManifest === 'function') {
     try {
       const m = await env.getAppManifest();
-      if (m && typeof m === 'object') return m;
+      if (m && typeof m === 'object') cands.push(m);
     } catch (e) { /* ignore */ }
   }
+  try {
+    const m = await readKvAppManifest(env);
+    if (m) cands.push(m);
+  } catch (e) { /* ignore */ }
   try {
     if (env && env.ASSETS && typeof env.ASSETS.fetch === 'function') {
       const assetUrl = new URL('/APP/manifest.json', (request && request.url) || 'https://assets.local/');
       const r = await env.ASSETS.fetch(assetUrl);
-      if (r.ok) return await r.json();
+      if (r.ok) cands.push(await r.json());
     }
   } catch (e) { /* ignore */ }
   try {
     const base = request && request.url ? new URL(request.url) : null;
     if (base && base.hostname && base.hostname !== 'internal') {
       const r = await fetch(new URL('/APP/manifest.json', base), { signal: AbortSignal.timeout(4000) });
-      if (r.ok) return await r.json();
+      if (r.ok) cands.push(await r.json());
     }
   } catch (e) { /* ignore */ }
-  return null;
+  let best = null;
+  for (const m of cands) {
+    if (!m || typeof m !== 'object') continue;
+    if (!best || manifestCode(m) > manifestCode(best)) best = m;
+  }
+  return best;
+}
+
+/** 当 KV 版本新于静态资源时，从 GitHub 拉 APK/manifest（私有仓 + token） */
+async function tryServeAppFromGithub(env, fileName, ctx) {
+  const token = githubToken(env);
+  const repo = githubRepo(env);
+  if (!token || !repo || !fileName || fileName.includes('..') || fileName.includes('/')) return null;
+  const kvMan = await readKvAppManifest(env);
+  // 无 KV 版本时也可强制走 GitHub（变量 APP_FROM_GITHUB=1）
+  const force = String((env && env.APP_FROM_GITHUB) || '') === '1';
+  if (!force && !kvMan) return null;
+
+  const cacheKey = new Request(`https://app-github-cache.local/APP/${fileName}?v=${manifestCode(kvMan)}`);
+  try {
+    const hit = await caches.default.match(cacheKey);
+    if (hit) return hit;
+  } catch (e) { /* ignore */ }
+
+  let file = null;
+  for (const ref of ['publish/app', 'main']) {
+    file = await githubReadFile(env, 'public/APP/' + fileName, ref);
+    if (file) break;
+  }
+  if (!file) return null;
+  const isApk = /\.apk$/i.test(fileName);
+  const isJson = /\.json$/i.test(fileName);
+  const headers = {
+    'Cache-Control': 'public, max-age=300',
+    'Content-Type': isApk
+      ? 'application/vnd.android.package-archive'
+      : (isJson ? 'application/json; charset=utf-8' : 'application/octet-stream'),
+  };
+  const res = new Response(file.bytes, { status: 200, headers });
+  try {
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(caches.default.put(cacheKey, res.clone()));
+    }
+  } catch (e) { /* ignore */ }
+  return res;
 }
 
 function parseManifestVersion(manifest) {
@@ -273,6 +420,21 @@ async function saveSettings(env, patch) {
   if (typeof patch.appForceUpdate === 'boolean') next.appForceUpdate = patch.appForceUpdate;
   if (typeof patch.appChangelog === 'string') next.appChangelog = patch.appChangelog.trim().slice(0, 2000);
   if (typeof patch.appVersionAuto === 'boolean') next.appVersionAuto = patch.appVersionAuto;
+  if (patch.appManifest && typeof patch.appManifest === 'object') {
+    try { await writeKvAppManifest(env, patch.appManifest); } catch (e) { /* ignore */ }
+  } else if (patch.appVersionCode !== undefined && Number(patch.appVersionCode) > 0) {
+    // CI 同步版本号时同步写入 KV manifest，Cloudflare 静态资源未重建也能识别新版本
+    try {
+      await writeKvAppManifest(env, {
+        versionCode: next.appVersionCode,
+        versionName: next.appVersionName || ('1.0.' + next.appVersionCode),
+        changelog: next.appChangelog || '',
+        publishedAt: new Date().toISOString(),
+        phone: { path: '/APP/xiaolintv-phone-latest.apk' },
+        tv: { path: '/APP/xiaolintv-tv-latest.apk' },
+      });
+    } catch (e) { /* ignore */ }
+  }
   if (typeof patch.adminPath === 'string') {
     const ap = patch.adminPath.trim().toLowerCase();
     if (ap && !/^[a-z0-9][a-z0-9-_]{1,39}$/.test(ap)) {
@@ -1277,19 +1439,24 @@ export default {
           const { passwordHash, salt, ...safeSettings } = saved;
           return json({ ok: true, settings: safeSettings, storage: kv(env) ? 'kv' : 'memory' });
         }
-        /* ---- 从 publish/app 同步 APK 到本机 public/APP（自托管 Node 可用） ---- */
+        /* ---- 同步 APK 版本：Node=git checkout；Cloudflare=GitHub API → KV ---- */
         if (path === '/api/admin/sync-app' && request.method === 'POST') {
-          if (typeof env.syncAppFromPublishBranch !== 'function') {
-            return json({
-              ok: false,
-              error: '当前托管环境不支持 git 同步。请等 CI 把 APK 同步进 main 后，重新部署/拉取网站代码。',
-            }, 400);
-          }
           try {
-            await env.syncAppFromPublishBranch();
+            let mode = 'github';
+            if (typeof env.syncAppFromPublishBranch === 'function') {
+              await env.syncAppFromPublishBranch();
+              mode = 'git';
+              // Node 同步磁盘后，把 manifest 也写入 KV（若有）
+              try {
+                const disk = typeof env.getAppManifest === 'function' ? await env.getAppManifest() : null;
+                if (disk) await writeKvAppManifest(env, disk);
+              } catch (e) { /* ignore */ }
+            } else {
+              await syncAppManifestFromGithub(env);
+            }
             const m = await loadAppManifest(env, request);
             const ver = effectiveAppVersion(await getSettings(env), m);
-            return json({ ok: true, manifest: m, ...ver });
+            return json({ ok: true, mode, manifest: m, ...ver });
           } catch (e) {
             return json({ ok: false, error: e.message || String(e) }, 500);
           }
@@ -1477,6 +1644,26 @@ export default {
       }
 
       /* ---- 静态资源兜底(Pages 高级模式走这里; Workers 模式一般到不了) ---- */
+      /* APP 目录：KV 版本新于静态资源时，从 GitHub 拉最新包（解决 CF 未重建仍显示旧版） */
+      if (request.method === 'GET' && path.startsWith('/APP/') && path.length > 5) {
+        const fileName = decodeURIComponent(path.slice(5)).replace(/^\/+/, '');
+        if (fileName && !fileName.includes('..') && !fileName.includes('/')) {
+          let assetVer = 0;
+          try {
+            if (env.ASSETS) {
+              const mr = await env.ASSETS.fetch(new URL('/APP/manifest.json', request.url));
+              if (mr.ok) assetVer = manifestCode(await mr.json());
+            }
+          } catch (e) { /* ignore */ }
+          const kvVer = manifestCode(await readKvAppManifest(env));
+          const forceGh = String(env.APP_FROM_GITHUB || '') === '1';
+          if (forceGh || kvVer > assetVer) {
+            const ghRes = await tryServeAppFromGithub(env, fileName, ctx);
+            if (ghRes) return ghRes;
+          }
+        }
+      }
+
       if (env.ASSETS) {
         const assetRes = await env.ASSETS.fetch(request);
         if (assetRes.status !== 404) return assetRes;

@@ -73,12 +73,20 @@ async function syncAdminSettings({ siteUrl, password, code, name, changelog }) {
     throw new Error('admin login failed: ' + (loginData.error || loginRes.status));
   }
   const token = loginData.token;
-  // 下载地址由后台「固定最新包」模式决定，CI 只同步版本号，不覆盖自定义链接
+  // 下载地址由后台「固定最新包」模式决定；版本写入 KV（Cloudflare 未重建静态资源也能识别）
   const patch = {
     appVersionAuto: true,
     appVersionCode: code,
     appVersionName: name,
     appChangelog: changelog || '',
+    appManifest: {
+      versionCode: code,
+      versionName: name,
+      changelog: changelog || '',
+      publishedAt: new Date().toISOString(),
+      phone: { path: '/APP/xiaolintv-phone-latest.apk' },
+      tv: { path: '/APP/xiaolintv-tv-latest.apk' },
+    },
   };
   const saveRes = await fetch(base + '/api/admin/settings', {
     method: 'POST',
