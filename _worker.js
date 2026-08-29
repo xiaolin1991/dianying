@@ -54,10 +54,11 @@ const DEFAULT_SETTINGS = {
   downloadUrl: '',      // 自定义手机 APK 地址(仅 custom 模式生效)
   downloadUrlTvMode: 'off', // off=不提供 | fixed=站内最新 | custom=自定义
   downloadUrlTv: '',    // 自定义 TV APK 地址(仅 custom 模式生效)
-  appVersionCode: 0,     // 最新 App versionCode(整数); 0=不检查更新
-  appVersionName: '',    // 最新版本号展示名, 如 1.0.5
+  appVersionCode: 0,     // 手动模式下的 versionCode; 0=不检查(自动模式则以 manifest 为准)
+  appVersionName: '',    // 手动模式版本名
   appForceUpdate: false, // 强制更新: App 内不可关闭弹窗
-  appChangelog: '',      // 更新说明(弹窗展示)
+  appChangelog: '',      // 手动模式更新说明
+  appVersionAuto: true,  // true=从 /APP/manifest.json 自动识别版本(推荐)
   adminPath: '',        // 后台入口自定义路径段(#/<adminPath>), 空则默认 'admin'
   playerOptimize: false, // 播放加载优化: false=保持现状, true=更快起播的 HLS 参数
   wmEnabled: false,      // 播放器 PNG 水印开关
@@ -168,6 +169,67 @@ function effectiveDownloadUrls(s) {
   return { downloadUrl: phone, downloadUrlTv: tv };
 }
 
+/** 读取 CI 写入的 public/APP/manifest.json */
+async function loadAppManifest(env, request) {
+  if (env && typeof env.getAppManifest === 'function') {
+    try {
+      const m = await env.getAppManifest();
+      if (m && typeof m === 'object') return m;
+    } catch (e) { /* ignore */ }
+  }
+  try {
+    if (env && env.ASSETS && typeof env.ASSETS.fetch === 'function') {
+      const assetUrl = new URL('/APP/manifest.json', (request && request.url) || 'https://assets.local/');
+      const r = await env.ASSETS.fetch(assetUrl);
+      if (r.ok) return await r.json();
+    }
+  } catch (e) { /* ignore */ }
+  try {
+    const base = request && request.url ? new URL(request.url) : null;
+    if (base && base.hostname && base.hostname !== 'internal') {
+      const r = await fetch(new URL('/APP/manifest.json', base), { signal: AbortSignal.timeout(4000) });
+      if (r.ok) return await r.json();
+    }
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+function parseManifestVersion(manifest) {
+  if (!manifest || typeof manifest !== 'object') return null;
+  const code = Math.max(0, Math.round(Number(manifest.versionCode == null ? 0 : manifest.versionCode)) || 0);
+  if (!code) return null;
+  return {
+    appVersionCode: code,
+    appVersionName: String(manifest.versionName || ('1.0.' + code)).slice(0, 40),
+    appChangelog: String(manifest.changelog || '').slice(0, 2000),
+    publishedAt: manifest.publishedAt || '',
+  };
+}
+
+/** 对外生效的 App 版本(默认自动读 manifest; 手动模式用后台字段) */
+function effectiveAppVersion(s, manifest) {
+  const auto = !s || s.appVersionAuto !== false;
+  const fromFile = parseManifestVersion(manifest);
+  if (auto && fromFile) {
+    return {
+      appVersionAuto: true,
+      appVersionCode: fromFile.appVersionCode,
+      appVersionName: fromFile.appVersionName,
+      appChangelog: fromFile.appChangelog,
+      appVersionSource: 'manifest',
+      appManifestAt: fromFile.publishedAt || '',
+    };
+  }
+  return {
+    appVersionAuto: auto,
+    appVersionCode: Math.max(0, Math.round(Number(s && s.appVersionCode != null ? s.appVersionCode : 0)) || 0),
+    appVersionName: (s && s.appVersionName) || '',
+    appChangelog: (s && s.appChangelog) || '',
+    appVersionSource: 'manual',
+    appManifestAt: fromFile ? (fromFile.publishedAt || '') : '',
+  };
+}
+
 async function saveSettings(env, patch) {
   const cur = await getSettings(env);
   const next = { ...cur };
@@ -210,6 +272,7 @@ async function saveSettings(env, patch) {
   if (typeof patch.appVersionName === 'string') next.appVersionName = patch.appVersionName.trim().slice(0, 40);
   if (typeof patch.appForceUpdate === 'boolean') next.appForceUpdate = patch.appForceUpdate;
   if (typeof patch.appChangelog === 'string') next.appChangelog = patch.appChangelog.trim().slice(0, 2000);
+  if (typeof patch.appVersionAuto === 'boolean') next.appVersionAuto = patch.appVersionAuto;
   if (typeof patch.adminPath === 'string') {
     const ap = patch.adminPath.trim().toLowerCase();
     if (ap && !/^[a-z0-9][a-z0-9-_]{1,39}$/.test(ap)) {
@@ -782,6 +845,7 @@ export default {
       if (path === '/api/settings' && request.method === 'GET') {
         const s = await getSettings(env);
         const dl = effectiveDownloadUrls(s);
+        const ver = effectiveAppVersion(s, await loadAppManifest(env, request));
         return json({
           siteName: s.siteName,
           defaultTheme: s.defaultTheme,
@@ -795,10 +859,12 @@ export default {
           downloadUrlTv: dl.downloadUrlTv,
           downloadUrlMode: phoneDlMode(s),
           downloadUrlTvMode: tvDlMode(s),
-          appVersionCode: Math.max(0, Math.round(Number(s.appVersionCode == null ? 0 : s.appVersionCode)) || 0),
-          appVersionName: s.appVersionName || '',
+          appVersionAuto: ver.appVersionAuto,
+          appVersionCode: ver.appVersionCode,
+          appVersionName: ver.appVersionName,
           appForceUpdate: !!s.appForceUpdate,
-          appChangelog: s.appChangelog || '',
+          appChangelog: ver.appChangelog,
+          appVersionSource: ver.appVersionSource,
           playerOptimize: !!s.playerOptimize,
           wmEnabled: !!s.wmEnabled,
           wmMode: s.wmMode === 'center' ? 'center' : 'corner',
@@ -1119,6 +1185,7 @@ export default {
           const { sources: remote } = await loadSources(env, ctx, s);
           const { all } = mergeSources(remote, s);
           const dl = effectiveDownloadUrls(s);
+          const ver = effectiveAppVersion(s, await loadAppManifest(env, request));
           return json({
             siteName: s.siteName,
             adultEnabled: s.adultEnabled,
@@ -1146,10 +1213,16 @@ export default {
             downloadUrlTvMode: tvDlMode(s),
             downloadUrlTv: s.downloadUrlTv || '',
             downloadUrlTvEffective: dl.downloadUrlTv,
-            appVersionCode: Math.max(0, Math.round(Number(s.appVersionCode == null ? 0 : s.appVersionCode)) || 0),
-            appVersionName: s.appVersionName || '',
+            appVersionAuto: ver.appVersionAuto,
+            appVersionSource: ver.appVersionSource,
+            appVersionCode: ver.appVersionCode,
+            appVersionName: ver.appVersionName,
+            appChangelog: ver.appChangelog,
+            appVersionCodeManual: Math.max(0, Math.round(Number(s.appVersionCode == null ? 0 : s.appVersionCode)) || 0),
+            appVersionNameManual: s.appVersionName || '',
+            appChangelogManual: s.appChangelog || '',
+            appManifestAt: ver.appManifestAt || '',
             appForceUpdate: !!s.appForceUpdate,
-            appChangelog: s.appChangelog || '',
             adminPath: s.adminPath || '',
             homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
             playerOptimize: !!s.playerOptimize,

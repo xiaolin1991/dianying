@@ -30,16 +30,19 @@
 只要 push 到 `main`（或 Actions 页手动 Run workflow）：
 
 1. 构建 Debug APK，版本号 `1.0.<构建编号>` / `versionCode=<构建编号>`。
-2. 脚本 [`scripts/publish-apk.mjs`](../scripts/publish-apk.mjs) 写入：
-   - `public/APP/xiaolintv-phone-latest.apk` / `xiaolintv-tv-latest.apk`（永久最新）
-   - `public/APP/xiaolintv-*-v1.0.<n>.apk`（当前版本备份）
-   - 删除同目录其它旧的 `xiaolintv-*-v*.apk`
-   - 写入 `public/APP/manifest.json`
-3. Actions **commit 回 main**（`[skip ci]` + `paths-ignore: public/APP/**`，不会死循环）。
-4. 若已配置 `SITE_URL` + `ADMIN_PASSWORD`：自动更新后台 `appVersionCode` / `appVersionName` / `appChangelog`（下载链接由「固定最新包」模式决定，无需改）。
-5. 服务器 `git pull`（或你的同步方式）后，用户即可访问：
-   - `https://你的域名/APP/xiaolintv-phone-latest.apk`
-6. GitHub Releases / Artifacts 仍会上传，仅作备份（私有仓国内常需代理，**不以它作主下载**）。
+2. 脚本 [`scripts/publish-apk.mjs`](../scripts/publish-apk.mjs) 写入工作区 `public/APP/`（latest + 版本号包 + manifest）。
+3. Actions 把 `public/APP` **强制推送到分支 `publish/app`**（**不改 main**，避免和你本地推送冲突）。
+4. 服务器执行 `bash scripts/sync-app-branch.sh` 同步 APK 到线上 `public/APP`。
+5. 若已配置 `SITE_URL` + `ADMIN_PASSWORD`：自动更新后台版本号字段（下载链接由「固定最新包」决定）。
+6. GitHub Releases / Artifacts 仍会上传，仅作备份。
+
+## 版本更新如何自动弹窗
+
+1. CI 打包后写入 `public/APP/manifest.json`（含 `versionCode` / `versionName` / `changelog`）。
+2. 站点 `/api/settings` **默认自动读取**该文件作为最新版本（后台「App 版本更新」保持「自动识别」即可）。
+3. 官方 App 对比本地 versionCode，更低则弹「立即更新」，下载走固定 `/APP/xiaolintv-phone-latest.apk`。
+4. 可选：配置 `SITE_URL` + `ADMIN_PASSWORD` 时，CI 还会把版本写入后台 KV（双保险）；不配也能靠 manifest 生效。
+5. 仅当需要临时关掉自动、手填版本时，后台切到「手动填写」。
 
 ## 三、本地手动发布（可选）
 

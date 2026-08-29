@@ -4058,13 +4058,28 @@
           </div>
           <div class="admin-card" style="margin-top:16px">
             <h3>🔄 App 版本更新</h3>
-            <p class="hint">官方 App 启动时对比本地 <b>versionCode</b> 与下方配置；有新版本则弹窗「立即更新」（下载走上方手机版生效地址）。CI 发布时会自动同步 versionCode。填 <b>0</b> 表示关闭检查。</p>
-            <label class="field-label">最新 versionCode（整数，与 Android 打包 verCode 一致）</label>
-            <input class="field-input" id="appVerCodeInput" type="number" min="0" step="1" value="${esc(String(s.appVersionCode == null ? 0 : s.appVersionCode))}" placeholder="例如 2">
-            <label class="field-label" style="margin-top:12px">版本名称（展示用，如 1.0.2）</label>
-            <input class="field-input" id="appVerNameInput" value="${esc(s.appVersionName || '')}" placeholder="1.0.2">
-            <label class="field-label" style="margin-top:12px">更新说明</label>
-            <textarea class="field-input" id="appChangelogInput" rows="4" placeholder="1. 修复若干问题&#10;2. 性能优化">${esc(s.appChangelog || '')}</textarea>
+            <p class="hint">默认<strong>自动识别</strong>：读取 CI 写入的 <code>/APP/manifest.json</code>（versionCode / 版本名 / 更新说明）。推送打包后客户端会按此弹更新，无需手填。仅「强制更新」需在本页开关。</p>
+            <div class="dl-mode-row" id="verModeRow" style="margin:12px 0">
+              <button type="button" class="chip dl-mode-btn ${(s.appVersionAuto !== false) ? 'on' : ''}" data-mode="auto">自动识别</button>
+              <button type="button" class="chip dl-mode-btn ${(s.appVersionAuto === false) ? 'on' : ''}" data-mode="manual">手动填写</button>
+            </div>
+            <div id="verAutoBox" class="${(s.appVersionAuto !== false) ? '' : 'hidden'}">
+              <div class="hint" style="margin-bottom:8px">当前生效（来自 manifest${s.appManifestAt ? ' · ' + esc(String(s.appManifestAt).replace('T', ' ').slice(0, 19)) : ''}${s.appVersionSource === 'manifest' ? '' : ' · 尚未检测到文件时暂用手动值'}）</div>
+              <label class="field-label">最新 versionCode</label>
+              <div class="field-input" style="opacity:.85">${esc(String(s.appVersionCode == null ? 0 : s.appVersionCode))}</div>
+              <label class="field-label" style="margin-top:12px">版本名称</label>
+              <div class="field-input" style="opacity:.85">${esc(s.appVersionName || '（暂无）')}</div>
+              <label class="field-label" style="margin-top:12px">更新说明</label>
+              <pre class="field-input" style="opacity:.85;white-space:pre-wrap;min-height:72px;margin:0">${esc(s.appChangelog || '（暂无，等下次 CI 发布）')}</pre>
+            </div>
+            <div id="verManualBox" class="${(s.appVersionAuto === false) ? '' : 'hidden'}">
+              <label class="field-label">最新 versionCode（整数，与 Android 打包 verCode 一致；0=关闭检查）</label>
+              <input class="field-input" id="appVerCodeInput" type="number" min="0" step="1" value="${esc(String(s.appVersionCodeManual != null ? s.appVersionCodeManual : (s.appVersionCode == null ? 0 : s.appVersionCode)))}" placeholder="例如 64">
+              <label class="field-label" style="margin-top:12px">版本名称（展示用，如 1.0.64）</label>
+              <input class="field-input" id="appVerNameInput" value="${esc(s.appVersionNameManual != null ? s.appVersionNameManual : (s.appVersionName || ''))}" placeholder="1.0.64">
+              <label class="field-label" style="margin-top:12px">更新说明</label>
+              <textarea class="field-input" id="appChangelogInput" rows="4" placeholder="1. 修复若干问题&#10;2. 性能优化">${esc(s.appChangelogManual != null ? s.appChangelogManual : (s.appChangelog || ''))}</textarea>
+            </div>
             <label style="display:flex;align-items:center;gap:10px;margin:14px 0;cursor:pointer">
               <span class="switch"><input type="checkbox" id="appForceSw" ${s.appForceUpdate ? 'checked' : ''}><span class="track"></span></span>
               <b>强制更新</b><span style="color:var(--dim);font-size:12px">（不可关闭弹窗，须先更新）</span>
@@ -4074,6 +4089,7 @@
 
         let curPhoneMode = phoneMode;
         let curTvMode = tvMode;
+        let curVerAuto = s.appVersionAuto !== false;
         const syncPhoneUi = () => {
           $$('#phoneModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curPhoneMode));
           $('#phoneFixedBox').classList.toggle('hidden', curPhoneMode !== 'fixed');
@@ -4085,11 +4101,19 @@
           $('#tvFixedBox').classList.toggle('hidden', curTvMode !== 'fixed');
           $('#tvCustomBox').classList.toggle('hidden', curTvMode !== 'custom');
         };
+        const syncVerUi = () => {
+          $$('#verModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', (b.dataset.mode === 'auto') === curVerAuto));
+          $('#verAutoBox').classList.toggle('hidden', !curVerAuto);
+          $('#verManualBox').classList.toggle('hidden', curVerAuto);
+        };
         $$('#phoneModeRow .dl-mode-btn').forEach((btn) => {
           btn.addEventListener('click', () => { curPhoneMode = btn.dataset.mode; syncPhoneUi(); });
         });
         $$('#tvModeRow .dl-mode-btn').forEach((btn) => {
           btn.addEventListener('click', () => { curTvMode = btn.dataset.mode; syncTvUi(); });
+        });
+        $$('#verModeRow .dl-mode-btn').forEach((btn) => {
+          btn.addEventListener('click', () => { curVerAuto = btn.dataset.mode === 'auto'; syncVerUi(); });
         });
 
         $('#savePromoBtn').addEventListener('click', async () => {
@@ -4122,20 +4146,33 @@
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
         $('#saveAppVerBtn').addEventListener('click', async () => {
-          const code = Math.round(Number($('#appVerCodeInput').value));
-          const name = $('#appVerNameInput').value.trim();
-          const log = $('#appChangelogInput').value.trim();
-          if (!isFinite(code) || code < 0) return toast('versionCode 需为 ≥0 的整数', 'err');
           try {
             const patch = {
-              appVersionCode: code,
-              appVersionName: name,
-              appChangelog: log,
+              appVersionAuto: curVerAuto,
               appForceUpdate: $('#appForceSw').checked,
             };
+            if (!curVerAuto) {
+              const code = Math.round(Number(($('#appVerCodeInput') && $('#appVerCodeInput').value) || 0));
+              const name = (($('#appVerNameInput') && $('#appVerNameInput').value) || '').trim();
+              const log = (($('#appChangelogInput') && $('#appChangelogInput').value) || '').trim();
+              if (!isFinite(code) || code < 0) return toast('versionCode 需为 ≥0 的整数', 'err');
+              patch.appVersionCode = code;
+              patch.appVersionName = name;
+              patch.appChangelog = log;
+            }
             await API.adminSaveSettings(patch);
-            State.settings = { ...State.settings, ...patch };
-            toast(code > 0 ? '版本更新设置已保存' : '已关闭 App 版本检查', 'ok');
+            const fresh = await API.adminGetSettings();
+            lastSettings = fresh;
+            State.settings = {
+              ...State.settings,
+              appVersionAuto: fresh.appVersionAuto,
+              appVersionCode: fresh.appVersionCode,
+              appVersionName: fresh.appVersionName,
+              appChangelog: fresh.appChangelog,
+              appForceUpdate: fresh.appForceUpdate,
+            };
+            toast(curVerAuto ? '已启用自动识别（以 /APP/manifest.json 为准）' : '已保存手动版本设置', 'ok');
+            renderAdmTab(fresh);
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
       }

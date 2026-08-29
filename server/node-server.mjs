@@ -23,6 +23,8 @@ const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
+const PUBLIC_DIR = path.join(ROOT, 'public');
+
 /* ---------------- 文件版 KV(CONFIG_KV 垫片) ---------------- */
 const kvFile = path.join(DATA_DIR, 'kv.json');
 let kvData = {};
@@ -46,6 +48,14 @@ const env = {
   },
   ADULT_ENABLED: process.env.ADULT_ENABLED || '',
   ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || '',
+  async getAppManifest() {
+    try {
+      const fp = path.join(PUBLIC_DIR, 'APP', 'manifest.json');
+      return JSON.parse(fs.readFileSync(fp, 'utf8'));
+    } catch (e) {
+      return null;
+    }
+  },
 };
 
 /* ---------------- 载入 Worker(ESM 语法 → 临时 .mjs 动态导入) ---------------- */
@@ -56,7 +66,6 @@ const app = mod.default;
 if (!app || typeof app.fetch !== 'function') throw new Error('_worker.js 未导出 fetch');
 
 /* ---------------- 静态资源 ---------------- */
-const PUBLIC_DIR = path.join(ROOT, 'public');
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',

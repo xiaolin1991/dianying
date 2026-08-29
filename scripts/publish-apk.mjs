@@ -6,9 +6,9 @@
  *   node scripts/publish-apk.mjs --apk path/to.apk --code 62 --name 1.0.62
  *   node scripts/publish-apk.mjs --apk out/app.apk --code 62 --name 1.0.62 --changelog "修复若干问题"
  *
- * 环境变量(可选，用于同步后台):
- *   SITE_URL          https://dy2026.hanglinkj.com
- *   ADMIN_PASSWORD    359844393w
+ * 环境变量(可选，用于同步后台版本号到 KV；即使不配也会写 manifest.json 供站点自动识别):
+ *   SITE_URL          站点根地址，如 https://你的域名
+ *   ADMIN_PASSWORD    后台管理密码
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -139,6 +139,7 @@ async function main() {
   const manifest = {
     versionCode: args.code,
     versionName: verName,
+    changelog: String(args.changelog || '').slice(0, 2000),
     publishedAt: new Date().toISOString(),
     phone: { path: phonePath, versioned: '/APP/' + phoneVer },
     tv: { path: tvPath, versioned: '/APP/' + tvVer },
