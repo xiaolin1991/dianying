@@ -586,7 +586,7 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 }
 .player-wm.off { display: none !important; }
 .player-wm.mode-corner {
-  right: 12px; bottom: 56px; left: auto; top: auto;
+  right: 12px; top: 12px; left: auto; bottom: auto;
 }
 .player-wm.mode-center {
   left: 50%; top: 46%; right: auto; bottom: auto;
@@ -599,7 +599,7 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 }
 .video-wrap.fake-fs .player-wm.mode-corner,
 .video-wrap:fullscreen .player-wm.mode-corner,
-.video-wrap:-webkit-full-screen .player-wm.mode-corner { bottom: 72px; right: 18px; }
+.video-wrap:-webkit-full-screen .player-wm.mode-corner { top: 18px; right: 18px; bottom: auto; }
 .video-wrap.fake-fs .player-wm.mode-center,
 .video-wrap:fullscreen .player-wm.mode-center,
 .video-wrap:-webkit-full-screen .player-wm.mode-center {
@@ -609,9 +609,9 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 .video-wrap:-webkit-full-screen .gest-hud,
 .video-wrap.fake-fs .gest-hud { z-index: 20; }
 .fs-exit-btn { display: none !important; }
-/* 当前播放源角标 */
+/* 当前播放源角标(左上, 避免与右上水印重叠) */
 .src-badge {
-  position: absolute; right: 10px; top: 10px; z-index: 4;
+  position: absolute; left: 10px; top: 10px; right: auto; z-index: 4;
   display: inline-flex; align-items: center; gap: 5px; pointer-events: none;
   background: rgba(0,0,0,.45); backdrop-filter: blur(6px); color: rgba(255,255,255,.92);
   font-size: 11.5px; padding: 4px 11px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
