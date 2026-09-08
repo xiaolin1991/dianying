@@ -65,16 +65,28 @@
           }
           videoEl.play().catch(() => {});
         });
+        let netRetries = 0;
+        const MAX_NET_RETRIES = 1;
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (!data.fatal) return;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            showTip(tipEl, true, '网络加载失败，正在重试…');
-            hls.startLoad();
+            if (netRetries < MAX_NET_RETRIES) {
+              netRetries++;
+              showTip(tipEl, true, '网络加载失败，正在重试…');
+              hls.startLoad();
+              return;
+            }
+            showTip(tipEl, true, '播放地址连接失败（上游CDN失效或证书过期）');
+            if (opts && typeof opts.onError === 'function') opts.onError(data);
+            try { videoEl.dispatchEvent(new CustomEvent('player-error', { detail: data })); } catch (e) {}
+            destroy();
           } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             showTip(tipEl, true, '媒体解码错误，尝试恢复…');
             hls.recoverMediaError();
           } else {
-            showTip(tipEl, true, '该频道/影片暂时无法播放，请换一个试试');
+            showTip(tipEl, true, '该影片暂时无法播放');
+            if (opts && typeof opts.onError === 'function') opts.onError(data);
+            try { videoEl.dispatchEvent(new CustomEvent('player-error', { detail: data })); } catch (e) {}
             destroy();
           }
         });
@@ -84,6 +96,11 @@
       if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
         videoEl.src = url;
         videoEl.play().catch(() => {});
+        videoEl.onerror = (e) => {
+          showTip(tipEl, true, '播放失败，源可能已失效');
+          if (opts && typeof opts.onError === 'function') opts.onError(e);
+          try { videoEl.dispatchEvent(new CustomEvent('player-error', { detail: e })); } catch (err) {}
+        };
         return { destroy };
       }
       showTip(tipEl, true, '当前浏览器不支持 HLS 播放');
@@ -93,7 +110,11 @@
     // mp4 / 其他原生格式
     videoEl.src = url;
     videoEl.play().catch(() => {});
-    videoEl.onerror = () => showTip(tipEl, true, '播放失败，源可能已失效');
+    videoEl.onerror = (e) => {
+      showTip(tipEl, true, '播放失败，源可能已失效');
+      if (opts && typeof opts.onError === 'function') opts.onError(e);
+      try { videoEl.dispatchEvent(new CustomEvent('player-error', { detail: e })); } catch (err) {}
+    };
     return { destroy };
   }
 

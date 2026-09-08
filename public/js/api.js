@@ -86,6 +86,12 @@
       }),
     adminSyncApp: () =>
       jfetch('/api/admin/sync-app', { method: 'POST' }, 120000),
+    adminDispatchBuildApk: (changelog) =>
+      jfetch('/api/admin/dispatch-build-apk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changelog: changelog || '' }),
+      }, 20000),
     adminChangePassword: (oldPassword, newPassword) =>
       jfetch('/api/admin/password', {
         method: 'POST',

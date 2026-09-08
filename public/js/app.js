@@ -1465,7 +1465,6 @@
               <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
               <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
               <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
-              <button class="chip" id="m3uBtn" title="复制本集 M3U8 播放地址">🔗 直链</button>
             </div>
           </div>
           <aside class="rel-rail" id="relRail">
@@ -1758,17 +1757,107 @@
     let saveTimer = null; // 进度保存定时器(换集/离开页面时必须停掉, 否则污染旧集进度)
     function stopSaveTimer() { if (saveTimer) { clearInterval(saveTimer); saveTimer = null; } }
 
+    const swapHits = [];
+    let swapPending = 0;
+    let autoFailoverTimer = null;
+    let hasPlaybackFailed = false;
+
+    function handlePlaybackFailure(trigger) {
+      if (!alive()) return;
+      if (trigger !== 'swap_hit_arrived' && trigger !== 'all_swap_finished') {
+        if (hasPlaybackFailed) return;
+        hasPlaybackFailed = true;
+        // 1. 如果当前影片包含其他播放组（例如 线路2、线路3），优先尝试切线路
+        if (groups.length > 1 && gi + 1 < groups.length) {
+          toast(`当前线路播放失败，正在自动尝试线路 ${gi + 2}…`, 'info');
+          gotoEp(ei, gi + 1);
+          return;
+        }
+      } else {
+        if (!hasPlaybackFailed) return; // 播放正常则不响应探测更新
+      }
+
+      const swapCount = Number(sessionStorage.getItem('ntv_swap_count') || 0);
+
+      const renderFailoverUI = (targetHit) => {
+        if (!alive() || !tip) return;
+        tip.classList.remove('hidden');
+        if (targetHit && swapCount < 3) {
+          tip.innerHTML = `
+            <div class="failover-box" style="padding:16px 20px;background:rgba(0,0,0,0.85);border-radius:12px;border:1px solid rgba(255,255,255,0.15);max-width:380px;margin:0 auto">
+              <div style="font-size:15px;font-weight:600;margin-bottom:6px">⚠️ 播放失败（上游CDN失效或断连）</div>
+              <div style="font-size:13px;color:var(--dim);margin-bottom:14px">已为您找到可用源【<b>${esc(targetHit.s.name)}</b>】，正在自动无缝切换…</div>
+              <div style="display:flex;gap:10px;justify-content:center">
+                <button class="btn primary small" id="doSwapNowBtn">⚡ 立即切源</button>
+                <button class="btn ghost small" id="doRetryBtn">🔄 重试</button>
+              </div>
+            </div>`;
+          const doSwap = () => {
+            clearTimeout(autoFailoverTimer);
+            sessionStorage.setItem('ntv_swap_count', String(swapCount + 1));
+            toast(`已自动切换到可用源：${targetHit.s.name}`, 'ok');
+            window.location.hash = `#/play/${esc(targetHit.s.key)}/${encodeURIComponent(targetHit.id)}?ep=${ei}&group=0`;
+          };
+          const b1 = $('#doSwapNowBtn');
+          if (b1) b1.onclick = doSwap;
+          const b2 = $('#doRetryBtn');
+          if (b2) b2.onclick = () => { hasPlaybackFailed = false; playCurrent(true); };
+          clearTimeout(autoFailoverTimer);
+          autoFailoverTimer = setTimeout(doSwap, 1200);
+        } else if (swapPending > 0) {
+          tip.innerHTML = `
+            <div class="failover-box" style="padding:16px 20px;background:rgba(0,0,0,0.85);border-radius:12px;border:1px solid rgba(255,255,255,0.15);max-width:380px;margin:0 auto">
+              <div style="font-size:15px;font-weight:600;margin-bottom:6px">⚠️ 播放连接异常（上游CDN失效）</div>
+              <div style="font-size:13px;color:var(--dim);margin-bottom:14px"><span class="spin"></span> 正在自动探测其他可用源，探测到将立即无缝切换…</div>
+              <div style="display:flex;gap:10px;justify-content:center">
+                <button class="btn ghost small" id="doRetryBtn">🔄 重试当前源</button>
+                <a class="btn ghost small" href="#/home">回首页</a>
+              </div>
+            </div>`;
+          const b2 = $('#doRetryBtn');
+          if (b2) b2.onclick = () => { hasPlaybackFailed = false; playCurrent(true); };
+        } else {
+          tip.innerHTML = `
+            <div class="failover-box" style="padding:16px 20px;background:rgba(0,0,0,0.85);border-radius:12px;border:1px solid rgba(255,255,255,0.15);max-width:380px;margin:0 auto">
+              <div style="font-size:15px;font-weight:600;margin-bottom:6px">⚠️ 播放失败，且暂无其他可用源</div>
+              <div style="font-size:13px;color:var(--dim);margin-bottom:14px">可能是上游源下架或CDN证书异常，可尝试刷新或换部影片</div>
+              <div style="display:flex;gap:10px;justify-content:center">
+                <button class="btn primary small" id="doRetryBtn">🔄 重试</button>
+                <a class="btn ghost small" href="#/home">回首页找片</a>
+              </div>
+            </div>`;
+          const b2 = $('#doRetryBtn');
+          if (b2) b2.onclick = () => { hasPlaybackFailed = false; playCurrent(true); };
+        }
+      };
+
+      if (swapHits.length > 0) {
+        renderFailoverUI(swapHits[0]);
+      } else {
+        renderFailoverUI(null);
+      }
+    }
+
     function playCurrent(resume) {
       const ep = groups[gi].eps[ei];
-      const m3uBtn = $('#m3uBtn');
-      if (m3uBtn) m3uBtn.title = ep.url ? 'M3U8：' + ep.url : '本集暂无播放地址';
-      Player.play(video, ep.url, tip, { optimize: !!(State.settings && State.settings.playerOptimize) });
+      hasPlaybackFailed = false;
+      clearTimeout(autoFailoverTimer);
+      Player.play(video, ep.url, tip, {
+        optimize: !!(State.settings && State.settings.playerOptimize),
+        onError: (err) => handlePlaybackFailure(err),
+      });
       applyPlayerPrefs();
       tip.classList.remove('hidden');
       tip.textContent = '正在加载…';
-      const clear = () => { tip.classList.add('hidden'); };
+      const clear = () => {
+        sessionStorage.removeItem('ntv_swap_count');
+        hasPlaybackFailed = false;
+        tip.classList.add('hidden');
+        tip.innerHTML = '';
+      };
       video.addEventListener('playing', clear, { once: true });
-      video.addEventListener('error', () => { tip.classList.remove('hidden'); tip.textContent = '播放失败，请尝试换集或在右上角「快速换源」换一个源'; }, { once: true });
+      video.addEventListener('error', (e) => handlePlaybackFailure(e), { once: true });
+      video.addEventListener('player-error', (e) => handlePlaybackFailure(e.detail), { once: true });
 
       if (resume && allProg[gi + ':' + ei] && allProg[gi + ':' + ei].t > 20) {
         const onceSeek = () => { try { video.currentTime = allProg[gi + ':' + ei].t; } catch (e) {} };
@@ -1822,27 +1911,6 @@
       store.set('autoNext', nv);
       e.target.textContent = '连播: ' + (nv ? '开' : '关');
       e.target.classList.toggle('on', nv);
-    });
-
-    // 🔗 直链: 仅复制当前正在播放剧集的 M3U8 地址(不打开原始链接); 切集后点击始终取当前集
-    $('#m3uBtn').addEventListener('click', async () => {
-      const u = (groups[gi].eps[ei] || {}).url || '';
-      if (!u) return toast('当前剧集没有可用的播放地址', 'err');
-      const doCopy = async () => {
-        try { await navigator.clipboard.writeText(u); return true; } catch (e) { /* 老内核走降级 */ }
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = u;
-          ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
-          document.body.appendChild(ta);
-          ta.select();
-          const r = document.execCommand('copy');
-          ta.remove();
-          return !!r;
-        } catch (e) { return false; }
-      };
-      if (await doCopy()) toast('已复制本集 M3U8 地址', 'ok');
-      else toast('复制失败，可长按按钮查看完整地址', 'err');
     });
 
     // ⛶ 全屏: 电脑 = 浏览器真全屏(容器); 手机 = 假全屏(兼容 iOS)
@@ -2264,6 +2332,7 @@
       const hits = [];   // {s, ms, spdCls, id}
       const misses = []; // {s, ms, spdCls, why}
       let pending = others.length;
+      swapPending = pending;
       const norm = (s2) => String(s2 || '').replace(/\s/g, '');
       // 桌面端失效源收缩区(与可用源同款 5 列排列); 手机端由 CSS 隐藏
       const updMissToggle = () => {
@@ -2335,8 +2404,14 @@
             const spdCls = ms < 900 ? 'sp-good' : ms < 2600 ? 'sp-mid' : 'sp-bad';
             const hit = (r2.list || []).find((v2) => norm(v2.vod_name) === norm(vod.vod_name));
             pending--;
+            swapPending = pending;
             if (hit && hit.vod_id) {
-              hits.push({ s, ms, spdCls, id: hit.vod_id });
+              const hitObj = { s, ms, spdCls, id: hit.vod_id };
+              hits.push(hitObj);
+              swapHits.push(hitObj);
+              if (hasPlaybackFailed && !autoFailoverTimer) {
+                handlePlaybackFailure('swap_hit_arrived');
+              }
               // 桌面端药丸(手机上该区域 display:none)
               if (swapOk) swapOk.insertAdjacentHTML('beforeend',
                 `<a class="src-item" href="#/play/${esc(s.key)}/${encodeURIComponent(hit.vod_id)}?ep=${ei}&group=${gi}" title="${esc(s.name)} · 延迟${ms}ms · 点击切换并同步到第${ei + 1}集">
@@ -2352,6 +2427,7 @@
           } catch (e) {
             if (!alive()) return;
             pending--;
+            swapPending = pending;
             misses.push({ s, ms: 0, spdCls: '', why: '超时/失效' });
             if (swapMiss) swapMiss.insertAdjacentHTML('beforeend',
               `<span class="src-item miss" title="${esc(s.name)} · 请求超时或源已失效">
@@ -2359,6 +2435,9 @@
             updMissToggle();
           }
           updStat();
+          if (pending === 0 && hasPlaybackFailed && swapHits.length === 0) {
+            handlePlaybackFailure('all_swap_finished');
+          }
         })();
       });
     })();
@@ -2653,7 +2732,7 @@
   }
 
   /* ============================================================
-     视图：个人中心(观看记录 / 我的收藏)
+     视图：个人中心(现代流媒体 UI · 观看记录 / 我的收藏 / 搜索历史 / 独立私密福利专区)
      ============================================================ */
   async function viewUser(alive) {
     const v = $('#view');
@@ -2666,29 +2745,94 @@
     const favs = store.get('favs', []);
     const watchItems = data ? data.items.filter((it) => it.kind === 'watch') : [];
     const searchItems = data ? data.items.filter((it) => it.kind === 'search') : [];
-    let tab = 'watch';
+    let tab = store.get('uTab', 'watch');
     const hasAdult = Boolean(State.config && State.config.adultEnabled);
+    const isAdultUnlocked = Boolean(State.config && State.config.adultUnlocked);
 
     v.innerHTML = `
       <div class="container page-wrap">
-        <div class="page-head">
-          <div class="page-title">👤 ${esc(State.me)}</div>
-          <button class="btn ghost small" id="uLogout">退出登录</button>
+        <!-- 头部个人资料横幅 -->
+        <div class="user-hero-card">
+          <div class="user-hero-main">
+            <div class="user-profile-left">
+              <div class="user-avatar-wrap">
+                ${esc(String(State.me).slice(0, 1).toUpperCase())}
+                ${isAdultUnlocked ? '<span class="user-avatar-crown">👑</span>' : ''}
+              </div>
+              <div class="user-profile-info">
+                <div class="user-profile-title">
+                  <span class="user-name-text">${esc(State.me)}</span>
+                  ${hasAdult ? `
+                    <span class="user-vip-tag ${isAdultUnlocked ? 'unlocked' : 'locked'}">
+                      ${isAdultUnlocked ? '👑 私密福利VIP特权 · 已激活' : '🔒 注册会员 · 私密福利未解锁'}
+                    </span>` : ''}
+                </div>
+                <div class="user-profile-sub">
+                  ${data && data.lastLoginAt ? '最近活跃时间：' + fmtDateTime(data.lastLoginAt) : '欢迎回到晓林影视会员中心'}
+                </div>
+              </div>
+            </div>
+            <div class="user-hero-actions">
+              ${hasAdult && !isAdultUnlocked ? `
+                <button class="btn primary small" id="uHeroUnlockBtn" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700">
+                  👑 输入卡密解锁
+                </button>` : ''}
+              <button class="btn ghost small" id="uRefreshBtn" title="刷新个人数据">⟳ 刷新</button>
+              <button class="btn ghost small" id="uLogout">退出登录</button>
+            </div>
+          </div>
         </div>
-        <div class="user-stats">
-          <span>⏱ 累计观看 <b>${fmtWatchSec(data ? data.watchSec : 0)}</b></span>
-          <span>🎬 观看记录 <b>${watchItems.length}</b> 条</span>
-          <span>🔍 搜索记录 <b>${searchItems.length}</b> 条</span>
-          <span>★ 收藏 <b>${favs.length}</b> 部</span>
-          ${hasAdult ? `<span>${State.config.adultUnlocked ? '👑 私密福利 <b style="color:var(--ok)">已解锁</b>' : '🔒 私密福利 <b style="color:var(--danger)">未解锁(仅预览)</b>'}</span>` : ''}
+
+        <!-- 四宫格数据统计看板 -->
+        <div class="user-kpi-grid">
+          <div class="user-kpi-card">
+            <div class="user-kpi-ico">⏱</div>
+            <div class="user-kpi-content">
+              <div class="user-kpi-label">累计观影时长</div>
+              <div class="user-kpi-val">${fmtWatchSec(data ? data.watchSec : 0)}</div>
+            </div>
+          </div>
+          <div class="user-kpi-card" style="cursor:pointer" data-jump="watch">
+            <div class="user-kpi-ico">🎬</div>
+            <div class="user-kpi-content">
+              <div class="user-kpi-label">播放历史记录</div>
+              <div class="user-kpi-val">${watchItems.length} <small style="font-size:13px;font-weight:400;color:var(--dim)">条</small></div>
+            </div>
+          </div>
+          <div class="user-kpi-card" style="cursor:pointer" data-jump="fav">
+            <div class="user-kpi-ico">⭐</div>
+            <div class="user-kpi-content">
+              <div class="user-kpi-label">我的收藏大片</div>
+              <div class="user-kpi-val">${favs.length} <small style="font-size:13px;font-weight:400;color:var(--dim)">部</small></div>
+            </div>
+          </div>
+          ${hasAdult ? `
+            <div class="user-kpi-card vip-card ${isAdultUnlocked ? 'unlocked' : 'locked'}" style="cursor:pointer" data-jump="adult">
+              <div class="user-kpi-ico">${isAdultUnlocked ? '👑' : '🔞'}</div>
+              <div class="user-kpi-content">
+                <div class="user-kpi-label">私密福利专区</div>
+                <div class="user-kpi-val" style="color:${isAdultUnlocked ? 'var(--ok)' : 'var(--danger)'}">
+                  ${isAdultUnlocked ? '已解锁 · 畅享播放' : '未解锁 · 仅图片预览'}
+                </div>
+              </div>
+            </div>` : `
+            <div class="user-kpi-card" style="cursor:pointer" data-jump="search">
+              <div class="user-kpi-ico">🔍</div>
+              <div class="user-kpi-content">
+                <div class="user-kpi-label">搜索记录</div>
+                <div class="user-kpi-val">${searchItems.length} <small style="font-size:13px;font-weight:400;color:var(--dim)">条</small></div>
+              </div>
+            </div>`}
         </div>
-        <p class="hint" style="color:var(--dim);font-size:12px;margin:-8px 0 14px">删除记录仅对自己隐藏，管理员仍可在后台查看；彻底删除请联系管理员。</p>
-        <div class="chips" id="uTabs">
-          <button class="chip on" data-t="watch">🎬 观看记录</button>
-          <button class="chip" data-t="fav">★ 我的收藏</button>
-          <button class="chip" data-t="search">🔍 搜索记录</button>
-          ${hasAdult ? `<button class="chip" data-t="adult">🔞 私密福利影片</button>` : ''}
+
+        <!-- 现代化选项卡导航栏 -->
+        <div class="user-tabs-bar" id="uTabs">
+          <button class="user-tab-btn ${tab === 'watch' ? 'on' : ''}" data-t="watch">🎬 观看记录 (${watchItems.length})</button>
+          <button class="user-tab-btn ${tab === 'fav' ? 'on' : ''}" data-t="fav">⭐ 我的收藏 (${favs.length})</button>
+          <button class="user-tab-btn ${tab === 'search' ? 'on' : ''}" data-t="search">🔍 搜索记录 (${searchItems.length})</button>
+          ${hasAdult ? `<button class="user-tab-btn tab-adult ${tab === 'adult' ? 'on' : ''}" data-t="adult">🔞 私密福利影片 ${isAdultUnlocked ? '👑' : '🔒'}</button>` : ''}
         </div>
+
         <div id="uBody"></div>
       </div>`;
 
@@ -2696,18 +2840,23 @@
     let adultCurSrcKey = '';
     let adultPg = 1;
     let adultQuery = '';
+    let adultCat = '';
 
     function renderBody() {
-      $$('#uTabs .chip').forEach((c) => c.classList.toggle('on', c.dataset.t === tab));
+      $$('#uTabs .user-tab-btn').forEach((c) => c.classList.toggle('on', c.dataset.t === tab));
+      store.set('uTab', tab);
+
       if (tab === 'fav') {
         body.innerHTML = favs.length
           ? `<div class="grid">${favs.map((f, i) => `
-              <div class="hist-card">
+              <div class="hist-card" style="position:relative">
                 ${cardHtml({ sourceKey: f.key, sourceName: '', id: f.id, title: f.title, pic: f.pic, remarks: f.remarks || '' })}
-                <button class="hist-del" data-fi="${i}" title="取消收藏">×</button>
+                <button class="hist-del" data-fi="${i}" title="取消收藏" style="position:absolute;top:6px;right:6px;z-index:3;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:26px;height:26px;cursor:pointer;font-size:14px;line-height:1">×</button>
               </div>`).join('')}</div>`
-          : '<div class="empty"><div class="big">☆</div>还没有收藏，去首页逛逛吧</div>';
-        $$('#uBody .hist-del').forEach((b) => b.addEventListener('click', () => {
+          : '<div class="empty"><div class="big">⭐</div>还没有收藏大片，去首页逛逛吧</div>';
+        $$('#uBody .hist-del').forEach((b) => b.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
           favs.splice(Number(b.dataset.fi), 1);
           store.set('favs', favs);
           pushFavsToServer();
@@ -2716,13 +2865,16 @@
         }));
       } else if (tab === 'watch') {
         body.innerHTML = watchItems.length
-          ? `<div class="u-clear-row"><span></span><button class="btn ghost small" id="clearWatch">🗑 清空我的观看记录</button></div>
+          ? `<div class="u-clear-row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+               <span style="font-size:12.5px;color:var(--dim)">共 ${watchItems.length} 条播放记录（删除仅对自己隐藏）</span>
+               <button class="btn ghost small" id="clearWatch">🗑 清空观看记录</button>
+             </div>
              <div class="grid">${watchItems.map((it) => `
-              <div class="hist-card">
-                ${cardHtml({ sourceKey: it.srcKey, sourceName: it.srcName, id: it.vidId, title: it.title, pic: it.pic, remarks: it.ep ? '看到 ' + it.ep : '', year: '' , typeName: ''})}
-                <button class="hist-del" data-id="${esc(it.id)}" title="删除该条">×</button>
+              <div class="hist-card" style="position:relative">
+                ${cardHtml({ sourceKey: it.srcKey, sourceName: it.srcName, id: it.vidId, title: it.title, pic: it.pic, remarks: it.ep ? '看到 ' + it.ep : '', year: '', typeName: '' })}
+                <button class="hist-del" data-id="${esc(it.id)}" title="删除该条记录" style="position:absolute;top:6px;right:6px;z-index:3;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:26px;height:26px;cursor:pointer;font-size:14px;line-height:1">×</button>
               </div>`).join('')}</div>`
-          : '<div class="empty"><div class="big">🎬</div>暂无观看记录</div>';
+          : '<div class="empty"><div class="big">🎬</div>暂无观看记录，快去开启精彩观影吧</div>';
         bindHistDel();
         $('#clearWatch') && $('#clearWatch').addEventListener('click', async () => {
           if (!confirm('确定清空自己的观看记录？（管理员后台仍保留）')) return;
@@ -2733,7 +2885,10 @@
         });
       } else if (tab === 'search') {
         body.innerHTML = searchItems.length
-          ? `<div class="u-clear-row"><span></span><button class="btn ghost small" id="clearSearch">🗑 清空我的搜索记录</button></div>
+          ? `<div class="u-clear-row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+               <span style="font-size:12.5px;color:var(--dim)">共 ${searchItems.length} 条搜索历史</span>
+               <button class="btn ghost small" id="clearSearch">🗑 清空搜索记录</button>
+             </div>
              <div class="search-hist-list">${searchItems.map((it) => `
               <div class="search-hist-row">
                 <span class="sh-q">🔍 ${esc(it.title)}</span>
@@ -2741,7 +2896,7 @@
                 <a class="btn ghost small" href="#/search?q=${encodeURIComponent(it.title)}">再搜一次</a>
                 <button class="hist-del row-del" data-id="${esc(it.id)}">×</button>
               </div>`).join('')}</div>`
-          : '<div class="empty"><div class="big">🔍</div>暂无搜索记录</div>';
+          : '<div class="empty"><div class="big">🔍</div>暂无搜索历史记录</div>';
         bindHistDel();
         $('#clearSearch') && $('#clearSearch').addEventListener('click', async () => {
           if (!confirm('确定清空自己的搜索记录？（管理员后台仍保留）')) return;
@@ -2755,7 +2910,7 @@
       }
     }
 
-    function renderAdultTab() {
+    async function renderAdultTab() {
       const adultSources = (State.config && State.config.adultSources) || [];
       if (!adultSources.length) {
         body.innerHTML = '<div class="empty"><div class="big">🔞</div>私密福利功能已开启，但暂无可用福利源，请联系管理员在后台开启采集源。</div>';
@@ -2763,66 +2918,143 @@
       }
       if (!adultCurSrcKey || !adultSources.some((s) => s.key === adultCurSrcKey)) {
         adultCurSrcKey = store.get('adultCurKey', adultSources[0].key);
+        if (!adultSources.some((s) => s.key === adultCurSrcKey)) adultCurSrcKey = adultSources[0].key;
       }
       let curSrc = adultSources.find((s) => s.key === adultCurSrcKey) || adultSources[0];
       const isUnlocked = Boolean(State.config && State.config.adultUnlocked);
 
+      // 完全对齐影视源：左侧常驻测速源列表 + 移动端切换弹窗 + 右侧分类与搜索 + 标准瀑布流海报网格
       body.innerHTML = `
-        <div class="vip-status-card ${isUnlocked ? 'unlocked' : 'locked'}" style="margin-bottom:16px;padding:16px 20px;border-radius:12px;background:var(--bg2);border:1.5px solid ${isUnlocked ? 'rgba(34,197,94,.4)' : 'rgba(225,29,72,.4)'};display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-          <div style="font-size:32px;line-height:1">${isUnlocked ? '👑' : '🔒'}</div>
-          <div style="flex:1;min-width:240px">
-            <h4 style="margin:0 0 4px;font-size:16px;color:${isUnlocked ? 'var(--ok)' : 'var(--danger)'}">
-              ${isUnlocked ? '私密福利VIP特权 · 已激活解锁' : '私密福利专区 · 仅图片预览模式'}
-            </h4>
-            <p style="margin:0;font-size:13px;color:var(--dim);line-height:1.5">
-              ${isUnlocked ? '您已开通私密福利播放权限，专区内所有 18+ 影片均可无限次高清在线播放。' : '当前账号未付费解锁私密福利播放权限。您可以预览影片封面海报、剧照及简介；解锁后即可直接在线播放全部影片。'}
-            </p>
-          </div>
-          ${!isUnlocked ? `
-            <div>
-              <button class="btn primary small" id="uBtnUnlock" style="background:linear-gradient(135deg,#e11d48,#be123c);white-space:nowrap">
-                👑 立即输入卡密解锁播放
-              </button>
-            </div>` : ''}
-        </div>
+        <div class="adult-src-wrapper">
+          <button class="btn ghost small adult-switch-mobile" id="adultSrcPickBtn">
+            🔀 切换福利源：当前「${esc(cleanSrcName(curSrc))}」 ${speedBadge(curSrc.key)}
+          </button>
+          <div class="src-layout">
+            <aside class="src-list" id="adultSrcList">
+              ${adultSources.map((s) => `
+                <div class="src-row ${s.key === curSrc.key ? 'on' : ''}" data-k="${esc(s.key)}" style="cursor:pointer" title="${esc(cleanSrcName(s))}">
+                  ${srcIconHtml(s)}
+                  <span class="src-name">${esc(cleanSrcName(s))}</span>
+                  <span class="src-speed" data-sk="${esc(s.key)}">${speedBadge(s.key)}</span>
+                </div>`).join('')}
+            </aside>
+            <div class="src-main" id="adultSrcMain">
+              <div class="src-panel-head">
+                <div class="src-panel-title">
+                  ${srcIconHtml(curSrc)} ${esc(cleanSrcName(curSrc))} <i class="adult-tag">私密专区</i>
+                  <span class="vip-status-pill ${isUnlocked ? 'unlocked' : 'locked'}">
+                    ${isUnlocked ? '👑 VIP已解锁播放' : '🔒 仅图片预览模式'}
+                  </span>
+                  <span class="src-panel-sub">${adultQuery ? '搜索「' + esc(adultQuery) + '」' : adultCat ? '分类筛选' : '最新影片'}</span>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  ${!isUnlocked ? `
+                    <button class="btn primary small" id="uBtnUnlock" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700">
+                      🔑 立即输入卡密解锁
+                    </button>` : ''}
+                  <form class="src-page-search" id="adultSearchForm" style="margin:0" onsubmit="return false">
+                    <input type="search" id="adultSearchInput" placeholder="在福利源中搜片..." value="${esc(adultQuery)}" autocomplete="off" />
+                    <button class="btn primary small" id="adultSearchBtn" type="button">搜索</button>
+                    ${adultQuery ? `<button class="btn ghost small" id="adultSearchClear" type="button">看全部</button>` : ''}
+                  </form>
+                </div>
+              </div>
 
-        <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap;justify-content:space-between">
-          <div class="chips" style="margin:0" id="adultSrcChips">
-            ${adultSources.map((s) => `<button class="chip ${s.key === curSrc.key ? 'on' : ''}" data-k="${esc(s.key)}">${esc(cleanSrcName(s))}</button>`).join('')}
-          </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input type="search" id="adultSearchInput" class="input" placeholder="在福利源中搜片..." value="${esc(adultQuery)}" style="font-size:13px;padding:6px 12px;max-width:200px" />
-            <button class="btn primary small" id="adultSearchBtn">搜索</button>
-            ${adultQuery ? `<button class="btn ghost small" id="adultSearchClear">清空</button>` : ''}
-          </div>
-        </div>
+              <!-- 动态分类导航胶囊 -->
+              <div class="chips src-cats" id="adultCats"></div>
 
-        <div id="adultGridWrap"></div>
-        <div id="adultPgWrap" style="display:flex;gap:12px;justify-content:center;align-items:center;margin-top:20px"></div>
-      `;
+              <!-- 状态与数量指示 -->
+              <div class="src-status" id="adultStatus"></div>
 
+              <!-- 影片瀑布流海报网格 (使用站点统一的 .grid 与 .card 规范) -->
+              <div class="grid" id="adultGrid"></div>
+
+              <!-- 分页器 -->
+              <div id="adultPgWrap" style="display:flex;gap:12px;justify-content:center;align-items:center;margin-top:24px;padding-bottom:16px"></div>
+            </div>
+          </div>
+        </div>`;
+
+      // 绑定福利源测速
+      for (const s of adultSources) {
+        if (!speedGet(s.key)) {
+          (async () => {
+            const t0 = performance.now();
+            let rec;
+            try { await API.list(s, 1); rec = { ms: Math.round(performance.now() - t0), fail: false, ts: Date.now() }; }
+            catch (e) { rec = { ms: 0, fail: true, ts: Date.now() }; }
+            speedCache.set(s.key, rec);
+            refreshSpeedBadges();
+            persistSpeed();
+          })();
+        }
+      }
+
+      // 移动端弹窗切源
+      $('#adultSrcPickBtn') && $('#adultSrcPickBtn').addEventListener('click', () => {
+        const box = document.createElement('div');
+        box.className = 'modal-mask';
+        box.innerHTML = `<div class="modal-box" style="width:min(92vw,500px)">
+            <h3 style="margin-bottom:6px">🔀 切换私密福利源</h3>
+            <p class="hint" style="margin-bottom:12px">点击任意源即可实时切换 · ⚡ 为实测响应延时</p>
+            <div class="swap-modal-list">${adultSources.map((s) => `
+              <div class="src-row ${s.key === curSrc.key ? 'on' : ''}" data-k="${esc(s.key)}" style="cursor:pointer">
+                ${srcIconHtml(s)}
+                <span class="src-name">${esc(cleanSrcName(s))}</span>
+                <span class="src-speed">${speedBadge(s.key)}</span>
+              </div>`).join('')}</div>
+          </div>`;
+        box.addEventListener('click', (ev) => {
+          const row = ev.target.closest('.src-row');
+          if (row) {
+            adultCurSrcKey = row.dataset.k;
+            store.set('adultCurKey', adultCurSrcKey);
+            adultPg = 1;
+            adultCat = '';
+            adultQuery = '';
+            box.remove();
+            renderAdultTab();
+          } else if (ev.target === box) {
+            box.remove();
+          }
+        });
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'modal-close';
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', () => box.remove());
+        box.querySelector('.modal-box').appendChild(closeBtn);
+        document.body.appendChild(box);
+      });
+
+      // 侧边栏切源
+      $$('#adultSrcList .src-row').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (adultCurSrcKey === btn.dataset.k) return;
+          adultCurSrcKey = btn.dataset.k;
+          store.set('adultCurKey', adultCurSrcKey);
+          adultPg = 1;
+          adultCat = '';
+          adultQuery = '';
+          renderAdultTab();
+        });
+      });
+
+      // 解锁弹窗
       $('#uBtnUnlock') && $('#uBtnUnlock').addEventListener('click', () => {
         openUnlockModal(() => {
           renderAdultTab();
         });
       });
 
-      $$('#adultSrcChips .chip').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          adultCurSrcKey = btn.dataset.k;
-          store.set('adultCurKey', adultCurSrcKey);
-          adultPg = 1;
-          renderAdultTab();
-        });
-      });
-
-      $('#adultSearchBtn').addEventListener('click', () => {
+      // 搜索表单
+      $('#adultSearchBtn') && $('#adultSearchBtn').addEventListener('click', () => {
         adultQuery = ($('#adultSearchInput').value || '').trim();
         adultPg = 1;
         fetchAdultList();
       });
-      $('#adultSearchInput').addEventListener('keydown', (e) => {
+      $('#adultSearchInput') && $('#adultSearchInput').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
+          e.preventDefault();
           adultQuery = ($('#adultSearchInput').value || '').trim();
           adultPg = 1;
           fetchAdultList();
@@ -2834,28 +3066,66 @@
         renderAdultTab();
       });
 
+      // 动态加载上游分类
+      const catsEl = $('#adultCats');
+      (async () => {
+        const cats = await loadSourceCats(curSrc, alive);
+        if (!alive() || !catsEl) return;
+        if (cats && cats.length) {
+          catsEl.classList.remove('hidden');
+          catsEl.innerHTML = `
+            <button class="chip ${!adultCat ? 'on' : ''}" data-cat="">全部</button>
+            ${cats.map((c) => `<button class="chip ${adultCat === c.id ? 'on' : ''}" data-cat="${esc(c.id)}">${esc(c.name)}</button>`).join('')}
+          `;
+          $$('#adultCats .chip').forEach((c) => {
+            c.addEventListener('click', () => {
+              adultCat = c.dataset.cat || '';
+              adultQuery = '';
+              if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
+              adultPg = 1;
+              $$('#adultCats .chip').forEach((x) => x.classList.toggle('on', x === c));
+              fetchAdultList();
+            });
+          });
+        } else {
+          catsEl.classList.add('hidden');
+        }
+      })();
+
       async function fetchAdultList() {
-        const gw = $('#adultGridWrap');
+        const grid = $('#adultGrid');
+        const statusEl = $('#adultStatus');
         const pw = $('#adultPgWrap');
-        if (!gw) return;
-        gw.innerHTML = `<div class="grid">${skeletons(14)}</div>`;
+        if (!grid) return;
+
+        grid.innerHTML = skeletons(14);
+        if (statusEl) statusEl.textContent = '⏳ 正在加载福利影片…';
         if (pw) pw.innerHTML = '';
 
         let r;
         try {
-          r = adultQuery ? await API.search(curSrc, adultQuery, adultPg) : await API.list(curSrc, adultPg);
+          r = adultQuery
+            ? await API.search(curSrc, adultQuery, adultPg)
+            : await API.list(curSrc, adultPg, adultCat);
         } catch (e) {
-          gw.innerHTML = `<div class="empty"><div class="big">⚠️</div>加载失败：${esc(e.message)}</div>`;
+          grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">⚠️</div>加载失败：${esc(e.message)}</div>`;
+          if (statusEl) statusEl.textContent = '❌ 加载失败';
           return;
         }
         if (!alive()) return;
         const list = (r && r.list) || [];
         if (!list.length) {
-          gw.innerHTML = `<div class="empty"><div class="big">🙈</div>没有找到私密福利影片</div>`;
+          grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">🙈</div>没有找到符合条件的私密福利影片</div>`;
+          if (statusEl) statusEl.textContent = '未检索到影片';
           return;
         }
 
-        gw.innerHTML = `<div class="grid">${list.map((v) => {
+        if (statusEl) {
+          statusEl.textContent = `⚡ 加载成功 · 第 ${adultPg} 页 (共 ${r.total != null ? r.total : list.length} 部)`;
+        }
+
+        // 使用网站标准 .card, .card-poster, .card-badge, .card-name, .card-sub
+        grid.innerHTML = list.map((v) => {
           const pic = v.vod_pic || '';
           const title = v.vod_name || '';
           const remarks = v.vod_remarks || '';
@@ -2863,25 +3133,27 @@
           const type = v.type_name || '';
           return `
             <div class="card adult-vod-card" data-id="${esc(v.vod_id)}" style="cursor:pointer">
-              <div class="card-cover" style="position:relative">
-                <img src="${esc(pic)}" referrerpolicy="no-referrer" alt="${esc(title)}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>'">
-                ${remarks ? `<span class="card-tag card-tag-remarks">${esc(remarks)}</span>` : ''}
-                <span class="card-lock-badge" style="position:absolute;top:6px;left:6px;padding:3px 7px;border-radius:4px;font-size:11px;font-weight:700;background:${isUnlocked ? '#16a34a' : 'rgba(225,29,72,.9)'};color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.4)">
-                  ${isUnlocked ? '▶ 可播放' : '🔒 仅图片预览'}
+              <div class="card-poster">
+                <img loading="lazy" referrerpolicy="no-referrer" src="${esc(pic)}" alt="${esc(title)}"
+                     onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>'">
+                <span class="card-badge">${esc(remarks || year || '18+')}</span>
+                <span class="card-lock-badge ${isUnlocked ? 'unlocked' : 'locked'}">
+                  ${isUnlocked ? '▶ 可播放' : '🔒 预览大图'}
                 </span>
+                <span class="card-play-ico"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>
               </div>
-              <div class="card-title" title="${esc(title)}">${esc(title)}</div>
-              <div class="card-meta">${esc(type || '福利')} · ${esc(year || '18+')}</div>
+              <div class="card-name" title="${esc(title)}">${esc(title)}</div>
+              <div class="card-sub">${esc(year || '福利')}${type ? ' · ' + esc(type) : ''}</div>
             </div>`;
-        }).join('')}</div>`;
+        }).join('');
 
-        $$('#adultGridWrap .adult-vod-card').forEach((el) => {
+        $$('#adultGrid .adult-vod-card').forEach((el) => {
           el.addEventListener('click', () => {
             const vidId = el.dataset.id;
             const vod = list.find((x) => String(x.vod_id) === String(vidId));
             if (!vod) return;
             if (isUnlocked) {
-              location.hash = `#/detail/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(vidId)}`;
+              location.hash = `#/play/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(vidId)}?ep=0&group=0`;
             } else {
               openPicPreviewModal(vod, curSrc);
             }
@@ -2892,14 +3164,20 @@
         if (pw && (pageCount > 1 || adultPg > 1)) {
           pw.innerHTML = `
             <button class="btn ghost small" id="adultPrevPg" ${adultPg <= 1 ? 'disabled' : ''}>上一页</button>
-            <span style="font-size:13px;color:var(--dim)">第 ${adultPg} 页</span>
+            <span style="font-size:13px;color:var(--dim)">第 ${adultPg} / ${pageCount || adultPg} 页</span>
             <button class="btn ghost small" id="adultNextPg" ${pageCount && adultPg >= pageCount ? 'disabled' : ''}>下一页</button>
           `;
           $('#adultPrevPg') && $('#adultPrevPg').addEventListener('click', () => {
-            if (adultPg > 1) { adultPg--; fetchAdultList(); window.scrollTo({ top: 180, behavior: 'smooth' }); }
+            if (adultPg > 1) {
+              adultPg--;
+              fetchAdultList();
+              window.scrollTo({ top: $('#uBody').offsetTop - 60, behavior: 'smooth' });
+            }
           });
           $('#adultNextPg') && $('#adultNextPg').addEventListener('click', () => {
-            adultPg++; fetchAdultList(); window.scrollTo({ top: 180, behavior: 'smooth' });
+            adultPg++;
+            fetchAdultList();
+            window.scrollTo({ top: $('#uBody').offsetTop - 60, behavior: 'smooth' });
           });
         }
       }
@@ -2907,7 +3185,9 @@
       fetchAdultList();
     }
     function bindHistDel() {
-      $$('#uBody .hist-del[data-id]').forEach((b) => b.addEventListener('click', async () => {
+      $$('#uBody .hist-del[data-id]').forEach((b) => b.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
         await API.userDeleteHistory([b.dataset.id]);
         const all = watchItems.concat(searchItems);
         const idx = all.findIndex((x) => x.id === b.dataset.id);
@@ -2920,7 +3200,16 @@
       }));
     }
 
-    $$('#uTabs .chip').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.t; renderBody(); }));
+    $$('#uTabs .user-tab-btn').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.t; renderBody(); }));
+    $$('.user-kpi-card[data-jump]').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.jump; renderBody(); }));
+    $('#uHeroUnlockBtn') && $('#uHeroUnlockBtn').addEventListener('click', () => {
+      openUnlockModal(() => {
+        viewUser(alive);
+      });
+    });
+    $('#uRefreshBtn') && $('#uRefreshBtn').addEventListener('click', () => {
+      viewUser(alive);
+    });
     $('#uLogout').addEventListener('click', async () => {
       try { await API.userLogout(); } catch (e) {}
       State.me = null;
@@ -4466,6 +4755,29 @@
               <b>强制更新</b><span style="color:var(--dim);font-size:12px">（不可关闭弹窗，须先更新）</span>
             </label>
             <button class="btn primary" id="saveAppVerBtn">保存版本更新设置</button>
+          </div>
+          <div class="admin-card" style="margin-top:16px">
+            <h3>📦 自动构建 APK 控制（安全确认机制）</h3>
+            <div style="margin:10px 0;padding:12px 16px;border-radius:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);font-size:13px;line-height:1.6">
+              <b style="color:var(--ok)">🛡️ 安全确认构建已生效：</b>
+              系统已优化构建流程，代码推送到 main 不再盲目自动打包，防止网页版出现故障时发布错误包。<br>
+              请先在网页端浏览影片、播放及搜索，确认版本完全正常后，再点击下方确认按钮触发构建！
+            </div>
+            <div style="margin-top:12px">
+              <label class="field-label">本次构建更新说明（选填，将作为更新日志写入 APK）</label>
+              <input class="field-input" id="apkBuildChangelogInput" placeholder="例如：优化私密福利双栏体验、会员中心UI全面升级" />
+              <div style="display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap">
+                <button class="btn primary" id="dispatchBuildApkBtn" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)" type="button">
+                  🚀 确认网页正常，立即触发构建 APK
+                </button>
+                <a class="btn ghost" href="https://github.com/xiaolin1991/dianying/actions/workflows/android.yml" target="_blank" rel="noopener">
+                  📋 前往 GitHub Actions 查看构建状态
+                </a>
+              </div>
+              <p class="hint" style="margin-top:10px">
+                其他触发方式：① 前往 Actions 页面直接点击「Run workflow」；② 本地推送版本标签（如 <code>git tag v1.0.xx && git push origin v1.0.xx</code>）；③ 提交说明附带 <code>[build-apk]</code>。
+              </p>
+            </div>
           </div>`;
 
         let curPhoneMode = phoneMode;
@@ -4574,6 +4886,29 @@
             toast(curVerAuto ? '已启用自动识别（以 /APP/manifest.json 为准）' : '已保存手动版本设置', 'ok');
             renderAdmTab(fresh);
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+
+        $('#dispatchBuildApkBtn') && $('#dispatchBuildApkBtn').addEventListener('click', async () => {
+          const btn = $('#dispatchBuildApkBtn');
+          const changelog = ($('#apkBuildChangelogInput') && $('#apkBuildChangelogInput').value.trim()) || '';
+          if (!confirm('已确认当前网页版功能与浏览一切正常，确认立即触发 GitHub Actions 打包构建 APK？')) return;
+          btn.disabled = true;
+          btn.textContent = '⏳ 正在向 GitHub 发送调度指令...';
+          try {
+            const res = await API.adminDispatchBuildApk(changelog);
+            if (res.ok) {
+              toast(res.msg || '🎉 APK 构建任务已触发！', 'ok');
+            } else if (res.needToken) {
+              alert('【提示】' + res.error + '\n\n您可以直接前往 GitHub Actions 页面点击「Run workflow」手动触发：\nhttps://github.com/' + res.repo + '/actions/workflows/android.yml');
+            } else {
+              toast('触发失败：' + (res.error || '未知错误'), 'err');
+            }
+          } catch (e) {
+            toast('请求失败：' + e.message, 'err');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = '🚀 确认网页正常，立即触发构建 APK';
+          }
         });
       }
 

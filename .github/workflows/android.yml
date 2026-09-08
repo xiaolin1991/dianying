@@ -1,17 +1,25 @@
-name: Build & Publish (APK + Docker)
-
-# 你改站点并 push 到 main → 本工作流必跑：① APK + Release ② Docker → GHCR
-# 仓库首页「Workers Builds」= Cloudflare 部署站点，不是本任务；请到 Actions 页查看本工作流
-#
-# 不会触发的唯一情况：
-#   1) 本次 push 里「改动的文件全部」只在 public/APP/（机器人回写安装包）
-#   2) 提交说明里含有 GitHub 保留跳过词（见下方 bot 提交；你自己写说明时不要抄）
+# 安全构建机制（优化版）：
+# 默认推送到 main 分支不会盲目打包，先部署并确认网页版浏览正常无误后，再确认触发构建 APK：
+# 方式 1: 网页测试正常后，在 GitHub Actions 页面点击 "Run workflow"，输入 yes 确认触发
+# 方式 2: 后台管理中心「App 版本更新」点击「🚀 确认网页正常，立即触发构建 APK」
+# 方式 3: 确认版本后推送版本标签触发（例如 git tag v1.0.77 && git push origin v1.0.77）
+# 方式 4: 提交信息含有 [build-apk] 或 [apk] 标签（例如 git commit -m "release: ... [build-apk]"）
 on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: '已确认网页版浏览与功能均正常？(输入 yes 确认构建)'
+        required: true
+        default: 'yes'
+      changelog:
+        description: '本次构建更新说明(选填)'
+        required: false
+        default: ''
   push:
     branches: [main]
+    tags: ['v*']
     paths-ignore:
       - 'public/APP/**'
-  workflow_dispatch: {}
 
 concurrency:
   group: apk-docker-${{ github.ref }}
@@ -28,6 +36,12 @@ jobs:
   build-apk:
     name: Build APK
     runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.confirm == 'yes' || github.event.inputs.confirm == 'true')) ||
+      github.event_name == 'release' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      contains(github.event.head_commit.message, '[build-apk]') ||
+      contains(github.event.head_commit.message, '[apk]')
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,7 +110,12 @@ jobs:
           if [ -z "$NOTES" ]; then
             NOTES="- 版本更新至 1.0.${RUN_NO}"$'\n'"- 优化体验与稳定性"
           fi
-          NOTES="晓林影视 1.0.${RUN_NO}"$'\n'"${NOTES}"
+          CUSTOM_LOG="${{ github.event.inputs.changelog }}"
+          if [ -n "$CUSTOM_LOG" ]; then
+            NOTES="晓林影视 1.0.${RUN_NO}"$'\n'"${CUSTOM_LOG}"
+          else
+            NOTES="晓林影视 1.0.${RUN_NO}"$'\n'"${NOTES}"
+          fi
           node scripts/publish-apk.mjs \
             --apk "android/app/build/outputs/apk/debug/app-debug.apk" \
             --code "$RUN_NO" \
@@ -215,6 +234,12 @@ jobs:
   docker:
     name: Build Docker
     runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.confirm == 'yes' || github.event.inputs.confirm == 'true')) ||
+      github.event_name == 'release' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      contains(github.event.head_commit.message, '[build-apk]') ||
+      contains(github.event.head_commit.message, '[apk]')
     steps:
       - uses: actions/checkout@v4
 

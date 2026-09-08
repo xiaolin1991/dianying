@@ -506,13 +506,28 @@ async function saveSettings(env, patch) {
 /* --------------------------- 源配置加载/缓存 ------------------------------ */
 function parseConfig(raw) {
   const sites = raw && raw.api_site ? raw.api_site : {};
-  const sources = Object.entries(sites).map(([key, v]) => ({
-    key,
-    name: String(v.name || key).trim(),
-    api: String(v.api || ''),
-    detail: String(v.detail || ''),
-    adult: String(v.name || '').includes('🔞'),
-  })).filter((s) => /^https?:\/\//i.test(s.api));
+  const KNOWN_DEAD_HOSTS = new Set(['m3u8.apiyhzy.com', 'p2100.net', 'yhzy.cc']);
+  const sources = Object.entries(sites).map(([key, v]) => {
+    let api = String(v.api || '').trim();
+    // 自动清洗失效第三方代理前缀 (例如 https://pz.v88.qzz.io/?url=https://...)
+    const proxyMatch = api.match(/[?&]url=(https?:\/\/[^&]+)/i);
+    if (proxyMatch && proxyMatch[1]) {
+      try { api = decodeURIComponent(proxyMatch[1]); } catch (e) { api = proxyMatch[1]; }
+    }
+    let host = '';
+    try { host = new URL(api).hostname.toLowerCase(); } catch (e) {}
+    let detailHost = '';
+    try { detailHost = new URL(String(v.detail || '')).hostname.toLowerCase(); } catch (e) {}
+    const isDead = KNOWN_DEAD_HOSTS.has(host) || KNOWN_DEAD_HOSTS.has(detailHost);
+    return {
+      key,
+      name: String(v.name || key).trim(),
+      api,
+      detail: String(v.detail || ''),
+      adult: String(v.name || '').includes('🔞'),
+      _isDead: isDead,
+    };
+  }).filter((s) => /^https?:\/\//i.test(s.api) && !s._isDead);
   return sources;
 }
 
@@ -1137,8 +1152,8 @@ export default {
             } catch (e) { /* ignore */ }
           }
         }
-        const ok = allow.has(host) || [...allow].some((h) => host.endsWith('.' + h));
-        if (!ok) return json({ error: 'host not allowed' }, 403);
+        const ok = allow.has(host) || [...allow].some((h) => host.endsWith('.' + h) || h.endsWith('.' + host));
+        if (!ok) return json({ code: 1, msg: 'host not allowed', page: 1, pagecount: 0, total: 0, list: [] }, 200);
 
         const isAdultSrc = Boolean(matchedSrc && matchedSrc.adult);
         const uname = await currentUser(request, env, url);
@@ -1167,11 +1182,20 @@ export default {
           }
         }
 
-        const upstream = await fetch(tu.toString(), {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) XIAOLIN-TV/1.0', Accept: '*/*' },
-          signal: AbortSignal.timeout(20000),
-          cf: { cacheTtl: 120, cacheEverything: true },
-        });
+        let upstream;
+        try {
+          upstream = await fetch(tu.toString(), {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+              Accept: 'application/json, text/plain, */*',
+              'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            },
+            signal: AbortSignal.timeout(15000),
+            cf: { cacheTtl: 120, cacheEverything: true },
+          });
+        } catch (e) {
+          return json({ code: 1, msg: 'upstream unavailable: ' + e.message, page: 1, pagecount: 0, total: 0, list: [] }, 200);
+        }
 
         const headers = new Headers();
         const contentType = upstream.headers.get('Content-Type') || 'application/json; charset=utf-8';
@@ -1179,6 +1203,12 @@ export default {
         headers.set('Access-Control-Allow-Origin', '*');
         headers.set('Cache-Control', 'public, max-age=120');
         if (g1.newCookie) headers.set('Set-Cookie', guestSetCookie(g1.newCookie));
+
+        if (!upstream.ok) {
+          return json({ code: 1, msg: `upstream error ${upstream.status}`, page: 1, pagecount: 0, total: 0, list: [] }, 200, {
+            headers,
+          });
+        }
 
         // 策略 2: 若访问成人源但未付费解锁(只能预览图片, 不能播放)
         // 从源头剥离播放地址 vod_play_url, 仅保留图片、片名、简介等元数据供图片预览
@@ -1572,6 +1602,50 @@ export default {
             const m = await loadAppManifest(env, request);
             const ver = effectiveAppVersion(await getSettings(env), m);
             return json({ ok: true, mode, manifest: m, ...ver });
+          } catch (e) {
+            return json({ ok: false, error: e.message || String(e) }, 500);
+          }
+        }
+        /* ---- 后台手动确认触发 GitHub Actions 构建 APK ---- */
+        if (path === '/api/admin/dispatch-build-apk' && request.method === 'POST') {
+          try {
+            const token = githubToken(env);
+            const repo = githubRepo(env) || 'xiaolin1991/dianying';
+            if (!token) {
+              return json({
+                ok: false,
+                needToken: true,
+                repo,
+                error: '未配置 GITHUB_TOKEN，无法自动向 GitHub 发送调度指令。请在 Cloudflare 环境变量中配置 GITHUB_TOKEN，或直接在 GitHub Actions 页面手动点击 Run workflow。'
+              }, 400);
+            }
+            let body = {};
+            try { body = await request.json(); } catch (e) { /* ignore */ }
+            const changelog = String(body.changelog || '').trim();
+            const url = `https://api.github.com/repos/${repo}/actions/workflows/android.yml/dispatches`;
+            const r = await fetch(url, {
+              method: 'POST',
+              headers: {
+                Accept: 'application/vnd.github+json',
+                Authorization: `Bearer ${token}`,
+                'User-Agent': 'xiaolin-tv-worker',
+                'X-GitHub-Api-Version': '2022-11-28',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                ref: 'main',
+                inputs: {
+                  confirm: 'yes',
+                  changelog: changelog,
+                },
+              }),
+              signal: AbortSignal.timeout(15000),
+            });
+            if (r.status === 204 || r.ok) {
+              return json({ ok: true, msg: '🎉 已成功触发 GitHub Actions 构建 APK 任务！请稍后前往 GitHub Actions 查看打包进度。' });
+            }
+            const errText = await r.text();
+            return json({ ok: false, error: `GitHub API 返回错误(${r.status}): ${errText}` }, 500);
           } catch (e) {
             return json({ ok: false, error: e.message || String(e) }, 500);
           }

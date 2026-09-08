@@ -25,9 +25,19 @@
    - 若要用蓝奏云等外链：后台切到「自定义」再填地址。TV 包未上线时保持「关闭」。
 4. 不配 Secrets 时：APK 仍会写入仓库 `public/APP/`；手机下载在固定模式下部署后即可用。
 
-## 二、每次更新如何出包
+## 二、每次更新如何出包（安全确认机制）
 
-改站点后 **push 到 `main`**（或到 Actions 页手动 **Run workflow**），会并行跑两个任务：
+为了保证 APK 产物质量，避免在网页端尚未验证或存在错误时发布故障包，工作流已优化为**「先验证网页，后确认构建」**机制：
+
+1. **第一步：推送代码与网页验证**
+   - 推送代码到 `main` 分支后，Cloudflare 或 VPS 会先行完成网页部署。
+   - 打开网站，测试浏览、换源、播放、搜索等核心体验，确认新版本一切正常。
+
+2. **第二步：确认执行 APK 构建（四种任选其一）**
+   - **方式 A（后台一键触发 · 最便捷）**：进入「管理中心」→「App 版本更新」，在「📦 自动构建 APK 控制」卡片点击 **「🚀 确认网页正常，立即触发构建 APK」** 按钮。
+   - **方式 B（GitHub Actions 页面手动点击）**：前往 GitHub 仓库的 **Actions → Build & Publish (APK + Docker)**，点击右上角 **Run workflow**，确认输入 `yes` 点击执行。
+   - **方式 C（版本标签触发）**：确认网页版本无误后，在终端打 tag 并推送：`git tag v1.0.77 && git push origin v1.0.77`。
+   - **方式 D（提交信息触发）**：若对本次提交十分自信，可在提交说明包含 `[build-apk]` 标签（例如 `git commit -m "feat: release verified [build-apk]"`）。
 
 | 任务 | 产物 |
 |------|------|
@@ -38,28 +48,23 @@
 
 1. 构建 Debug APK，版本号 `1.0.<构建编号>` / `versionCode=<构建编号>`。
 2. 写入 `public/APP/`（`*-latest.apk` + 版本号包 + `manifest.json`）。
-3. **更新说明**自动取「距上一版」的提交摘要（过滤机器人提交），写入 manifest。
+3. **更新说明**自动取「距上一版」的提交摘要（或手动触发时填写的更新日志），写入 manifest。
 4. 推到备份分支 `publish/app`，并**同步回 `main` 的 `public/APP`**。
 5. 若配置了 `SITE_URL` + `ADMIN_PASSWORD`：额外把版本写入后台 KV。
 6. 若配置了 `CF_DEPLOY_HOOK`：额外触发 Cloudflare 重新部署（让线上静态资源带上最新 APK）。
 
-**一定会跑 / 不会跑：**
-
-- ✅ 你改了 `public/`、`_worker.js`、`android/`、工作流等任意非 APP 目录文件并 push → **必跑 APK + Docker**
-- ⏭ 仅机器人回写 `public/APP/**` 的那次 push → 跳过（避免打包死循环）
-- ⚠️ 提交说明里不要写 GitHub 保留的跳过词（如方括号包起来的 skip ci / ci skip 等），否则整次 Actions 会被跳过
-- 仓库首页绿勾里的 **Workers Builds** 是 Cloudflare，**不是** APK/Docker；请到 **Actions → Build & Publish (APK + Docker)** 查看
-
-串联关系：
+**串联关系：**
 
 ```
-你推 main → Actions 打包 → publish/app + main/public/APP + GHCR 镜像
-                              ↓
-                   Cloudflare 部署 / 网站 git pull
-                              ↓
-                   /APP/manifest.json + latest.apk
-                              ↓
-                   后台「自动识别」+ 用户下载
+你推 main → 网页自动部署 → 浏览测试确认无误 → 触发构建 APK
+                                                  ↓
+                               Actions 打包 → publish/app + main/public/APP + GHCR 镜像
+                                                  ↓
+                               Cloudflare 重新部署 / 网站自动同步
+                                                  ↓
+                               /APP/manifest.json + latest.apk
+                                                  ↓
+                               后台「自动识别」+ 用户下载
 ```
 
 > Desktop 若提示远程有更新：先「拉取」再推（CI 回写 APK 到 main 时偶尔发生），或运行 `.\scripts\git-push.ps1`。
