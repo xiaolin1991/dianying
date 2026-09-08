@@ -573,16 +573,6 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   transform: none !important;
 }
 html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% !important; }
-/* 左右侧条手势: 仅手机; 中间留给点击出进度条 */
-.gest-side { display: none; }
-.video-wrap.is-mobile-player .gest-side {
-  display: block;
-  position: absolute; top: 0; bottom: 56px; width: 20%;
-  z-index: 5; touch-action: none; -webkit-tap-highlight-color: transparent;
-}
-.gest-side.gest-left { left: 0; }
-.gest-side.gest-right { right: 0; }
-.video-wrap.fake-fs .gest-side { bottom: 64px; width: 18%; }
 /* 中央播放钮: 仅暂停时显示 */
 .pp-btn {
   display: none;
@@ -776,13 +766,13 @@ body.tv .src-badge, body.tv .fs-exit-btn, body.tv .gest-hud { backdrop-filter: n
 /* TV 上没有触屏手势/下载推广, 相关提示隐藏 */
 body.tv .dl-hero-cta .btn.ghost { display: none; }
 
-/* 触屏手势 HUD: 亮度/音量竖条, 全屏中央两侧显示 */
+/* 触屏手势与快捷键 HUD: 快进/快退/音量居中显示 */
 .gest-hud {
-  position: absolute; top: 18%; left: 50%; transform: translateX(-50%);
-  background: rgba(0, 0, 0, .72); color: #fff; padding: 10px 16px; border-radius: 14px;
-  font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20;
-  box-shadow: 0 8px 28px rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.18);
-  white-space: nowrap;
+  position: absolute; top: 22%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(12, 16, 24, .82); color: #fff; padding: 10px 18px; border-radius: 14px;
+  font-size: 14.5px; font-weight: 600; opacity: 0; transition: opacity .18s ease; pointer-events: none; z-index: 25;
+  box-shadow: 0 8px 32px rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.2);
+  white-space: nowrap; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 }
 .gest-hud.show { opacity: 1; }
 .gest-hud.bar {

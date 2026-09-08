@@ -426,53 +426,97 @@
     }));
   }
 
-  /* ------------------------------ 列表页滚动记忆(搜索/影视源/分类) ------------------------------ */
+  /* ------------------------------ 全站页面与滚动记忆(搜索/影视源/分类/首页/会员中心) ------------------------------ */
   const LIST_PAGE_CACHE = new Map(); // routeKey -> { html, scrollY, state, rebind, ts }
   let activeListPage = null; // { key, getState, rebind }
+  let lastKnownScrollY = 0;
+
+  // 全局持续记录最新滚动位置(避免移动端在点击或 hashchange 触发瞬间 scrollTop 被归零)
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY || document.documentElement.scrollTop || 0;
+    if (y > 0) lastKnownScrollY = y;
+  }, { passive: true });
+
+  // 在任意可能导致跳转的卡片/链接点击捕获阶段, 立刻固化当前页面 DOM 与精确滚动高度
+  document.addEventListener('click', (e) => {
+    const target = e.target.closest('a, button, .card, .adult-vod-card');
+    if (!target) return;
+    const curY = window.scrollY || document.documentElement.scrollTop || lastKnownScrollY || 0;
+    if (curY > 0) lastKnownScrollY = curY;
+    const { parts, query } = parseHash();
+    const rKey = listRouteKey(parts, query);
+    if (rKey && isListRoute(parts)) {
+      saveListPageCache(rKey, curY);
+    }
+  }, true);
 
   function listRouteKey(parts, query) {
+    const p = (parts && parts[0]) || 'home';
     const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
-    if (parts[0] === 'search') return 'search|' + dec(query.q || '');
-    if (parts[0] === 'sources' || parts[0] === 'source') {
+    if (p === 'search') return 'search|' + dec(query.q || '');
+    if (p === 'sources' || p === 'source') {
       return 'sources|' + dec(parts[1] || '') + '|' + dec(query.q || '') + '|' + dec(query.cat || '');
     }
-    if (parts[0] === 'browse') return 'browse|' + dec(parts[1] || '电影') + '|' + (query.year || '全部');
+    if (p === 'browse') return 'browse|' + dec(parts[1] || '电影') + '|' + (query.year || '全部');
+    if (p === 'home') return 'home';
+    if (p === 'user') return 'user';
     return '';
   }
+
   function isListRoute(parts) {
-    return parts[0] === 'search' || parts[0] === 'sources' || parts[0] === 'source' || parts[0] === 'browse';
+    const p = (parts && parts[0]) || 'home';
+    return p === 'search' || p === 'sources' || p === 'source' || p === 'browse' || p === 'home' || p === 'user';
   }
-  function saveListPageCache(key) {
-    if (!key || !activeListPage || activeListPage.key !== key) return;
+
+  function saveListPageCache(key, optScrollY) {
+    if (!key) return;
     const view = $('#view');
     if (!view || !view.innerHTML.trim()) return;
+    const curY = (optScrollY != null && optScrollY > 0) ? optScrollY : (window.scrollY || document.documentElement.scrollTop || lastKnownScrollY || 0);
+    const hasActive = activeListPage && activeListPage.key === key;
+    const state = (hasActive && typeof activeListPage.getState === 'function') ? activeListPage.getState() : null;
+    const rebind = hasActive ? activeListPage.rebind : null;
     LIST_PAGE_CACHE.set(key, {
       html: view.innerHTML,
-      scrollY: window.scrollY || 0,
-      state: activeListPage.getState(),
-      getState: activeListPage.getState,
-      rebind: activeListPage.rebind,
+      scrollY: curY,
+      state,
+      getState: hasActive ? activeListPage.getState : null,
+      rebind,
       ts: Date.now(),
     });
-    if (LIST_PAGE_CACHE.size > 6) {
+    sessionStorage.setItem('ntv_scroll_' + key, String(curY));
+    if (LIST_PAGE_CACHE.size > 12) {
       let oldest = '', ot = Infinity;
       LIST_PAGE_CACHE.forEach((v, k) => { if (v.ts < ot) { ot = v.ts; oldest = k; } });
       if (oldest) LIST_PAGE_CACHE.delete(oldest);
     }
   }
+
+  function smoothScrollRestore(targetY) {
+    if (targetY == null || targetY <= 0) return;
+    const doScroll = () => {
+      window.scrollTo({ top: targetY, behavior: 'instant' });
+    };
+    doScroll();
+    requestAnimationFrame(doScroll);
+    setTimeout(doScroll, 40);
+    setTimeout(doScroll, 120);
+    setTimeout(doScroll, 280);
+    setTimeout(doScroll, 550);
+  }
+
   function restoreListPageCache(key, alive) {
     const cached = LIST_PAGE_CACHE.get(key);
     if (!cached || Date.now() - cached.ts > 30 * 60 * 1000) return false;
     const view = $('#view');
     if (!view) return false;
     view.innerHTML = cached.html;
-    try { cached.rebind(alive, cached.state); } catch (e) { console.warn('[list-cache] rebind failed', e); return false; }
+    if (typeof cached.rebind === 'function') {
+      try { cached.rebind(alive, cached.state); } catch (e) { console.warn('[list-cache] rebind failed', e); }
+    }
     activeListPage = { key, getState: cached.getState, rebind: cached.rebind };
-    const y = cached.scrollY;
-    requestAnimationFrame(() => {
-      window.scrollTo(0, y);
-      requestAnimationFrame(() => window.scrollTo(0, y));
-    });
+    const y = cached.scrollY || Number(sessionStorage.getItem('ntv_scroll_' + key) || 0);
+    smoothScrollRestore(y);
     return true;
   }
 
@@ -679,11 +723,32 @@
 
     let settled = 0;
     for (const p of jobs) {
-      p.then((j) => { consume(j); settled++; if (settled % 3 === 0) fillRows(false); });
+      p.then((j) => {
+        consume(j); settled++;
+        if (settled % 3 === 0) {
+          fillRows(false);
+          activeListPage = {
+            key: 'home',
+            getState: () => ({}),
+            rebind: (alive2) => {
+              if (!alive2()) return;
+              if (heroItems && heroItems.length) setupHero(heroItems, alive2);
+            },
+          };
+        }
+      });
     }
     await Promise.allSettled(jobs);
     fillRows(true);
     loadHero(alive);
+    activeListPage = {
+      key: 'home',
+      getState: () => ({}),
+      rebind: (alive2) => {
+        if (!alive2()) return;
+        if (heroItems && heroItems.length) setupHero(heroItems, alive2);
+      },
+    };
   }
 
   /* ---- Hero ---- */
@@ -1028,9 +1093,6 @@
       const emptyEl = $('#srEmpty');
       if (emptyEl && !merged.size) emptyEl.classList.remove('hidden');
     }
-    await runSearchPool();
-    if (!life.ok()) return;
-
     const searchKey = listRouteKey(['search'], { q });
     activeListPage = {
       key: searchKey,
@@ -1063,13 +1125,13 @@
         else {
           const sen = $('#srSentinel');
           const r = sen && sen.getBoundingClientRect();
-          if (r && r.top < window.innerHeight + 400 && reveal < merged.size) {
-            reveal = Math.min(merged.size, reveal + 48);
-            renderGrid();
-          }
+          if (r && r.top < window.innerHeight + 500) { reveal += 24; renderGrid(); }
         }
       },
     };
+
+    await runSearchPool();
+    if (!life.ok()) return;
   }
 
   /* ============================================================
@@ -1448,16 +1510,12 @@
           <div class="play-col">
             <div class="play-stage">
               <div class="video-wrap" id="videoWrap"><video id="videoEl" playsinline webkit-playsinline autoplay></video>
-                <div class="gest-side gest-left" id="gestLeft" aria-hidden="true"></div>
-                <div class="gest-side gest-right" id="gestRight" aria-hidden="true"></div>
                 <button class="pp-btn" id="ppBtn" type="button" title="播放" aria-label="播放">▶</button>
                 <div class="m-ctrl" id="mCtrl">
                   <div class="m-ctrl-row">
                     <span class="m-time" id="mTimeCur">0:00</span>
                     <input class="m-seek" id="mSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="进度" />
                     <span class="m-time" id="mTimeDur">0:00</span>
-                    <button type="button" class="m-icon-btn" id="mOrientBtn" title="锁定横屏" aria-label="锁定转向">🔓</button>
-                    <button type="button" class="m-icon-btn" id="mPpBtn" title="播放/暂停" aria-label="播放/暂停">❚❚</button>
                     <button type="button" class="m-icon-btn" id="mFsToggle" title="全屏" aria-label="全屏">⛶</button>
                   </div>
                 </div>
@@ -1503,21 +1561,16 @@
     const video = $('#videoEl');
     const tip = $('#videoTip');
     const wrap = $('#videoWrap');
-    const gestLeft = $('#gestLeft');
-    const gestRight = $('#gestRight');
     const ppBtn = $('#ppBtn');
     const mCtrl = $('#mCtrl');
     const mSeek = $('#mSeek');
-    const mPpBtn = $('#mPpBtn');
     const mFsToggle = $('#mFsToggle');
-    const mOrientBtn = $('#mOrientBtn');
     const playerWm = $('#playerWm');
     const mTimeCur = $('#mTimeCur');
     const mTimeDur = $('#mTimeDur');
     const stageHome = wrap && wrap.parentElement; // 假全屏结束后还原位置
     let autoFsByOrient = false;
     let fakeFsHistPushed = false;
-    let orientLocked = !!store.get('orientLock', false);
     // 仅真手机/APK WebView 走假全屏与横屏自动全屏; 带触摸的笔记本不算手机
     const isMobilePlayer = (() => {
       const ua = navigator.userAgent || '';
@@ -1537,7 +1590,6 @@
       if (wrap) wrap.classList.add('is-mobile-player');
     }
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
-    const getSavedBright = () => Math.min(2.2, Math.max(0.25, Number(store.get('vidBright', 1)) || 1));
     /** 假全屏 / 容器全屏 / 视频原生全屏 均视为播放器全屏 */
     const isPlayerFs = () => {
       if (!wrap) return false;
@@ -1547,19 +1599,9 @@
       try { if (video && video.webkitDisplayingFullscreen) return true; } catch (e) {}
       return false;
     };
-    /** 亮度只打在 video 上, 避免连 HUD/按钮一起被滤镜 */
-    const applyBrightFilter = (bright) => {
-      const b = bright == null ? getSavedBright() : bright;
-      try {
-        if (wrap) wrap.style.filter = '';
-        if (isPlayerFs()) video.style.filter = `brightness(${b})`;
-        else video.style.filter = '';
-      } catch (e) {}
-    };
     const applyPlayerPrefs = () => {
       const vol = getSavedVol();
       try { video.volume = vol; if (vol > 0) video.muted = false; } catch (e) {}
-      applyBrightFilter();
     };
     const fmtClock = (sec) => {
       sec = Math.max(0, Math.floor(sec || 0));
@@ -1587,7 +1629,6 @@
         ppBtn.textContent = '▶';
         ppBtn.classList.toggle('paused', video.paused);
       }
-      if (mPpBtn) mPpBtn.textContent = video.paused ? '▶' : '❚❚';
       if (mFsToggle) mFsToggle.classList.toggle('on', isPlayerFs());
       if (isMobilePlayer) bumpMCtrl();
     };
@@ -1610,7 +1651,6 @@
       try { if (!video.muted && video.volume >= 0) store.set('vidVol', Number(video.volume.toFixed(2))); } catch (e) {}
     });
     if (ppBtn) ppBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); bumpMCtrl(); });
-    if (mPpBtn) mPpBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); bumpMCtrl(); });
     if (mSeek) {
       mSeek.addEventListener('pointerdown', () => { mSeeking = true; bumpMCtrl(); });
       mSeek.addEventListener('input', () => {
@@ -1964,8 +2004,8 @@
     };
     const toggleFakeFs = () => { togglePlayerFs(); };
     $('#fsBtn').addEventListener('click', (e) => { e.preventDefault(); togglePlayerFs(); });
-    // 手机自绘全屏
-    if (mFsToggle && isMobilePlayer) {
+    // 控制栏全屏按钮 (移动端与电脑端通用)
+    if (mFsToggle) {
       mFsToggle.addEventListener('click', (e) => { e.stopPropagation(); togglePlayerFs(); });
     }
     // 桌面单击画面暂停/播放(避开原生控件条); 双击另走真全屏
@@ -1986,39 +2026,6 @@
       wrap.addEventListener('dblclick', () => { clearTimeout(deskClickT); }, true);
     }
 
-    const syncOrientBtn = () => {
-      if (!mOrientBtn) return;
-      mOrientBtn.textContent = orientLocked ? '🔒' : '🔓';
-      mOrientBtn.classList.toggle('on', orientLocked);
-      mOrientBtn.title = orientLocked ? '已锁定横屏（点按解锁）' : '锁定横屏（点按锁定）';
-    };
-    const applyOrientLock = () => {
-      try {
-        if (!screen.orientation) return;
-        if (orientLocked && screen.orientation.lock) {
-          screen.orientation.lock('landscape').catch(() => {});
-        } else if (!orientLocked && !wrap.classList.contains('fake-fs') && screen.orientation.unlock) {
-          screen.orientation.unlock();
-        }
-      } catch (e) {}
-    };
-    if (isMobilePlayer && mOrientBtn) {
-      syncOrientBtn();
-      applyOrientLock();
-      mOrientBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        orientLocked = !orientLocked;
-        store.set('orientLock', orientLocked);
-        syncOrientBtn();
-        applyOrientLock();
-        if (orientLocked) toast('已锁定横屏', 'ok');
-        else toast('已解锁转向');
-        bumpMCtrl();
-      });
-    } else if (mOrientBtn) {
-      mOrientBtn.style.display = 'none';
-    }
-
     function enterFakeFs() {
       const wrapEl = $('#videoWrap');
       if (!wrapEl || wrapEl.classList.contains('fake-fs')) return;
@@ -2026,7 +2033,6 @@
       wrapEl.classList.add('fake-fs');
       document.body.style.overflow = 'hidden';
       document.documentElement.classList.add('player-fs');
-      applyBrightFilter(getSavedBright());
       try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); } catch (e) {}
       // 压入一层历史: 系统/浏览器返回键先退出全屏, 不离开播放页
       if (isMobilePlayer && !fakeFsHistPushed) {
@@ -2045,11 +2051,7 @@
       document.body.style.overflow = '';
       document.documentElement.classList.remove('player-fs');
       if (stageHome && wrapEl.parentElement !== stageHome) stageHome.insertBefore(wrapEl, stageHome.firstChild);
-      applyBrightFilter();
-      if (orientLocked) applyOrientLock();
-      else {
-        try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
-      }
+      try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
       // 点按钮退出时回退刚才压入的历史, 避免多点一次返回
       if (wasFs && fakeFsHistPushed && !fromPopstate) {
         fakeFsHistPushed = false;
@@ -2091,7 +2093,6 @@
       // 电脑原生全屏钮: 保持 video 全屏, 不拦截、不转假全屏
       // 双击 / 下方「全屏」走的是容器真全屏(wrap), 此处仅同步状态
       if (fsEl === video) {
-        applyBrightFilter();
         syncPpBtn();
         refreshPlayerWm();
         return;
@@ -2103,7 +2104,6 @@
           document.documentElement.classList.remove('player-fs');
         }
       }
-      applyBrightFilter();
       syncPpBtn();
       refreshPlayerWm();
     };
@@ -2119,7 +2119,7 @@
         refreshPlayerWm();
       }, 50);
     });
-    video.addEventListener('webkitendfullscreen', () => { applyBrightFilter(); refreshPlayerWm(); });
+    video.addEventListener('webkitendfullscreen', () => { refreshPlayerWm(); });
 
     // 仅手机横屏自动全屏; 电脑绝不触发
     const orientMq = window.matchMedia('(orientation: landscape)');
@@ -2156,173 +2156,209 @@
       btn.classList.toggle('on', idx < 0);
     });
 
-    // ---- 触屏: 左右侧条亮度/音量; 中间单击出原生进度条; 双击暂停 ----
+    // ---- 播放器手势引擎: 屏幕任意位置左右滑动快进/快退, 纵向滑动调节音量, 桌面端方向键与滚轮快捷控制 ----
     {
       const hud = $('#gestHud');
-      const fmtT = (sec) => {
-        sec = Math.max(0, Math.floor(sec || 0));
-        const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s2 = sec % 60;
-        return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s2).padStart(2, '0');
-      };
       let hudTimer = null;
-      const showBarHud = (icon, label, pct, side) => {
+
+      const showTextHud = (t, dur = 900) => {
+        if (!hud) return;
+        hud.textContent = t;
+        hud.style.left = '50%';
+        hud.style.top = '22%';
+        hud.style.transform = 'translate(-50%, -50%)';
+        hud.classList.remove('bar');
+        hud.classList.add('show');
+        clearTimeout(hudTimer);
+        hudTimer = setTimeout(() => { if (hud) hud.classList.remove('show'); }, dur);
+      };
+
+      const showBarHud = (icon, label, pct) => {
         if (!hud) return;
         const p = Math.max(0, Math.min(100, Math.round(pct)));
         hud.innerHTML = `<div class="gh-ico">${icon}</div><div class="gh-bar"><i style="height:${p}%"></i></div><div class="gh-val">${label} ${p}%</div>`;
-        hud.style.left = side === 'b' ? '18%' : '82%';
+        hud.style.left = '50%';
         hud.style.top = '50%';
         hud.style.transform = 'translate(-50%, -50%)';
         hud.classList.add('bar', 'show');
         clearTimeout(hudTimer);
       };
-      const hideBarHudSoon = () => {
+
+      const hideBarHudSoon = (delay = 800) => {
         clearTimeout(hudTimer);
-        hudTimer = setTimeout(() => { if (hud) hud.classList.remove('show'); }, 900);
-      };
-      const showTextHud = (t) => {
-        if (!hud) return;
-        hud.textContent = t;
-        hud.style.left = '50%';
-        hud.style.top = '18%';
-        hud.style.transform = 'translateX(-50%)';
-        hud.classList.remove('bar');
-        hud.classList.add('show');
-        clearTimeout(hudTimer);
-        hudTimer = setTimeout(() => hud.classList.remove('show'), 900);
+        hudTimer = setTimeout(() => { if (hud) hud.classList.remove('show'); }, delay);
       };
 
-      if (isMobilePlayer) {
-        const bindSideGest = (el, kind) => {
-          if (!el) return;
-          let sx = 0, sy = 0, mode = '', startVal = 0, seekBase = 0, seekTarget = -1, lastSeekApply = 0, bright = 1;
-          el.addEventListener('touchstart', (e) => {
-            const t = e.touches[0];
-            sx = t.clientX; sy = t.clientY; mode = ''; seekTarget = -1;
-            bright = getSavedBright();
-            bumpMCtrl();
-          }, { passive: true });
-          el.addEventListener('touchmove', (e) => {
-            const t = e.touches[0];
-            const dx = t.clientX - sx, dyUp = sy - t.clientY;
-            if (!mode) {
-              if (Math.abs(dx) < 10 && Math.abs(dyUp) < 10) return;
-              mode = Math.abs(dx) > Math.abs(dyUp) * 1.2 ? 'seek' : kind;
-              startVal = mode === 'b' ? bright : mode === 'v' ? getSavedVol() : (video.currentTime || 0);
-              if (mode === 'seek') seekBase = video.currentTime || 0;
-            }
-            e.preventDefault();
-            bumpMCtrl();
-            const sens = Math.max(140, (wrap.getBoundingClientRect().height || 300) * 0.5);
-            if (mode === 'b') {
-              bright = Math.min(2.2, Math.max(0.25, startVal + dyUp / sens));
-              store.set('vidBright', Number(bright.toFixed(2)));
-              const pct = ((bright - 0.25) / (2.2 - 0.25)) * 100;
-              if (isPlayerFs()) { applyBrightFilter(bright); showBarHud('☀️', '亮度', pct, 'b'); }
-              else showTextHud('☀️ 请先全屏再调亮度');
-            } else if (mode === 'v') {
-              const nv = Math.min(1, Math.max(0, startVal + dyUp / sens));
-              try { video.volume = nv; video.muted = nv <= 0; } catch (err) {}
-              store.set('vidVol', Number(nv.toFixed(2)));
-              showBarHud(nv <= 0 ? '🔇' : '🔊', '音量', nv * 100, 'v');
-            } else if (mode === 'seek' && video.duration) {
-              const halfW = Math.max(120, wrap.getBoundingClientRect().width / 2);
-              seekTarget = Math.min(video.duration - 0.5, Math.max(0, seekBase + dx * (90 / halfW)));
-              showTextHud(`${seekTarget >= seekBase ? '⏩' : '⏪'} ${fmtT(seekTarget)} / ${fmtT(video.duration)}`);
-              const now = Date.now();
-              if (now - lastSeekApply > 280 && video.readyState >= 2) {
-                try { video.currentTime = seekTarget; lastSeekApply = now; } catch (err) {}
-              }
-            }
-          }, { passive: false });
-          el.addEventListener('touchend', () => {
-            if (mode === 'seek' && seekTarget >= 0 && video.duration) {
-              try { video.currentTime = seekTarget; } catch (e) {}
-              showTextHud('⏱ 已跳到 ' + fmtT(video.currentTime));
-            } else if (mode === 'b' || mode === 'v') hideBarHudSoon();
-            mode = ''; seekTarget = -1;
-            bumpMCtrl();
-          });
-          el.addEventListener('touchcancel', () => { if (mode === 'b' || mode === 'v') hideBarHudSoon(); mode = ''; bumpMCtrl(); });
-        };
-        bindSideGest(gestLeft, 'b');
-        bindSideGest(gestRight, 'v');
+      // ---- 触屏手势 (全屏幕任意位置左右滑动均可触发快进/快退, 无死角) ----
+      if (wrap) {
+        let touchStartX = 0, touchStartY = 0;
+        let touchStartTime = 0, touchStartVol = 1;
+        let touchMode = ''; // '' | 'seek' | 'vol'
+        let seekTarget = -1;
+        let lastTapAt = 0, singleTapTimer = null;
 
-        // 单击立刻出进度条; 双击暂停/播放
-        let lastTapAt = 0, lastTapX = 0, lastTapY = 0;
         wrap.addEventListener('touchstart', (e) => {
-          if (e.target.closest('.m-ctrl, .pp-btn')) return;
+          if (e.target.closest('.m-ctrl, .video-tip, a, button, input, select')) return;
+          if (!e.touches || e.touches.length !== 1) return;
+          const t = e.touches[0];
+          touchStartX = t.clientX;
+          touchStartY = t.clientY;
+          touchStartTime = video.currentTime || 0;
+          touchStartVol = getSavedVol();
+          touchMode = '';
+          seekTarget = -1;
           bumpMCtrl();
         }, { passive: true });
-        wrap.addEventListener('touchend', (e) => {
-          if (e.target.closest('.gest-side, .pp-btn, .m-ctrl')) return;
-          const t = (e.changedTouches && e.changedTouches[0]) || null;
-          if (!t) return;
-          bumpMCtrl();
-          const now = Date.now();
-          const dt = now - lastTapAt;
-          const dist = Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY);
-          if (dt < 280 && dist < 36) {
+
+        wrap.addEventListener('touchmove', (e) => {
+          if (e.target.closest('.m-ctrl, .video-tip, a, button, input, select')) return;
+          if (!e.touches || e.touches.length !== 1) return;
+          const t = e.touches[0];
+          const dx = t.clientX - touchStartX;
+          const dyUp = touchStartY - t.clientY;
+
+          if (!touchMode) {
+            if (Math.hypot(dx, dyUp) < 8) return; // 初始位移防抖
+            // 任意位置横向位移为主 -> 立即进入快进/快退
+            if (Math.abs(dx) >= Math.abs(dyUp)) {
+              touchMode = 'seek';
+            } else {
+              touchMode = 'vol';
+            }
+          }
+
+          if (touchMode === 'seek') {
             e.preventDefault();
-            togglePlay();
-            showTextHud(video.paused ? '⏸ 已暂停' : '▶ 播放中');
-            lastTapAt = 0;
-          } else {
-            lastTapAt = now; lastTapX = t.clientX; lastTapY = t.clientY;
+            bumpMCtrl();
+            const w = Math.max(160, wrap.clientWidth || 320);
+            const span = video.duration ? Math.min(300, Math.max(90, video.duration * 0.12)) : 90;
+            const delta = Math.round((dx / w) * span);
+            seekTarget = Math.min((video.duration || 0) > 0 ? video.duration - 0.5 : 0, Math.max(0, touchStartTime + delta));
+            const diff = Math.round(seekTarget - touchStartTime);
+            const sign = diff >= 0 ? '+' : '';
+            const ico = diff >= 0 ? '⏩ 快进' : '⏪ 快退';
+            const curStr = fmtClock(seekTarget);
+            const durStr = fmtClock(video.duration || 0);
+            showTextHud(`${ico} ${curStr} / ${durStr} (${sign}${diff}s)`, 1500);
+
+            if (mSeek && video.duration) {
+              mSeek.value = String(Math.round((seekTarget / video.duration) * 1000));
+            }
+            if (mTimeCur) mTimeCur.textContent = curStr;
+          } else if (touchMode === 'vol') {
+            e.preventDefault();
+            bumpMCtrl();
+            const h = Math.max(140, (wrap.clientHeight || 240) * 0.7);
+            const nv = Math.min(1, Math.max(0, touchStartVol + dyUp / h));
+            try { video.volume = nv; video.muted = nv <= 0; } catch (err) {}
+            store.set('vidVol', Number(nv.toFixed(2)));
+            showBarHud(nv <= 0 ? '🔇' : '🔊', '音量', nv * 100);
           }
         }, { passive: false });
+
+        wrap.addEventListener('touchend', (e) => {
+          if (e.target.closest('.m-ctrl, .video-tip, a, button, input, select')) return;
+          if (touchMode === 'seek') {
+            if (seekTarget >= 0 && video.duration) {
+              try { video.currentTime = seekTarget; } catch (err) {}
+              showTextHud(`⏱ 已跳到 ${fmtClock(video.currentTime)}`, 800);
+            }
+            touchMode = '';
+            seekTarget = -1;
+            bumpMCtrl();
+            return;
+          }
+          if (touchMode === 'vol') {
+            hideBarHudSoon();
+            touchMode = '';
+            bumpMCtrl();
+            return;
+          }
+
+          // 未滑动的轻触 -> 处理单击控制条与双击播放/暂停
+          const now = Date.now();
+          const dt = now - lastTapAt;
+          if (dt < 280) {
+            clearTimeout(singleTapTimer);
+            lastTapAt = 0;
+            togglePlay();
+            showTextHud(video.paused ? '⏸ 已暂停' : '▶ 播放中', 700);
+          } else {
+            lastTapAt = now;
+            singleTapTimer = setTimeout(() => {
+              if (mCtrl) {
+                if (mCtrl.classList.contains('show')) mCtrl.classList.remove('show');
+                else bumpMCtrl();
+              }
+            }, 280);
+          }
+        });
+
+        wrap.addEventListener('touchcancel', () => {
+          if (touchMode === 'vol') hideBarHudSoon();
+          touchMode = '';
+          seekTarget = -1;
+          bumpMCtrl();
+        });
       }
 
-      // 桌面双击: 进出真全屏, 不切换播放/暂停
-      if (wrap && !isMobilePlayer) {
-        wrap.addEventListener('dblclick', (e) => {
-          if (e.target.closest('.pp-btn, .m-ctrl, .gest-side, button, a')) return;
+      // ---- 电脑端优化: 键盘左右方向键快进/快退 + 空格播放 + 滚轮音量 + 双击全屏 ----
+      const onPlayerKeyDown = (e) => {
+        if (!alive() || !video.isConnected) return;
+        const target = e.target;
+        if (target && target.tagName && /^(INPUT|TEXTAREA|SELECT)$/i.test(target.tagName)) return;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+          if (!video.duration) return;
           e.preventDefault();
-          e.stopPropagation();
-          const wasPlaying = !video.paused;
-          togglePlayerFs().then(() => {
-            requestAnimationFrame(() => {
-              if (wasPlaying && video.isConnected && video.paused) video.play().catch(() => {});
-            });
-            setTimeout(() => {
-              if (wasPlaying && video.isConnected && video.paused) video.play().catch(() => {});
-            }, 150);
-          });
-        }, true);
-      }
+          const step = e.key === 'ArrowRight' ? 10 : -10;
+          const targetTime = Math.min(video.duration - 0.5, Math.max(0, (video.currentTime || 0) + step));
+          try { video.currentTime = targetTime; } catch (err) {}
+          const ico = step > 0 ? '⏩ 快进 10s' : '⏪ 快退 10s';
+          showTextHud(`${ico} (${fmtClock(video.currentTime)} / ${fmtClock(video.duration)})`, 800);
+          syncMSeek();
+          bumpMCtrl();
+        } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          const step = e.key === 'ArrowUp' ? 0.08 : -0.08;
+          const nv = Math.min(1, Math.max(0, (video.volume || 1) + step));
+          try { video.volume = nv; video.muted = nv <= 0; } catch (err) {}
+          store.set('vidVol', Number(nv.toFixed(2)));
+          showBarHud(nv <= 0 ? '🔇' : '🔊', '音量', nv * 100);
+          hideBarHudSoon(900);
+        } else if (e.key === ' ' || e.code === 'Space') {
+          e.preventDefault();
+          togglePlay();
+          showTextHud(video.paused ? '⏸ 已暂停' : '▶ 播放中', 700);
+        } else if (e.key === 'f' || e.key === 'F') {
+          e.preventDefault();
+          togglePlayerFs();
+        }
+      };
+      document.addEventListener('keydown', onPlayerKeyDown);
 
-      // 鼠标滚轮
+      // 桌面端鼠标滚轮纯调节音量
       if (wrap) {
-        let wheelHudT = null;
-        const showWheelBar = (icon, label, pct, side) => {
-          if (!hud) return;
-          const p = Math.max(0, Math.min(100, Math.round(pct)));
-          hud.innerHTML = `<div class="gh-ico">${icon}</div><div class="gh-bar"><i style="height:${p}%"></i></div><div class="gh-val">${label} ${p}%</div>`;
-          hud.style.left = side === 'b' ? '18%' : '82%';
-          hud.style.top = '50%';
-          hud.style.transform = 'translate(-50%, -50%)';
-          hud.classList.add('bar', 'show');
-          clearTimeout(wheelHudT);
-          wheelHudT = setTimeout(() => hud.classList.remove('show'), 1000);
-        };
         wrap.addEventListener('wheel', (e) => {
           if (!video.isConnected) return;
           e.preventDefault();
           const step = e.deltaY < 0 ? 0.05 : -0.05;
-          if (e.shiftKey) {
-            let bright = getSavedBright();
-            bright = Math.min(2.2, Math.max(0.25, bright + step));
-            store.set('vidBright', Number(bright.toFixed(2)));
-            if (!isPlayerFs()) { showTextHud('☀️ 请先全屏再调亮度'); return; }
-            applyBrightFilter(bright);
-            showWheelBar('☀️', '亮度', ((bright - 0.25) / (2.2 - 0.25)) * 100, 'b');
-          } else {
-            let vol = getSavedVol();
-            vol = Math.min(1, Math.max(0, vol + step));
-            store.set('vidVol', Number(vol.toFixed(2)));
-            try { video.volume = vol; video.muted = vol <= 0; } catch (err) {}
-            showWheelBar(vol <= 0 ? '🔇' : '🔊', '音量', vol * 100, 'v');
-          }
+          let vol = getSavedVol();
+          vol = Math.min(1, Math.max(0, vol + step));
+          store.set('vidVol', Number(vol.toFixed(2)));
+          try { video.volume = vol; video.muted = vol <= 0; } catch (err) {}
+          showBarHud(vol <= 0 ? '🔇' : '🔊', '音量', vol * 100);
+          hideBarHudSoon(900);
         }, { passive: false });
+      }
+
+      // 桌面双击全屏
+      if (wrap && !isMobilePlayer) {
+        wrap.addEventListener('dblclick', (e) => {
+          if (e.target.closest('.m-ctrl, button, a, input, select')) return;
+          e.preventDefault();
+          e.stopPropagation();
+          togglePlayerFs();
+        }, true);
       }
     }
 
@@ -3392,24 +3428,82 @@
       }));
     }
 
-    $$('#uTabs .user-tab-btn').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.t; renderBody(); }));
-    $$('.user-kpi-card[data-jump]').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.jump; renderBody(); }));
-    $('#uHeroUnlockBtn') && $('#uHeroUnlockBtn').addEventListener('click', () => {
-      openUnlockModal(() => {
-        viewUser(alive);
+    function bindUserHeaderEvents() {
+      $$('#uTabs .user-tab-btn').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.t; renderBody(); }));
+      $$('.user-kpi-card[data-jump]').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.jump; renderBody(); }));
+      $('#uHeroUnlockBtn') && $('#uHeroUnlockBtn').addEventListener('click', () => {
+        openUnlockModal(() => { viewUser(alive); });
       });
-    });
-    $('#uRefreshBtn') && $('#uRefreshBtn').addEventListener('click', () => {
-      viewUser(alive);
-    });
-    $('#uLogout').addEventListener('click', async () => {
-      try { await API.userLogout(); } catch (e) {}
-      State.me = null;
-      updateUserBox();
-      toast('已退出登录');
-      location.hash = '#/home';
-    });
+      $('#uRefreshBtn') && $('#uRefreshBtn').addEventListener('click', () => { viewUser(alive); });
+      $('#uLogout') && $('#uLogout').addEventListener('click', async () => {
+        try { await API.userLogout(); } catch (e) {}
+        State.me = null;
+        updateUserBox();
+        toast('已退出登录');
+        location.hash = '#/home';
+      });
+    }
 
+    activeListPage = {
+      key: 'user',
+      getState: () => ({ tab }),
+      rebind: (alive2, state) => {
+        if (!alive2()) return;
+        if (state && state.tab) tab = state.tab;
+        bindUserHeaderEvents();
+        if (tab === 'adult') {
+          const grid = $('#adultGrid');
+          if (grid) bindAdultCardClicks(grid);
+          initInfiniteScroll();
+          const bannerToggle = $('#adultBannerToggle');
+          const bannerBody = $('#adultBannerBody');
+          const toggleTxt = $('#adultToggleTxt');
+          if (bannerToggle && bannerBody) {
+            bannerToggle.addEventListener('click', () => {
+              const isFold = bannerBody.classList.toggle('hidden');
+              store.set('adultDescFold', isFold);
+              if (toggleTxt) toggleTxt.textContent = isFold ? '展开说明 ▾' : '收起说明 ▴';
+            });
+          }
+          $('#uBannerUnlockBtn') && $('#uBannerUnlockBtn').addEventListener('click', () => openUnlockModal(() => renderAdultTab()));
+          $('#uBtnUnlock') && $('#uBtnUnlock').addEventListener('click', () => openUnlockModal(() => renderAdultTab()));
+          $('#adultSearchBtn') && $('#adultSearchBtn').addEventListener('click', () => {
+            adultQuery = ($('#adultSearchInput').value || '').trim();
+            fetchAdultList(true);
+          });
+          $('#adultSearchInput') && $('#adultSearchInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); adultQuery = ($('#adultSearchInput').value || '').trim(); fetchAdultList(true); }
+          });
+          $('#adultSearchClear') && $('#adultSearchClear').addEventListener('click', () => {
+            adultQuery = '';
+            if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
+            fetchAdultList(true);
+          });
+          $$('#adultCats .chip').forEach((c) => {
+            c.addEventListener('click', () => {
+              adultCat = c.dataset.cat || '';
+              adultQuery = '';
+              if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
+              $$('#adultCats .chip').forEach((x) => x.classList.toggle('on', x === c));
+              fetchAdultList(true);
+            });
+          });
+          $$('#adultSrcList .src-row').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              if (adultCurSrcKey === btn.dataset.k) return;
+              adultCurSrcKey = btn.dataset.k;
+              store.set('adultCurKey', adultCurSrcKey);
+              adultPg = 1; adultCat = ''; adultQuery = '';
+              renderAdultTab();
+            });
+          });
+        } else if (tab === 'watch' || tab === 'fav' || tab === 'search') {
+          bindHistDel();
+        }
+      },
+    };
+
+    bindUserHeaderEvents();
     renderBody();
   }
 
@@ -5336,6 +5430,9 @@
     }
     window.addEventListener('scroll', () => $('#backTop').classList.toggle('show', window.scrollY > 600));
     $('#backTop').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    if ('scrollRestoration' in history) {
+      try { history.scrollRestoration = 'manual'; } catch (e) {}
+    }
     window.addEventListener('hashchange', route);
 
     buildThemePop();
