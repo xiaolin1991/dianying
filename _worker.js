@@ -34,6 +34,7 @@ const DEFAULT_LIVE_SOURCES = [
 
 const DEFAULT_SETTINGS = {
   siteName: '晓林影视 XIAOLIN-TV',
+  siteSlogan: '海量高清 · 聚合秒播 · 极简私人影院',
   adultEnabled: false,
   defaultTheme: 'midnight',
   announcement: '',
@@ -47,6 +48,7 @@ const DEFAULT_SETTINGS = {
   configJson: '',       // 后台直接粘贴的 JSON 配置内容(优先于所有 URL)
   requireLogin: true,   // 登录观看: 开启=游客可试看 trialMinutes 分钟, 到期需注册; 关闭=完全免登录
   trialMinutes: 20,     // 游客试看时长(分钟), 后台可自定义; 0=立即要求登录
+  mobileWebLimitMinutes: 10, // 手机网页端试看限制(分钟); 0=完全禁止手机网页播放须用App; -1=不限制
   allowRegister: true,  // 开放前台注册
   homeSources: [],      // 首页默认加载的影视源 key 顺序列表(空=内置精选)
   appPromoEnabled: true, // 手机访问弹「下载APP」引导弹窗(后台可关)
@@ -54,6 +56,19 @@ const DEFAULT_SETTINGS = {
   downloadUrl: '',      // 自定义手机 APK 地址(仅 custom 模式生效)
   downloadUrlTvMode: 'off', // off=不提供 | fixed=站内最新 | custom=自定义
   downloadUrlTv: '',    // 自定义 TV APK 地址(仅 custom 模式生效)
+  // App 版本发布控制 (必须管理员点击【确认正式发布】后才向客户端下发弹窗)
+  appVersionActive: false, // 线上客户端是否激活推送
+  appPublishedCode: 0,     // 正式向客户端下发的最新 versionCode
+  appPublishedName: '',    // 正式向客户端下发的版本名
+  appPublishedChangelog: '', // 正式向客户端下发的更新说明
+  appPublishedForce: false, // 是否强制更新 (App 内不可关闭弹窗)
+  appPublishedAt: '',      // 正式发布时间
+  // 待发布草稿区 (支持自动提取或手动填写，可自由编辑)
+  appDraftCode: 0,
+  appDraftName: '',
+  appDraftChangelog: '',
+  appDraftForce: false,
+  // 历史兼容字段
   appVersionCode: 0,     // 手动模式下的 versionCode; 0=不检查(自动模式则以 manifest 为准)
   appVersionName: '',    // 手动模式版本名
   appForceUpdate: false, // 强制更新: App 内不可关闭弹窗
@@ -358,25 +373,131 @@ function parseManifestVersion(manifest) {
 
 /** 对外生效的 App 版本(默认自动读 manifest; 手动模式用后台字段) */
 function effectiveAppVersion(s, manifest) {
-  const auto = !s || s.appVersionAuto !== false;
   const fromFile = parseManifestVersion(manifest);
+  const auto = !s || s.appVersionAuto !== false;
+  const publishedCode = s && s.appPublishedCode ? Math.max(0, Math.round(Number(s.appPublishedCode)) || 0) : 0;
+  const legacyCode = s && s.appVersionCode ? Math.max(0, Math.round(Number(s.appVersionCode)) || 0) : 0;
+
+  // 若已正式发布
+  if (publishedCode > 0) {
+    return {
+      appVersionAuto: auto,
+      appVersionCode: publishedCode,
+      appVersionName: s.appPublishedName || ('1.0.' + publishedCode),
+      appChangelog: s.appPublishedChangelog || '',
+      appForceUpdate: Boolean(s.appPublishedForce !== undefined ? s.appPublishedForce : s.appForceUpdate),
+      appVersionSource: 'published',
+      appManifestAt: s.appPublishedAt || (fromFile ? fromFile.publishedAt : ''),
+    };
+  }
+
+  // 默认自动读 manifest / 兼容旧手动
   if (auto && fromFile) {
     return {
       appVersionAuto: true,
       appVersionCode: fromFile.appVersionCode,
       appVersionName: fromFile.appVersionName,
       appChangelog: fromFile.appChangelog,
+      appForceUpdate: Boolean(s && s.appForceUpdate),
       appVersionSource: 'manifest',
       appManifestAt: fromFile.publishedAt || '',
     };
   }
   return {
     appVersionAuto: auto,
-    appVersionCode: Math.max(0, Math.round(Number(s && s.appVersionCode != null ? s.appVersionCode : 0)) || 0),
+    appVersionCode: legacyCode,
     appVersionName: (s && s.appVersionName) || '',
     appChangelog: (s && s.appChangelog) || '',
+    appForceUpdate: Boolean(s && s.appForceUpdate),
     appVersionSource: 'manual',
     appManifestAt: fromFile ? (fromFile.publishedAt || '') : '',
+  };
+}
+
+/** 供后台一键提取最新版本信息 (GitHub Releases + 站内 Manifest) */
+async function fetchAppRelease(env, request) {
+  const repo = githubRepo(env) || 'xiaolin1991/dianying';
+  const token = githubToken(env);
+  let ghData = null;
+  let ghErr = '';
+
+  // 1. 尝试从 GitHub Releases 获取最新发布
+  try {
+    const headers = {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'xiaolin-tv-worker',
+      'X-GitHub-Api-Version': '2022-11-28',
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const r = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+      headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (r.ok) {
+      ghData = await r.json();
+    } else {
+      ghErr = `GitHub API HTTP ${r.status}`;
+    }
+  } catch (e) {
+    ghErr = e.message || String(e);
+  }
+
+  // 2. 读取站内 manifest.json (优先 KV / 磁盘 / 静态)
+  const manifest = await loadAppManifest(env, request);
+
+  // 3. 解析版本号与更新说明
+  let code = 0;
+  let name = '';
+  let changelog = '';
+  let publishedAt = '';
+  let source = '';
+  let downloadUrl = '/APP/xiaolintv-phone-latest.apk';
+
+  if (ghData && ghData.tag_name) {
+    source = 'github_release';
+    name = String(ghData.tag_name).replace(/^v/i, '');
+    const m = ghData.tag_name.match(/v?(\d+)\.(\d+)\.(\d+)/i) || ghData.tag_name.match(/v?(\d+)/i);
+    if (m) {
+      if (m[3] !== undefined) {
+        if (m[1] === '1' && m[2] === '0') code = parseInt(m[3], 10) || 0;
+        else code = (parseInt(m[1], 10) * 10000) + (parseInt(m[2], 10) * 100) + (parseInt(m[3], 10) || 0);
+      } else {
+        code = parseInt(m[1], 10) || 0;
+      }
+    }
+    changelog = String(ghData.body || '').trim();
+    publishedAt = ghData.published_at || '';
+    if (Array.isArray(ghData.assets)) {
+      const apkAsset = ghData.assets.find((a) => a.name && a.name.endsWith('.apk'));
+      if (apkAsset && apkAsset.browser_download_url) {
+        downloadUrl = apkAsset.browser_download_url;
+      }
+    }
+  }
+
+  // 如果 manifest 存在且版本比 GitHub 提取的更高或 GitHub 获取失败，以 manifest 为准补充
+  if (manifest && manifest.versionCode) {
+    const mCode = Math.max(0, Math.round(Number(manifest.versionCode)) || 0);
+    if (mCode >= code || !code) {
+      code = mCode;
+      name = String(manifest.versionName || ('1.0.' + mCode));
+      if (!changelog || changelog.length < 5) {
+        changelog = String(manifest.changelog || '');
+      }
+      publishedAt = manifest.publishedAt || publishedAt || '';
+      source = ghData ? 'github_release+manifest' : 'manifest';
+    }
+  }
+
+  return {
+    ok: true,
+    source: source || 'fallback',
+    versionCode: code,
+    versionName: name || (code ? `1.0.${code}` : ''),
+    changelog: changelog || '优化体验与播放稳定性',
+    publishedAt: publishedAt || new Date().toISOString(),
+    downloadUrl,
+    ghErr: ghData ? undefined : ghErr,
   };
 }
 
@@ -384,6 +505,7 @@ async function saveSettings(env, patch) {
   const cur = await getSettings(env);
   const next = { ...cur };
   if (typeof patch.siteName === 'string' && patch.siteName.trim()) next.siteName = patch.siteName.trim().slice(0, 40);
+  if (typeof patch.siteSlogan === 'string') next.siteSlogan = patch.siteSlogan.trim().slice(0, 100);
   if (typeof patch.adultEnabled === 'boolean') next.adultEnabled = patch.adultEnabled;
   if (typeof patch.defaultTheme === 'string' && THEMES.includes(patch.defaultTheme)) next.defaultTheme = patch.defaultTheme;
   if (typeof patch.announcement === 'string') next.announcement = patch.announcement.slice(0, 300);
@@ -403,6 +525,11 @@ async function saveSettings(env, patch) {
     if (!isFinite(n) || n < 0 || n > 2880) throw new Error('试看时长需为 0-2880 分钟');
     next.trialMinutes = n;
   }
+  if (patch.mobileWebLimitMinutes !== undefined) {
+    const m = Math.round(Number(patch.mobileWebLimitMinutes));
+    if (!isFinite(m) || m < -1 || m > 2880) throw new Error('手机网页端观看时限需为 -1 到 2880 分钟');
+    next.mobileWebLimitMinutes = m;
+  }
   if (typeof patch.allowRegister === 'boolean') next.allowRegister = patch.allowRegister;
   if (typeof patch.appPromoEnabled === 'boolean') next.appPromoEnabled = patch.appPromoEnabled;
   if (typeof patch.downloadUrlMode === 'string') {
@@ -414,14 +541,55 @@ async function saveSettings(env, patch) {
     next.downloadUrlTvMode = (m === 'fixed' || m === 'custom') ? m : 'off';
   }
   if (typeof patch.downloadUrlTv === 'string') next.downloadUrlTv = patch.downloadUrlTv.trim().slice(0, 300);
-  if (patch.appVersionCode !== undefined) {
+
+  // App 版本发布控制 (发布 vs 草稿)
+  if (typeof patch.appVersionActive === 'boolean') next.appVersionActive = patch.appVersionActive;
+  if (patch.appPublishedCode !== undefined) {
+    const pc = Math.max(0, Math.round(Number(patch.appPublishedCode)) || 0);
+    next.appPublishedCode = pc;
+    next.appVersionCode = pc; // 兼容历史字段
+  }
+  if (typeof patch.appPublishedName === 'string') {
+    const pn = patch.appPublishedName.trim().slice(0, 40);
+    next.appPublishedName = pn;
+    next.appVersionName = pn;
+  }
+  if (typeof patch.appPublishedChangelog === 'string') {
+    const pcl = patch.appPublishedChangelog.trim().slice(0, 2000);
+    next.appPublishedChangelog = pcl;
+    next.appChangelog = pcl;
+  }
+  if (typeof patch.appPublishedForce === 'boolean') {
+    next.appPublishedForce = patch.appPublishedForce;
+    next.appForceUpdate = patch.appPublishedForce;
+  }
+  if (typeof patch.appPublishedAt === 'string') next.appPublishedAt = patch.appPublishedAt.trim().slice(0, 40);
+
+  // 待发布草稿字段
+  if (patch.appDraftCode !== undefined) next.appDraftCode = Math.max(0, Math.round(Number(patch.appDraftCode)) || 0);
+  if (typeof patch.appDraftName === 'string') next.appDraftName = patch.appDraftName.trim().slice(0, 40);
+  if (typeof patch.appDraftChangelog === 'string') next.appDraftChangelog = patch.appDraftChangelog.trim().slice(0, 2000);
+  if (typeof patch.appDraftForce === 'boolean') next.appDraftForce = patch.appDraftForce;
+
+  // 兼容直接提交旧版字段
+  if (patch.appVersionCode !== undefined && patch.appPublishedCode === undefined) {
     const c = Math.round(Number(patch.appVersionCode));
     if (!isFinite(c) || c < 0 || c > 999999999) throw new Error('App versionCode 需为 0-999999999 的整数');
     next.appVersionCode = c;
+    next.appDraftCode = c;
   }
-  if (typeof patch.appVersionName === 'string') next.appVersionName = patch.appVersionName.trim().slice(0, 40);
-  if (typeof patch.appForceUpdate === 'boolean') next.appForceUpdate = patch.appForceUpdate;
-  if (typeof patch.appChangelog === 'string') next.appChangelog = patch.appChangelog.trim().slice(0, 2000);
+  if (typeof patch.appVersionName === 'string' && patch.appPublishedName === undefined) {
+    next.appVersionName = patch.appVersionName.trim().slice(0, 40);
+    next.appDraftName = next.appVersionName;
+  }
+  if (typeof patch.appForceUpdate === 'boolean' && patch.appPublishedForce === undefined) {
+    next.appForceUpdate = patch.appForceUpdate;
+    next.appDraftForce = patch.appForceUpdate;
+  }
+  if (typeof patch.appChangelog === 'string' && patch.appPublishedChangelog === undefined) {
+    next.appChangelog = patch.appChangelog.trim().slice(0, 2000);
+    next.appDraftChangelog = next.appChangelog;
+  }
   if (typeof patch.appVersionAuto === 'boolean') next.appVersionAuto = patch.appVersionAuto;
   if (patch.appManifest && typeof patch.appManifest === 'object') {
     try { await writeKvAppManifest(env, patch.appManifest); } catch (e) { /* ignore */ }
@@ -1035,12 +1203,17 @@ export default {
         const s = await getSettings(env);
         const dl = effectiveDownloadUrls(s);
         const ver = effectiveAppVersion(s, await loadAppManifest(env, request));
+        // 核心：若 appVersionActive 未开启，对外下发 versionCode 为 0，避免未确认就向客户端弹窗
+        const isPushing = s.appVersionActive !== false;
+        const outVerCode = isPushing ? ver.appVersionCode : 0;
         return json({
           siteName: s.siteName,
+          siteSlogan: s.siteSlogan || '海量高清 · 聚合秒播 · 极简私人影院',
           defaultTheme: s.defaultTheme,
           announcement: s.announcement,
           requireLogin: s.requireLogin !== false,
           trialMinutes: Number(s.trialMinutes === undefined ? 20 : s.trialMinutes),
+          mobileWebLimitMinutes: Number(s.mobileWebLimitMinutes === undefined ? 10 : s.mobileWebLimitMinutes),
           allowRegister: s.allowRegister !== false,
           homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
           appPromoEnabled: s.appPromoEnabled !== false,
@@ -1048,10 +1221,11 @@ export default {
           downloadUrlTv: dl.downloadUrlTv,
           downloadUrlMode: phoneDlMode(s),
           downloadUrlTvMode: tvDlMode(s),
+          appVersionActive: !!s.appVersionActive,
           appVersionAuto: ver.appVersionAuto,
-          appVersionCode: ver.appVersionCode,
+          appVersionCode: outVerCode,
           appVersionName: ver.appVersionName,
-          appForceUpdate: !!s.appForceUpdate,
+          appForceUpdate: !!ver.appForceUpdate,
           appChangelog: ver.appChangelog,
           appVersionSource: ver.appVersionSource,
           playerOptimize: !!s.playerOptimize,
@@ -1492,6 +1666,7 @@ export default {
           const ver = effectiveAppVersion(s, await loadAppManifest(env, request));
           return json({
             siteName: s.siteName,
+            siteSlogan: s.siteSlogan || '海量高清 · 聚合秒播 · 极简私人影院',
             adultEnabled: s.adultEnabled,
             defaultTheme: s.defaultTheme,
             announcement: s.announcement,
@@ -1509,6 +1684,7 @@ export default {
             configFrom: s.configJson ? 'inline-json' : ((Array.isArray(s.configUrls) && s.configUrls.length) ? 'multi-url' : 'default'),
             requireLogin: s.requireLogin !== false,
             trialMinutes: Number(s.trialMinutes === undefined ? 20 : s.trialMinutes),
+            mobileWebLimitMinutes: Number(s.mobileWebLimitMinutes === undefined ? 10 : s.mobileWebLimitMinutes),
             allowRegister: s.allowRegister !== false,
             appPromoEnabled: s.appPromoEnabled !== false,
             downloadUrlMode: phoneDlMode(s),
@@ -1517,6 +1693,17 @@ export default {
             downloadUrlTvMode: tvDlMode(s),
             downloadUrlTv: s.downloadUrlTv || '',
             downloadUrlTvEffective: dl.downloadUrlTv,
+            // App 版本发布控制 (线上发布状态 vs 待发布草稿)
+            appVersionActive: !!s.appVersionActive,
+            appPublishedCode: Math.max(0, Math.round(Number(s.appPublishedCode || 0))),
+            appPublishedName: s.appPublishedName || '',
+            appPublishedChangelog: s.appPublishedChangelog || '',
+            appPublishedForce: !!s.appPublishedForce,
+            appPublishedAt: s.appPublishedAt || '',
+            appDraftCode: Math.max(0, Math.round(Number(s.appDraftCode || 0))),
+            appDraftName: s.appDraftName || '',
+            appDraftChangelog: s.appDraftChangelog || '',
+            appDraftForce: !!s.appDraftForce,
             appVersionAuto: ver.appVersionAuto,
             appVersionSource: ver.appVersionSource,
             appVersionCode: ver.appVersionCode,
@@ -1526,7 +1713,7 @@ export default {
             appVersionNameManual: s.appVersionName || '',
             appChangelogManual: s.appChangelog || '',
             appManifestAt: ver.appManifestAt || '',
-            appForceUpdate: !!s.appForceUpdate,
+            appForceUpdate: !!ver.appForceUpdate,
             adminPath: s.adminPath || '',
             homeSources: Array.isArray(s.homeSources) ? s.homeSources : [],
             playerOptimize: !!s.playerOptimize,
@@ -1606,7 +1793,16 @@ export default {
             return json({ ok: false, error: e.message || String(e) }, 500);
           }
         }
-        /* ---- 后台手动确认触发 GitHub Actions 构建 APK ---- */
+        /* ---- 自动提取最新版本信息 (GitHub Releases + manifest) 供后台编辑草稿 ---- */
+        if (path === '/api/admin/fetch-app-release' && (request.method === 'GET' || request.method === 'POST')) {
+          try {
+            const rel = await fetchAppRelease(env, request);
+            return json(rel);
+          } catch (e) {
+            return json({ ok: false, error: e.message || String(e) }, 500);
+          }
+        }
+        /* ---- 后台手动确认触发 GitHub Actions 构建 APK + Docker ---- */
         if (path === '/api/admin/dispatch-build-apk' && request.method === 'POST') {
           try {
             const token = githubToken(env);
@@ -1642,7 +1838,7 @@ export default {
               signal: AbortSignal.timeout(15000),
             });
             if (r.status === 204 || r.ok) {
-              return json({ ok: true, msg: '🎉 已成功触发 GitHub Actions 构建 APK 任务！请稍后前往 GitHub Actions 查看打包进度。' });
+              return json({ ok: true, msg: '🎉 已成功触发 GitHub Actions 构建任务（同时打包 APK 与推送 Docker 镜像）！请稍后前往 GitHub Actions 查看构建进度。' });
             }
             const errText = await r.text();
             return json({ ok: false, error: `GitHub API 返回错误(${r.status}): ${errText}` }, 500);

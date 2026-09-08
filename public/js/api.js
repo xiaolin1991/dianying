@@ -86,6 +86,8 @@
       }),
     adminSyncApp: () =>
       jfetch('/api/admin/sync-app', { method: 'POST' }, 120000),
+    adminFetchAppRelease: () =>
+      jfetch('/api/admin/fetch-app-release', { method: 'POST' }, 20000),
     adminDispatchBuildApk: (changelog) =>
       jfetch('/api/admin/dispatch-build-apk', {
         method: 'POST',

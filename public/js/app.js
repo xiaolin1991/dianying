@@ -527,8 +527,8 @@
     ['#/download', '下载APP'],
   ];
   function buildNav() {
-    // 已在官方 App 内(WebView 专属 UA) → 自动隐藏「下载APP」入口
-    const items = inApp() ? NAVS.filter(([href]) => href !== '#/download') : NAVS;
+    // 已在官方 App 内或已下载客户端 → 自动隐藏「下载APP」入口
+    const items = isClientOrDownloaded() ? NAVS.filter(([href]) => href !== '#/download') : NAVS;
     $('#mainNav').innerHTML = items.map(([href, label]) =>
       `<a href="${href}" data-href="${href}">${label}</a>`).join('');
   }
@@ -1909,6 +1909,8 @@
     }
 
     function playCurrent(resume) {
+      if (checkMobileWebLimit(video)) return;
+      if (inApp()) maybeAppUpdate();
       const ep = groups[gi].eps[ei];
       hasPlaybackFailed = false;
       clearTimeout(autoFailoverTimer);
@@ -1938,6 +1940,7 @@
       let beat = 0;
       saveTimer = setInterval(() => {
         if (!alive() || !video.isConnected) return stopSaveTimer(); // 已切页: 自动停止
+        if (!video.paused && checkMobileWebLimit(video, 5)) return stopSaveTimer();
         if (video.currentTime > 5) {
           allProg[gi + ':' + ei] = { t: Math.floor(video.currentTime), d: Math.floor(video.duration || 0) };
           store.set(progKey, allProg);
@@ -3956,15 +3959,18 @@
     const dlUrlTv = resolveDownloadUrl((State.settings && State.settings.downloadUrlTv) || '');
     const isAndroid = /Android/i.test(navigator.userAgent);
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (inApp()) {
-      // 已安装用户(安卓壳/PWA): 自动识别, 显示确认信息而非推广
+    if (isClientOrDownloaded()) {
+      // 已安装用户(安卓壳/PWA)或已下载用户: 自动识别, 显示确认信息而非推广
       v.innerHTML = `
         <div class="container page-wrap" style="max-width:680px">
           <div class="side-card" style="text-align:center;padding:40px 20px">
             <div style="font-size:52px">✅</div>
-            <h3 style="margin:12px 0 8px">你已在官方 App 中</h3>
-            <p class="hint">系统自动识别：当前正通过 晓林影院 App 访问，无需重复安装。<br>下载入口与引导弹窗已为你自动隐藏。</p>
-            <a class="btn primary" style="margin-top:14px" href="#/home">回到首页观影</a>
+            <h3 style="margin:12px 0 8px">你已下载或正在使用官方客户端</h3>
+            <p class="hint">系统自动识别：已下载安装或正在通过 晓林影院 App 访问。<br>下载入口与引导弹窗已为你自动隐藏。</p>
+            <div style="display:flex;gap:12px;justify-content:center;margin-top:16px;flex-wrap:wrap">
+              <a class="btn primary" href="#/home">回到首页观影</a>
+              ${dlUrl ? `<a class="btn ghost" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 重新下载安装包</a>` : ''}
+            </div>
           </div>
         </div>`;
       return;
@@ -4032,13 +4038,22 @@
           </ul>
         </section>
       </div>`;
+    $$('a[href*="/APP/"], a[href*=".apk"]', v).forEach((a) => {
+      a.addEventListener('click', () => {
+        store.set('appDownloaded', true);
+        buildNav();
+      });
+    });
   }
 
-  /* ---- APP 下载引导弹窗: 首次访问弹出; 永久关闭 or 10天后再弹; 后台可整体关闭 ---- */
+  /* ---- APP 下载引导弹窗与客户端识别 ---- */
   // 已在官方 App 内? (安卓壳 WebView 专属UA / iOS PWA standalone 模式)
   // UA: … XIAOLIN-TV-APP/<versionName>/<versionCode>
   function inApp() {
     return /XIAOLIN-TV-APP/i.test(navigator.userAgent || '') || isStandalone();
+  }
+  function isClientOrDownloaded() {
+    return inApp() || Boolean(store.get('appDownloaded', false));
   }
   function parseAppClient() {
     const m = (navigator.userAgent || '').match(/XIAOLIN-TV-APP\/([^/\s]+)(?:\/(\d+))?/i);
@@ -4064,7 +4079,70 @@
   function isStandalone() {
     return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
   }
+
+  /* ---- 手机网页端（非 APP）观看时限与强制下载客户端拦截 ---- */
+  let mobileLimitModalShown = false;
+  function checkMobileWebLimit(videoEl, deltaSec = 0) {
+    if (!isMobileUA() || inApp()) return false;
+    const st = State.settings || {};
+    const limitMin = Number(st.mobileWebLimitMinutes === undefined ? 10 : st.mobileWebLimitMinutes);
+    if (limitMin < 0) return false; // -1 = 不限制
+    if (limitMin === 0) {
+      // 0 = 完全禁止手机网页端播放，进入即要求下载官方 APP
+      if (videoEl) { try { videoEl.pause(); } catch (e) {} }
+      showMobileLimitModal(0);
+      return true;
+    }
+    const limitSec = limitMin * 60;
+    let watched = Number(store.get('mobile_web_watched_secs', 0)) || 0;
+    if (deltaSec > 0) {
+      watched += deltaSec;
+      store.set('mobile_web_watched_secs', watched);
+    }
+    if (watched >= limitSec) {
+      if (videoEl) { try { videoEl.pause(); } catch (e) {} }
+      showMobileLimitModal(limitMin);
+      return true;
+    }
+    return false;
+  }
+
+  function showMobileLimitModal(limitMin) {
+    if (mobileLimitModalShown || document.getElementById('mobileLimitMask')) return;
+    mobileLimitModalShown = true;
+    const box = document.createElement('div');
+    box.id = 'mobileLimitMask';
+    box.className = 'modal-mask mobile-limit-mask';
+    const siteName = esc((State.settings && State.settings.siteName) || '晓林影视');
+    const apkUrl = resolveDownloadUrl((State.settings && State.settings.downloadUrl) || '/APP/xiaolintv-phone-latest.apk');
+    box.innerHTML = `
+      <div class="modal-box promo-box mobile-limit-box" style="text-align:center;max-width:390px;padding:32px 24px">
+        <div style="font-size:52px;line-height:1;margin-bottom:12px">📱</div>
+        <h3 class="promo-title" style="margin-bottom:8px">手机网页端试看已结束</h3>
+        <p class="hint" style="margin:12px 0 20px;line-height:1.6;font-size:14px">
+          ${limitMin === 0 ? '为了保证极致观影画质与全屏交互体验，手机端请使用官方客户端观看。' : `您已达到手机浏览器免费试看（${limitMin} 分钟）时限。`}<br>
+          请下载安装 <b>${siteName}</b> 官方 APP，畅享无限制高速播放、双向云同步与全屏手势！
+        </p>
+        <a class="btn primary promo-go" id="mobileLimitDlBtn" href="${esc(apkUrl)}" style="width:100%;justify-content:center;padding:14px;font-size:16px;font-weight:700" target="_blank" rel="noopener">
+          ⬇️ 立即免费下载客户端
+        </a>
+        <div style="margin-top:14px;font-size:12px;color:var(--dim)">
+          已下载安装？在手机中打开桌面 APP 即可无限制畅享全站影片
+        </div>
+      </div>`;
+    document.body.appendChild(box);
+    const dlBtn = $('#mobileLimitDlBtn', box);
+    if (dlBtn) {
+      dlBtn.addEventListener('click', () => {
+        store.set('appDownloaded', true);
+        buildNav();
+        toast('正在开始下载官方客户端…', 'ok');
+      });
+    }
+  }
+
   function openAppPromoModal() {
+    if (isClientOrDownloaded()) return;
     const box = document.createElement('div');
     box.className = 'modal-mask';
     box.innerHTML = `<div class="modal-box promo-box">
@@ -4080,7 +4158,7 @@
         <div class="promo-feats">
           <span>🎬 全屏播放</span><span>☁️ 收藏云同步</span><span>📺 电视盒子</span><span>⚡ 秒开换源</span>
         </div>
-        <a class="btn primary promo-go" href="#/download">📥 免费安装</a>
+        <a class="btn primary promo-go" href="#/download" id="promoDlBtn">📥 免费安装</a>
         <button class="promo-skip" id="promoForever">已安装，不再提示</button>
       </div>`;
     box.addEventListener('click', (ev) => {
@@ -4088,8 +4166,17 @@
       if (ev.target.closest('a.promo-go')) setTimeout(() => box.remove(), 0);
     });
     $('.promo-x', box).addEventListener('click', () => box.remove()); // × 关闭 = 10 天后再弹
+    const dlGo = $('#promoDlBtn', box);
+    if (dlGo) {
+      dlGo.addEventListener('click', () => {
+        store.set('appDownloaded', true);
+        buildNav();
+      });
+    }
     $('#promoForever', box).addEventListener('click', () => {
       store.set('appPromoState', { ...store.get('appPromoState', {}), forever: true });
+      store.set('appDownloaded', true);
+      buildNav();
       box.remove();
       toast('好的，不再打扰');
     });
@@ -4098,7 +4185,7 @@
   function maybeAppPromo() {
     try {
       if (!State.settings || State.settings.appPromoEnabled === false) return; // 后台总开关
-      if (inApp()) return;                                                    // 已安装: 安卓壳/PWA 一律不弹
+      if (isClientOrDownloaded()) return;                                     // 已在客户端或已下载: 一律不弹
       if (!isMobileUA()) return;
       // 只对「已注册登录」的用户弹: 未登录/纯游客永远安静
       if (!State.me || State.me === '管理员') return;
@@ -4137,7 +4224,7 @@
         </div>
         ${notes}
         <a class="btn primary promo-go" id="updGoBtn" href="${esc(apkUrl)}" rel="noopener">⬇️ 立即更新</a>
-        ${force ? '<div class="upd-force-tip">此版本为强制更新，请安装后再继续使用</div>' : '<button type="button" class="promo-skip" id="updLater">稍后提醒</button>'}
+        ${force ? '<div class="upd-force-tip">此版本为强制更新，请更新后再继续观看</div>' : '<button type="button" class="promo-skip" id="updLater">稍后提醒</button>'}
       </div>`;
     const close = () => {
       if (force) return;
@@ -4151,7 +4238,7 @@
       const later = $('#updLater', box);
       if (later) later.addEventListener('click', close);
     } else {
-      box.addEventListener('click', (ev) => { if (ev.target === box) ev.stopPropagation(); });
+      box.addEventListener('click', (ev) => { ev.stopPropagation(); });
     }
     document.body.appendChild(box);
   }
@@ -4164,12 +4251,16 @@
       const st = State.settings || {};
       const latestCode = Math.max(0, Math.round(Number(st.appVersionCode || 0)) || 0);
       if (!latestCode || client.code >= latestCode) return;
-      const apkUrl = resolveDownloadUrl(st.downloadUrl || '');
+      const apkUrl = resolveDownloadUrl(st.downloadUrl || '/APP/xiaolintv-phone-latest.apk');
       if (!apkUrl) return;
       const force = !!st.appForceUpdate;
-      if (!force) {
+      if (force) {
+        // 强制更新：立即暂停正在播放的视频，阻断一切观看
+        const v = $('video');
+        if (v) { try { v.pause(); } catch (e) {} }
+      } else {
         const skip = store.get('appUpdateState', {}) || {};
-        // 同一 versionCode 点「稍后」后 12 小时内不重复
+        // 非强制模式：同一 versionCode 点「稍后」后 12 小时内不重复
         if (skip.skipCode === latestCode && skip.skipAt && Date.now() - skip.skipAt < 12 * 3600 * 1000) return;
       }
       setTimeout(() => openAppUpdateModal({
@@ -4178,7 +4269,7 @@
         force,
         changelog: st.appChangelog || '',
         apkUrl,
-      }), 1200);
+      }), force ? 100 : 1200);
     } catch (e) { /* ignore */ }
   }
 
@@ -4250,6 +4341,8 @@
     }
 
     function playCh(url, name) {
+      if (checkMobileWebLimit($('#videoEl'))) return;
+      if (inApp()) maybeAppUpdate();
       $('#nowName').textContent = '📺 正在播放：' + name;
       Player.play($('#videoEl'), url, $('#videoTip'), { optimize: !!(State.settings && State.settings.playerOptimize) });
       $$('#liveChs .live-ch').forEach((el) => el.classList.toggle('on', el.dataset.u === url));
@@ -4868,7 +4961,20 @@
 
       /* ---------------- ⚙️ 站点设置 ---------------- */
       else if (admTab === 'site') {
+        const storageNotice = s.storage === 'memory' ? `
+          <div class="adm-storage-alert" style="margin-bottom:16px;padding:14px 18px;border-radius:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);line-height:1.6">
+            <div style="font-weight:700;color:var(--danger);font-size:14px;margin-bottom:4px">⚠️ 当前运行在【临时内存模式】（未绑定 Cloudflare CONFIG_KV）</div>
+            <div style="font-size:13px;color:var(--text)">在此模式下，后台修改的配置仅保存在当前单个边缘节点内存中，无痕窗口、换设备或节点重启后将还原为默认设置！</div>
+            <div style="margin-top:6px;font-size:12px;color:var(--dim)">
+              👉 <b>永久保存教程</b>：登录 Cloudflare 仪表板 → Workers 与 Pages → dianying → 设置(Settings) → 变量和 KV(Variables and KV) → 在 <b>KV 命名空间绑定</b> 中添加变量名 <code>CONFIG_KV</code> 并绑定一个命名空间，重新部署即可彻底永久保存所有配置！
+            </div>
+          </div>` : `
+          <div class="adm-storage-ok" style="margin-bottom:16px;padding:10px 16px;border-radius:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);font-size:13px;color:var(--ok)">
+            ✅ <b>存储状态正常</b>：已检测到 Cloudflare CONFIG_KV 持久化绑定，所有修改已永久存储并在全球边缘节点同步。
+          </div>`;
+
         main.innerHTML = `
+          ${storageNotice}
           <div class="admin-card adult-toggle-card ${s.adultEnabled ? 'on' : ''}" id="adultCard">
             <div class="admin-row">
               <div class="admin-label">🔞 成人内容 / 私密福利专区
@@ -4890,13 +4996,15 @@
           </div>
           <div class="admin-card">
             <h3>🎨 站点设置</h3>
-            <label class="field-label">站点名称</label>
+            <label class="field-label">站点主标题</label>
             <input class="field-input" id="siteNameInput" value="${esc(s.siteName)}" maxlength="40">
-            <label class="field-label">默认配色主题（新访客首次进入时生效）</label>
+            <label class="field-label" style="margin-top:10px">网站副标题 / Slogan（展示在网站标题与首页）</label>
+            <input class="field-input" id="siteSloganInput" value="${esc(s.siteSlogan || '')}" placeholder="海量高清 · 聚合秒播 · 极简私人影院" maxlength="100">
+            <label class="field-label" style="margin-top:10px">默认配色主题（新访客首次进入时生效）</label>
             <select class="field-input" id="themeSelect">
               ${THEME_META.map((t) => `<option value="${t.id}" ${s.defaultTheme === t.id ? 'selected' : ''}>${t.name}</option>`).join('')}
             </select>
-            <label class="field-label">全站公告（留空则不显示）</label>
+            <label class="field-label" style="margin-top:10px">全站公告（留空则不显示）</label>
             <textarea class="field-area" id="annInput" maxlength="300">${esc(s.announcement)}</textarea>
             <label class="field-label" style="margin-top:14px">🏠 首页默认加载的影视源（每行一个 key，按顺序，最多12个；留空 = 默认精选）<br>
               <small style="font-weight:400;color:var(--dim)">建议填测速最快的源。可用 key 如：${esc((State.config ? State.config.sources : []).slice(0, 8).map((x) => x.key).join('、'))} …</small></label>
@@ -4965,21 +5073,30 @@
             const homeLines = $('#homeSrcInput').value.split('\n').map((x) => x.trim()).filter(Boolean);
             const res = await API.adminSaveSettings({
               siteName: $('#siteNameInput').value,
+              siteSlogan: $('#siteSloganInput').value,
               defaultTheme: $('#themeSelect').value,
               announcement: $('#annInput').value,
               homeSources: homeLines,
             });
-            State.settings = { ...State.settings, siteName: res.settings.siteName, announcement: res.settings.announcement, homeSources: res.settings.homeSources || [] };
+            State.settings = {
+              ...State.settings,
+              siteName: res.settings.siteName,
+              siteSlogan: res.settings.siteSlogan,
+              announcement: res.settings.announcement,
+              homeSources: res.settings.homeSources || [],
+            };
+            store.set('cached_settings', State.settings);
             if (lastSettings) {
               lastSettings.siteName = res.settings.siteName;
+              lastSettings.siteSlogan = res.settings.siteSlogan;
               lastSettings.announcement = res.settings.announcement;
               lastSettings.homeSources = res.settings.homeSources || [];
               lastSettings.defaultTheme = res.settings.defaultTheme;
             }
             $('#brandName').textContent = res.settings.siteName;
-            document.title = res.settings.siteName;
+            document.title = res.settings.siteSlogan ? `${res.settings.siteName} - ${res.settings.siteSlogan}` : res.settings.siteName;
             applyAnnouncement(res.settings.announcement);
-            toast(`站点设置已保存（首页源 ${homeLines.length} 个）`, 'ok');
+            toast(`站点设置已保存（副标题与首页源 ${homeLines.length} 个）`, 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
         $('#playOptSw').addEventListener('change', async (e) => {
@@ -5051,14 +5168,36 @@
         const tvMode = (s.downloadUrlTvMode === 'fixed' || s.downloadUrlTvMode === 'custom') ? s.downloadUrlTvMode : 'off';
         const fixedPhone = '/APP/xiaolintv-phone-latest.apk';
         const fixedTv = '/APP/xiaolintv-tv-latest.apk';
+
+        // 线上生效状态计算
+        const isLive = s.appVersionActive !== false && ((s.appPublishedCode && s.appPublishedCode > 0) || (s.appVersionCode && s.appVersionCode > 0));
+        const liveCode = s.appPublishedCode || s.appVersionCode || 0;
+        const liveName = s.appPublishedName || s.appVersionName || (liveCode ? '1.0.' + liveCode : '');
+        const liveChangelog = s.appPublishedChangelog || s.appChangelog || '';
+        const liveForce = Boolean(s.appPublishedForce !== undefined ? s.appPublishedForce : s.appForceUpdate);
+        const liveAt = s.appPublishedAt || s.appManifestAt || '';
+
+        // 待发布草稿区计算（自由修改）
+        const draftCode = s.appDraftCode || liveCode || 0;
+        const draftName = s.appDraftName || liveName || (draftCode ? '1.0.' + draftCode : '');
+        const draftChangelog = s.appDraftChangelog || liveChangelog || '';
+        const draftForce = Boolean(s.appDraftForce !== undefined ? s.appDraftForce : liveForce);
+
         main.innerHTML = `
           <div class="admin-card">
-            <h3>📲 APP下载弹窗</h3>
-            <p class="hint">手机端<b>已注册且注册满 2 小时</b>的用户会弹出下载引导（游客不弹）。默认用站内<strong>固定最新包</strong>：CI 每次覆盖同名文件，链接不用改。需要蓝奏云等外链时再开「自定义」。</p>
+            <h3>📲 APP下载与移动端访问控制</h3>
+            <p class="hint">控制手机浏览器访问与安装策略。默认用站内<strong>固定最新包</strong>：CI 每次覆盖同名文件，链接永不变。需要外部网盘或分发时可切换「自定义」。</p>
+            
             <label style="display:flex;align-items:center;gap:10px;margin:10px 0;cursor:pointer">
               <span class="switch"><input type="checkbox" id="promoSw" ${s.appPromoEnabled !== false ? 'checked' : ''}><span class="track"></span></span>
-              <b>启用下载引导弹窗</b>
+              <b>启用手机网页端「下载APP」推广弹窗</b>
             </label>
+
+            <label class="field-label" style="margin-top:14px">📱 手机网页端试看限制（分钟）</label>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <input class="field-input" id="mobileLimitInput" type="number" min="-1" max="2880" step="1" style="width:110px;text-align:center" value="${Number(s.mobileWebLimitMinutes === undefined ? 10 : s.mobileWebLimitMinutes)}">
+              <span style="font-size:13px;color:var(--dim)">分钟（填 <b>0</b> = 完全禁止手机浏览器播放，进入即弹窗强制下载客户端；填 <b>-1</b> = 不限制）</span>
+            </div>
 
             <h4 style="margin:18px 0 8px;font-size:14px">📱 手机版 APK</h4>
             <div class="dl-mode-row" id="phoneModeRow">
@@ -5092,68 +5231,116 @@
               <input class="field-input" id="dlUrlTvInput" value="${esc(s.downloadUrlTv || '')}" placeholder="https://… 或 /APP/xxx.apk">
             </div>
 
-            <button class="btn primary" id="savePromoBtn" style="margin-top:16px">保存弹窗设置</button>
+            <button class="btn primary" id="savePromoBtn" style="margin-top:16px">保存下载与访问控制</button>
           </div>
+
+          <!-- 🔄 App 版本更新两阶段确认发布卡片 -->
           <div class="admin-card" style="margin-top:16px">
-            <h3>🔄 App 版本更新</h3>
-            <p class="hint">默认<strong>自动识别</strong>：读取 <code>/APP/manifest.json</code>（优先 KV / 最新版本）。CI 会写入 <code>publish/app</code> 并同步回 <code>main</code>。<br>
-            · <b>自托管 Node</b>：点下方同步 = <code>git</code> 拉取 <code>publish/app</code><br>
-            · <b>Cloudflare</b>：需配置 Worker 变量 <code>GITHUB_REPO</code> + 密钥 <code>GITHUB_TOKEN</code> 后点同步；或配置 Actions Secret <code>CF_DEPLOY_HOOK</code> 让 CI 触发重新部署。更新说明由提交记录自动生成。</p>
-            <div class="dl-mode-row" id="verModeRow" style="margin:12px 0">
-              <button type="button" class="chip dl-mode-btn ${(s.appVersionAuto !== false) ? 'on' : ''}" data-mode="auto">自动识别</button>
-              <button type="button" class="chip dl-mode-btn ${(s.appVersionAuto === false) ? 'on' : ''}" data-mode="manual">手动填写</button>
+            <h3>🔄 App 版本更新管理（两阶段安全确认发布）</h3>
+            <p class="hint">
+              🛡️ <b>防误报机制</b>：无论是从 GitHub 自动获取还是手动输入，获取后均保留在下方<strong>待发布草稿区</strong>，您可以自由增删、扩充润色更新说明；<br>
+              <strong>绝不自动向客户端弹窗</strong>！只有当您确认无误并点击<strong>【🚀 确认正式发布更新给客户端】</strong>后，客户端才会弹出更新弹窗。
+            </p>
+
+            <!-- 区块 1：当前线上客户端生效状态 -->
+            <div style="margin:14px 0;padding:14px 16px;border-radius:12px;background:var(--card-bg,rgba(255,255,255,.03));border:1px solid var(--card-br,rgba(255,255,255,.1))">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span class="chip ${isLive ? 'on' : ''}" style="${isLive ? 'background:rgba(34,197,94,.18);color:#4ade80;border-color:rgba(34,197,94,.4)' : 'background:rgba(239,68,68,.15);color:#f87171;border-color:rgba(239,68,68,.3)'}">
+                    ${isLive ? '🟢 正在向客户端推送' : '⏸️ 已暂停向客户端推送'}
+                  </span>
+                  <b style="font-size:15px">线上生效版本：v${esc(liveName || '未发布')}</b>
+                  <span style="font-size:12px;color:var(--dim)">(versionCode: ${liveCode})</span>
+                </div>
+                <div style="display:flex;gap:8px">
+                  ${isLive ? `
+                    <button type="button" class="btn danger small" id="pauseAppPushBtn">⏸️ 暂停推送（停止弹窗）</button>
+                  ` : (liveCode ? `
+                    <button type="button" class="btn success small" id="resumeAppPushBtn" style="background:linear-gradient(135deg,#16a34a,#15803d)">▶️ 恢复推送</button>
+                  ` : '')}
+                </div>
+              </div>
+              <div style="margin-top:10px;display:flex;gap:16px;font-size:12px;color:var(--dim);flex-wrap:wrap">
+                <span>更新模式：<b>${liveForce ? '🔴 强制更新（客户端不可跳过）' : '⚪ 普通更新提示（可稍后）'}</b></span>
+                <span>发布时间：<b>${liveAt ? esc(String(liveAt).replace('T', ' ').slice(0, 19)) : '未记录'}</b></span>
+              </div>
+              <div style="margin-top:8px">
+                <label class="field-label" style="font-size:12px;margin-bottom:4px">当前线上更新说明预览：</label>
+                <pre style="margin:0;padding:8px 12px;border-radius:8px;background:rgba(0,0,0,.25);font-size:12px;white-space:pre-wrap;line-height:1.5;max-height:80px;overflow-y:auto;color:var(--dim)">${esc(liveChangelog || '（暂无更新说明）')}</pre>
+              </div>
             </div>
-            <div id="verAutoBox" class="${(s.appVersionAuto !== false) ? '' : 'hidden'}">
-              <div class="hint" style="margin-bottom:8px">当前生效（来自 manifest${s.appManifestAt ? ' · ' + esc(String(s.appManifestAt).replace('T', ' ').slice(0, 19)) : ''}${s.appVersionSource === 'manifest' ? '' : ' · 尚未检测到文件时暂用手动值'}）</div>
-              <label class="field-label">最新 versionCode</label>
-              <div class="field-input" style="opacity:.85">${esc(String(s.appVersionCode == null ? 0 : s.appVersionCode))}</div>
-              <label class="field-label" style="margin-top:12px">版本名称</label>
-              <div class="field-input" style="opacity:.85">${esc(s.appVersionName || '（暂无）')}</div>
-              <label class="field-label" style="margin-top:12px">更新说明</label>
-              <pre class="field-input" style="opacity:.85;white-space:pre-wrap;min-height:72px;margin:0">${esc(s.appChangelog || '（暂无，等下次 CI 发布）')}</pre>
-              <button class="btn ghost" id="syncAppBtn" style="margin-top:12px" type="button">⟳ 立即同步最新 APK 版本</button>
+
+            <!-- 区块 2：待发布版本草稿区（可自动提取 + 全字段自由编辑） -->
+            <div style="border-top:1px dashed var(--card-br);padding-top:16px;margin-top:16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+                <h4 style="margin:0;font-size:14px;color:var(--acc)">📝 待发布新版本（草稿与自定义编写区）</h4>
+                <button type="button" class="btn ghost small" id="autoFetchReleaseBtn" style="border-color:var(--acc);color:var(--acc)">
+                  🤖 自动从 GitHub / 站内提取最新版本
+                </button>
+              </div>
+              <p class="hint" style="margin-bottom:12px">
+                提示：提取后所有字段<b>完全可自由编辑</b>。如果自动获取的说明不充分，请直接在下方文本框中手动增补详细内容。
+              </p>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:12px">
+                <div>
+                  <label class="field-label">最新 versionCode（正整数，与打包编号对应）</label>
+                  <input class="field-input" id="appDraftCodeInput" type="number" min="0" step="1" value="${esc(String(draftCode || 0))}" placeholder="例如 80">
+                </div>
+                <div>
+                  <label class="field-label">版本名称（如 1.0.80）</label>
+                  <input class="field-input" id="appDraftNameInput" value="${esc(draftName || '')}" placeholder="例如 1.0.80">
+                </div>
+              </div>
+
+              <label class="field-label" style="margin-top:12px">🔄 App 版本更新说明（可自定义编写、分行详细描述）</label>
+              <textarea class="field-input" id="appDraftChangelogInput" rows="5" placeholder="请在此编写或扩充更新说明，例如：&#10;1. 优化私密福利专区体验&#10;2. 播放器支持全屏滑动手势快进&#10;3. 修复弱网环境下播放缓冲问题">${esc(draftChangelog || '')}</textarea>
+
+              <label style="display:flex;align-items:center;gap:10px;margin:14px 0;cursor:pointer">
+                <span class="switch"><input type="checkbox" id="appDraftForceSw" ${draftForce ? 'checked' : ''}><span class="track"></span></span>
+                <b>强制更新</b><span style="color:var(--dim);font-size:12px">（勾选后客户端必须更新才能继续观看影片）</span>
+              </label>
+
+              <div style="display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap">
+                <button class="btn primary" id="publishAppVerBtn" style="background:linear-gradient(135deg,#16a34a,#15803d);font-weight:700" type="button">
+                  🚀 确认正式发布更新给客户端（触发弹窗）
+                </button>
+                <button class="btn ghost" id="saveDraftAppVerBtn" type="button">
+                  💾 仅保存为草稿（不向客户端发布）
+                </button>
+              </div>
             </div>
-            <div id="verManualBox" class="${(s.appVersionAuto === false) ? '' : 'hidden'}">
-              <label class="field-label">最新 versionCode（整数，与 Android 打包 verCode 一致；0=关闭检查）</label>
-              <input class="field-input" id="appVerCodeInput" type="number" min="0" step="1" value="${esc(String(s.appVersionCodeManual != null ? s.appVersionCodeManual : (s.appVersionCode == null ? 0 : s.appVersionCode)))}" placeholder="例如 64">
-              <label class="field-label" style="margin-top:12px">版本名称（展示用，如 1.0.64）</label>
-              <input class="field-input" id="appVerNameInput" value="${esc(s.appVersionNameManual != null ? s.appVersionNameManual : (s.appVersionName || ''))}" placeholder="1.0.64">
-              <label class="field-label" style="margin-top:12px">更新说明</label>
-              <textarea class="field-input" id="appChangelogInput" rows="4" placeholder="1. 修复若干问题&#10;2. 性能优化">${esc(s.appChangelogManual != null ? s.appChangelogManual : (s.appChangelog || ''))}</textarea>
-            </div>
-            <label style="display:flex;align-items:center;gap:10px;margin:14px 0;cursor:pointer">
-              <span class="switch"><input type="checkbox" id="appForceSw" ${s.appForceUpdate ? 'checked' : ''}><span class="track"></span></span>
-              <b>强制更新</b><span style="color:var(--dim);font-size:12px">（不可关闭弹窗，须先更新）</span>
-            </label>
-            <button class="btn primary" id="saveAppVerBtn">保存版本更新设置</button>
           </div>
+
+          <!-- 区块 3：一键构建 GitHub APK 与 Docker 镜像 -->
           <div class="admin-card" style="margin-top:16px">
-            <h3>📦 自动构建 APK 控制（安全确认机制）</h3>
+            <h3>📦 一键构建 GitHub APK 与 Docker 镜像（双重任务发布）</h3>
             <div style="margin:10px 0;padding:12px 16px;border-radius:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);font-size:13px;line-height:1.6">
-              <b style="color:var(--ok)">🛡️ 安全确认构建已生效：</b>
-              系统已优化构建流程，代码推送到 main 不再盲目自动打包，防止网页版出现故障时发布错误包。<br>
-              请先在网页端浏览影片、播放及搜索，确认版本完全正常后，再点击下方确认按钮触发构建！
+              <b style="color:var(--ok)">🛡️ 安全确认构建机制：</b>
+              系统已优化构建流程，代码推送到 main 不再盲目自动打包。请先在网页端测试浏览正常后，再点击下方确认按钮触发构建！<br>
+              <b>构建将同时执行两大任务：</b><br>
+              ① <b>Android APK 编译</b>：自动打包手机端与电视版 APK，发布至 GitHub Releases 并写入 <code>/APP</code> 目录；<br>
+              ② <b>Docker 镜像构建</b>：自动编译多架构镜像并推送至 GitHub Packages (<code>ghcr.io</code>)。
             </div>
             <div style="margin-top:12px">
-              <label class="field-label">本次构建更新说明（选填，将作为更新日志写入 APK）</label>
+              <label class="field-label">本次构建更新说明（选填，将作为 Release 说明写入）</label>
               <input class="field-input" id="apkBuildChangelogInput" placeholder="例如：优化私密福利双栏体验、会员中心UI全面升级" />
               <div style="display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap">
-                <button class="btn primary" id="dispatchBuildApkBtn" style="background:linear-gradient(135deg,#2563eb,#1d4ed8)" type="button">
-                  🚀 确认网页正常，立即触发构建 APK
+                <button class="btn primary" id="dispatchBuildApkBtn" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);font-weight:700" type="button">
+                  🚀 确认网页正常，一键构建 APK + Docker 镜像
                 </button>
                 <a class="btn ghost" href="https://github.com/xiaolin1991/dianying/actions/workflows/android.yml" target="_blank" rel="noopener">
-                  📋 前往 GitHub Actions 查看构建状态
+                  📋 前往 GitHub Actions 查看构建进度
+                </a>
+                <a class="btn ghost" href="https://github.com/xiaolin1991/dianying/pkgs/container/dianying" target="_blank" rel="noopener">
+                  🐳 查看 GHCR Docker 镜像
                 </a>
               </div>
-              <p class="hint" style="margin-top:10px">
-                其他触发方式：① 前往 Actions 页面直接点击「Run workflow」；② 本地推送版本标签（如 <code>git tag v1.0.xx && git push origin v1.0.xx</code>）；③ 提交说明附带 <code>[build-apk]</code>。
-              </p>
             </div>
           </div>`;
 
         let curPhoneMode = phoneMode;
         let curTvMode = tvMode;
-        let curVerAuto = s.appVersionAuto !== false;
         const syncPhoneUi = () => {
           $$('#phoneModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curPhoneMode));
           $('#phoneFixedBox').classList.toggle('hidden', curPhoneMode !== 'fixed');
@@ -5165,43 +5352,17 @@
           $('#tvFixedBox').classList.toggle('hidden', curTvMode !== 'fixed');
           $('#tvCustomBox').classList.toggle('hidden', curTvMode !== 'custom');
         };
-        const syncVerUi = () => {
-          $$('#verModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', (b.dataset.mode === 'auto') === curVerAuto));
-          $('#verAutoBox').classList.toggle('hidden', !curVerAuto);
-          $('#verManualBox').classList.toggle('hidden', curVerAuto);
-        };
         $$('#phoneModeRow .dl-mode-btn').forEach((btn) => {
           btn.addEventListener('click', () => { curPhoneMode = btn.dataset.mode; syncPhoneUi(); });
         });
         $$('#tvModeRow .dl-mode-btn').forEach((btn) => {
           btn.addEventListener('click', () => { curTvMode = btn.dataset.mode; syncTvUi(); });
         });
-        $$('#verModeRow .dl-mode-btn').forEach((btn) => {
-          btn.addEventListener('click', () => { curVerAuto = btn.dataset.mode === 'auto'; syncVerUi(); });
-        });
-        const syncAppBtn = $('#syncAppBtn');
-        if (syncAppBtn) {
-          syncAppBtn.addEventListener('click', async () => {
-            syncAppBtn.disabled = true;
-            syncAppBtn.textContent = '⟳ 同步中…';
-            try {
-              const r = await API.adminSyncApp();
-              if (!r.ok) throw new Error(r.error || '同步失败');
-              toast('已同步：' + (r.appVersionName || r.appVersionCode || '完成'), 'ok');
-              const fresh = await API.adminGetSettings();
-              lastSettings = fresh;
-              renderAdmTab(fresh);
-            } catch (err) {
-              toast('同步失败：' + err.message, 'err');
-              syncAppBtn.disabled = false;
-              syncAppBtn.textContent = '⟳ 立即同步最新 APK 版本';
-            }
-          });
-        }
 
         $('#savePromoBtn').addEventListener('click', async () => {
           const url = ($('#dlUrlInput') && $('#dlUrlInput').value.trim()) || '';
           const urlTv = ($('#dlUrlTvInput') && $('#dlUrlTvInput').value.trim()) || '';
+          const mobileLimit = Number(($('#mobileLimitInput') && $('#mobileLimitInput').value) || 10);
           if (curPhoneMode === 'custom' && !isValidDownloadUrlInput(url)) {
             return toast('手机自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
           }
@@ -5211,6 +5372,7 @@
           try {
             const patch = {
               appPromoEnabled: $('#promoSw').checked,
+              mobileWebLimitMinutes: mobileLimit,
               downloadUrlMode: curPhoneMode,
               downloadUrl: url,
               downloadUrlTvMode: curTvMode,
@@ -5225,50 +5387,122 @@
               downloadUrl: effPhone,
               downloadUrlTv: effTv,
             };
-            toast('弹窗与下载链接已保存', 'ok');
-          } catch (err) { toast('保存失败：' + err.message, 'err'); }
-        });
-        $('#saveAppVerBtn').addEventListener('click', async () => {
-          try {
-            const patch = {
-              appVersionAuto: curVerAuto,
-              appForceUpdate: $('#appForceSw').checked,
-            };
-            if (!curVerAuto) {
-              const code = Math.round(Number(($('#appVerCodeInput') && $('#appVerCodeInput').value) || 0));
-              const name = (($('#appVerNameInput') && $('#appVerNameInput').value) || '').trim();
-              const log = (($('#appChangelogInput') && $('#appChangelogInput').value) || '').trim();
-              if (!isFinite(code) || code < 0) return toast('versionCode 需为 ≥0 的整数', 'err');
-              patch.appVersionCode = code;
-              patch.appVersionName = name;
-              patch.appChangelog = log;
-            }
-            await API.adminSaveSettings(patch);
-            const fresh = await API.adminGetSettings();
-            lastSettings = fresh;
-            State.settings = {
-              ...State.settings,
-              appVersionAuto: fresh.appVersionAuto,
-              appVersionCode: fresh.appVersionCode,
-              appVersionName: fresh.appVersionName,
-              appChangelog: fresh.appChangelog,
-              appForceUpdate: fresh.appForceUpdate,
-            };
-            toast(curVerAuto ? '已启用自动识别（以 /APP/manifest.json 为准）' : '已保存手动版本设置', 'ok');
-            renderAdmTab(fresh);
+            store.set('cached_settings', State.settings);
+            toast('下载与访问控制已保存', 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
 
+        // 自动从 GitHub Releases / Manifest 提取最新版本信息填充草稿
+        const autoFetchBtn = $('#autoFetchReleaseBtn');
+        if (autoFetchBtn) {
+          autoFetchBtn.addEventListener('click', async () => {
+            autoFetchBtn.disabled = true;
+            autoFetchBtn.textContent = '⏳ 正在提取…';
+            try {
+              const rel = await API.adminFetchAppRelease();
+              if (!rel || !rel.ok) throw new Error((rel && rel.error) || '提取失败');
+              if ($('#appDraftCodeInput') && rel.versionCode) $('#appDraftCodeInput').value = rel.versionCode;
+              if ($('#appDraftNameInput') && rel.versionName) $('#appDraftNameInput').value = rel.versionName;
+              if ($('#appDraftChangelogInput') && rel.changelog) $('#appDraftChangelogInput').value = rel.changelog;
+              toast(`已提取最新版本 v${rel.versionName} (Code: ${rel.versionCode})，您可在此自由修改编写说明！`, 'ok');
+            } catch (err) {
+              toast('提取失败：' + err.message, 'err');
+            } finally {
+              autoFetchBtn.disabled = false;
+              autoFetchBtn.textContent = '🤖 自动从 GitHub / 站内提取最新版本';
+            }
+          });
+        }
+
+        // 保存草稿（不向客户端下发更新）
+        $('#saveDraftAppVerBtn') && $('#saveDraftAppVerBtn').addEventListener('click', async () => {
+          const code = Math.max(0, Math.round(Number(($('#appDraftCodeInput') && $('#appDraftCodeInput').value) || 0)));
+          const name = (($('#appDraftNameInput') && $('#appDraftNameInput').value) || '').trim();
+          const log = (($('#appDraftChangelogInput') && $('#appDraftChangelogInput').value) || '').trim();
+          const force = Boolean($('#appDraftForceSw') && $('#appDraftForceSw').checked);
+          try {
+            await API.adminSaveSettings({
+              appDraftCode: code,
+              appDraftName: name,
+              appDraftChangelog: log,
+              appDraftForce: force,
+            });
+            toast('草稿已保存（未向客户端发布更新）', 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
+        });
+
+        // 确认正式发布更新给客户端
+        $('#publishAppVerBtn') && $('#publishAppVerBtn').addEventListener('click', async () => {
+          const code = Math.max(0, Math.round(Number(($('#appDraftCodeInput') && $('#appDraftCodeInput').value) || 0)));
+          const name = (($('#appDraftNameInput') && $('#appDraftNameInput').value) || '').trim();
+          const log = (($('#appDraftChangelogInput') && $('#appDraftChangelogInput').value) || '').trim();
+          const force = Boolean($('#appDraftForceSw') && $('#appDraftForceSw').checked);
+
+          if (!code) return toast('请先输入或提取有效的 versionCode（需大于0的整数）', 'err');
+          const confirmMsg = `确认将版本 v${name || code} (Code: ${code}) 正式发布？\n\n` +
+            `• 更新模式：${force ? '🔴 强制更新（不可跳过）' : '⚪ 普通提示更新'}\n` +
+            `• 发布后，客户端打开或播放时将立即收到更新弹窗！`;
+          if (!confirm(confirmMsg)) return;
+
+          try {
+            const patch = {
+              appVersionActive: true,
+              appPublishedCode: code,
+              appPublishedName: name || ('1.0.' + code),
+              appPublishedChangelog: log,
+              appPublishedForce: force,
+              appPublishedAt: new Date().toISOString(),
+              appDraftCode: code,
+              appDraftName: name,
+              appDraftChangelog: log,
+              appDraftForce: force,
+            };
+            const res = await API.adminSaveSettings(patch);
+            const fresh = await API.adminGetSettings();
+            lastSettings = fresh;
+            State.settings = { ...State.settings, ...fresh };
+            store.set('cached_settings', State.settings);
+            toast(`🚀 版本 v${name || code} 已正式发布！客户端将收到更新弹窗`, 'ok');
+            renderAdmTab(fresh);
+          } catch (err) { toast('发布失败：' + err.message, 'err'); }
+        });
+
+        // 暂停向客户端推送更新
+        $('#pauseAppPushBtn') && $('#pauseAppPushBtn').addEventListener('click', async () => {
+          if (!confirm('确认暂停向客户端推送更新弹窗？暂停后客户端将不再收到弹窗提示。')) return;
+          try {
+            await API.adminSaveSettings({ appVersionActive: false });
+            const fresh = await API.adminGetSettings();
+            lastSettings = fresh;
+            State.settings = { ...State.settings, appVersionActive: false, appVersionCode: 0 };
+            toast('已暂停客户端版本更新推送', 'ok');
+            renderAdmTab(fresh);
+          } catch (err) { toast('操作失败：' + err.message, 'err'); }
+        });
+
+        // 恢复向客户端推送更新
+        $('#resumeAppPushBtn') && $('#resumeAppPushBtn').addEventListener('click', async () => {
+          try {
+            await API.adminSaveSettings({ appVersionActive: true });
+            const fresh = await API.adminGetSettings();
+            lastSettings = fresh;
+            State.settings = { ...State.settings, appVersionActive: true, appVersionCode: fresh.appPublishedCode || fresh.appVersionCode };
+            toast('已恢复向客户端推送更新弹窗', 'ok');
+            renderAdmTab(fresh);
+          } catch (err) { toast('操作失败：' + err.message, 'err'); }
+        });
+
+        // 一键构建 APK + Docker 镜像
         $('#dispatchBuildApkBtn') && $('#dispatchBuildApkBtn').addEventListener('click', async () => {
           const btn = $('#dispatchBuildApkBtn');
           const changelog = ($('#apkBuildChangelogInput') && $('#apkBuildChangelogInput').value.trim()) || '';
-          if (!confirm('已确认当前网页版功能与浏览一切正常，确认立即触发 GitHub Actions 打包构建 APK？')) return;
+          if (!confirm('已确认当前网页版功能与浏览一切正常，确认立即触发 GitHub Actions 打包构建 APK 与 Docker 镜像？')) return;
           btn.disabled = true;
           btn.textContent = '⏳ 正在向 GitHub 发送调度指令...';
           try {
             const res = await API.adminDispatchBuildApk(changelog);
             if (res.ok) {
-              toast(res.msg || '🎉 APK 构建任务已触发！', 'ok');
+              toast(res.msg || '🎉 APK 与 Docker 镜像构建任务已触发！', 'ok');
             } else if (res.needToken) {
               alert('【提示】' + res.error + '\n\n您可以直接前往 GitHub Actions 页面点击「Run workflow」手动触发：\nhttps://github.com/' + res.repo + '/actions/workflows/android.yml');
             } else {
@@ -5278,7 +5512,7 @@
             toast('请求失败：' + e.message, 'err');
           } finally {
             btn.disabled = false;
-            btn.textContent = '🚀 确认网页正常，立即触发构建 APK';
+            btn.textContent = '🚀 确认网页正常，一键构建 APK + Docker 镜像';
           }
         });
       }
@@ -5642,6 +5876,7 @@
       const [settings, config] = await Promise.all([API.getSettings(), API.getConfig()]);
       State.settings = settings;
       State.config = config;
+      if (settings && settings.siteName) store.set('cached_settings', settings);
     } catch (err) {
       $('#view').innerHTML = `<div class="container empty" style="padding-top:120px">
         <div class="big">🛠️</div><p style="font-weight:700">后端服务连接失败：${esc(err.message)}</p>
@@ -5666,8 +5901,10 @@
 
     // 应用服务端默认主题（用户本地无偏好时）
     if (!store.get('theme', null) && State.settings.defaultTheme) applyTheme(State.settings.defaultTheme);
-    $('#brandName').textContent = State.settings.siteName || '晓林影视';
-    document.title = State.settings.siteName || '晓林影视';
+    const sTitle = State.settings.siteName || '晓林影视';
+    const sSlogan = State.settings.siteSlogan || '';
+    $('#brandName').textContent = sTitle;
+    document.title = sSlogan ? `${sTitle} - ${sSlogan}` : sTitle;
     applyAnnouncement(State.settings.announcement);
     route();
     maybeAppPromo();  // 首屏就绪后判断是否弹下载引导
