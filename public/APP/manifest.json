@@ -1,14 +1,14 @@
 {
-  "versionCode": 76,
-  "versionName": "1.0.76",
-  "changelog": "晓林影视 1.0.76\n- Actions构建APK和Docker发布修复",
-  "publishedAt": "2026-08-29T14:49:36.214Z",
+  "versionCode": 77,
+  "versionName": "1.0.77",
+  "changelog": "晓林影视 1.0.77\n- 18+ 影片仅能从会员中心",
+  "publishedAt": "2026-09-08T01:43:47.418Z",
   "phone": {
     "path": "/APP/xiaolintv-phone-latest.apk",
-    "versioned": "/APP/xiaolintv-phone-v1.0.76.apk"
+    "versioned": "/APP/xiaolintv-phone-v1.0.77.apk"
   },
   "tv": {
     "path": "/APP/xiaolintv-tv-latest.apk",
-    "versioned": "/APP/xiaolintv-tv-v1.0.76.apk"
+    "versioned": "/APP/xiaolintv-tv-v1.0.77.apk"
   }
 }
