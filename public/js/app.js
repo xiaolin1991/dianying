@@ -232,11 +232,19 @@
   };
   const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020'];
 
-  // 成人内容仅由后台总开关控制(服务器端过滤), 前台不再展示任何开关
+  // 网站常规页面严格仅展示正常源(成人源隔离至会员中心)
   function visibleSources() {
     if (!State.config) return [];
-    return State.config.sources;
+    return State.config.sources || [];
   }
+  // 全局源查找(兼容常规源 + 会员中心私密福利源)
+  function findSourceByKey(key) {
+    if (!State.config) return null;
+    const s = (State.config.sources || []).find((x) => x.key === key);
+    if (s) return s;
+    return (State.config.adultSources || []).find((x) => x.key === key) || null;
+  }
+  const cleanSrcName = (s) => s ? (String(s.name || s.key).replace(/🔞/g, '').trim() || s.key) : '';
 
   /* ---- 登录态 ---- */
   function loginRequired() {
@@ -725,7 +733,7 @@
         clearInterval(wait);
         try {
           const it = heroItems[heroIdx];
-          const src = State.config.sources.find((s) => s.key === it.sourceKey);
+          const src = findSourceByKey(it.sourceKey);
           const r = await API.detail(src, it.id);
           const vod = r.list && r.list[0];
           if (vod && document.getElementById('heroContent') && alive()) {
@@ -1058,12 +1066,151 @@
   }
 
   /* ============================================================
+     私密福利：卡密解锁弹窗 & 高清图片预览弹窗
+     ============================================================ */
+  function openUnlockModal(onSuccess) {
+    const prev = $('.unlock-modal-mask');
+    if (prev) prev.remove();
+    const box = document.createElement('div');
+    box.className = 'modal-mask unlock-modal-mask';
+    const payDesc = (State.settings && State.settings.adultPayDesc) ||
+      '私密福利影片为会员专属特权内容。如需开通，可联系管理员获取激活卡密，或输入卡密立即解锁。';
+    const payQr = (State.settings && State.settings.adultPayQr) || '';
+
+    box.innerHTML = `
+      <div class="modal-box unlock-modal-box" style="max-width:440px">
+        <h3 style="margin:0 0 10px;display:flex;align-items:center;gap:8px">👑 解锁私密福利VIP特权</h3>
+        <p style="color:var(--dim);font-size:13px;line-height:1.6;margin:0 0 14px">${esc(payDesc)}</p>
+        ${payQr ? `
+          <div class="unlock-qr-wrap" style="text-align:center;margin-bottom:14px;background:var(--bg2);padding:12px;border-radius:8px">
+            <img src="${esc(payQr)}" alt="赞助二维码" style="max-width:180px;max-height:180px;border-radius:8px;border:1px solid var(--card-br)">
+            <div style="color:var(--dim);font-size:12px;margin-top:6px">扫码赞助 / 联系客服获取卡密</div>
+          </div>` : ''}
+        <div style="margin-bottom:16px">
+          <label style="display:block;font-size:13px;color:var(--dim);margin-bottom:6px">激活码 / 卡密</label>
+          <input type="text" class="input unlock-code-input" placeholder="请输入激活卡密 (如: VIP888)" style="width:100%;box-sizing:border-box;text-transform:uppercase" />
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+          <button class="btn ghost btn-cancel" type="button">取消</button>
+          <button class="btn primary btn-submit" type="button">立即激活解锁</button>
+        </div>
+      </div>`;
+
+    const close = () => box.remove();
+    box.addEventListener('click', (e) => { if (e.target === box) close(); });
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'modal-close'; closeBtn.textContent = '×';
+    const mbox = box.querySelector('.unlock-modal-box');
+    if (mbox) mbox.appendChild(closeBtn);
+    closeBtn.addEventListener('click', close);
+    box.querySelector('.btn-cancel').addEventListener('click', close);
+
+    const input = box.querySelector('.unlock-code-input');
+    const submitBtn = box.querySelector('.btn-submit');
+    const doSubmit = async () => {
+      const code = String(input.value || '').trim();
+      if (!code) return toast('请输入激活卡密', 'err');
+      submitBtn.disabled = true;
+      submitBtn.textContent = '正在激活…';
+      try {
+        const res = await API.userUnlockAdult(code);
+        toast(res.message || '🎉 私密福利已成功解锁！', 'ok');
+        if (State.config) State.config.adultUnlocked = true;
+        close();
+        if (typeof onSuccess === 'function') onSuccess();
+        else route();
+      } catch (err) {
+        toast(err.message || '激活失败，卡密无效', 'err');
+        submitBtn.disabled = false;
+        submitBtn.textContent = '立即激活解锁';
+      }
+    };
+    submitBtn.addEventListener('click', doSubmit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSubmit(); });
+    document.body.appendChild(box);
+    setTimeout(() => input.focus(), 80);
+  }
+
+  function openPicPreviewModal(vod, src) {
+    const prev = $('.pic-preview-mask');
+    if (prev) prev.remove();
+    const box = document.createElement('div');
+    box.className = 'modal-mask pic-preview-mask';
+    const pic = vod.vod_pic || '';
+    const name = vod.vod_name || '未知影片';
+    const type = vod.type_name || '';
+    const year = vod.vod_year || '';
+    const desc = stripTags(vod.vod_content || '暂无简介');
+
+    box.innerHTML = `
+      <div class="modal-box pic-preview-modal-box" style="max-width:640px;width:90%">
+        <div class="pic-preview-head" style="margin-bottom:14px">
+          <h3 style="margin:0;display:flex;align-items:center;gap:6px">📷 私密福利 · 图片预览模式</h3>
+        </div>
+        <div class="pic-preview-body" style="display:flex;gap:18px;flex-wrap:wrap">
+          <div class="pic-preview-poster-wrap" style="flex:0 0 200px;text-align:center">
+            <img class="pic-preview-poster" src="${esc(pic)}" referrerpolicy="no-referrer" alt="${esc(name)}" style="width:100%;max-height:280px;object-fit:cover;border-radius:10px;border:1px solid var(--card-br)" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>'">
+            ${pic ? `<div style="margin-top:8px"><a class="btn ghost small" href="${esc(pic)}" target="_blank" rel="noopener" style="width:100%">🔍 查看高清大图</a></div>` : ''}
+          </div>
+          <div class="pic-preview-info" style="flex:1;min-width:220px">
+            <h2 style="font-size:18px;margin:0 0 8px">${esc(name)}</h2>
+            <div class="meta-row" style="margin-bottom:12px;gap:6px;flex-wrap:wrap">
+              ${type ? `<span class="tag">${esc(type)}</span>` : ''}
+              ${year ? `<span class="tag plain">${esc(year)}</span>` : ''}
+              <span class="tag plain">来源：${esc(cleanSrcName(src))}</span>
+            </div>
+            <div class="pic-lock-alert" style="display:flex;gap:10px;padding:10px 12px;background:rgba(225,29,72,.1);border:1px solid rgba(225,29,72,.3);border-radius:8px;margin-bottom:12px">
+              <div style="font-size:20px;line-height:1">🔒</div>
+              <div style="font-size:12.5px;line-height:1.5">
+                <b style="color:var(--danger)">未付费解锁 · 播放受限</b>
+                <div style="color:var(--dim)">本影片为私密福利会员影片，当前仅可预览图片与简介，无法播放视频。</div>
+              </div>
+            </div>
+            <button class="btn primary" id="modalBtnUnlock" type="button" style="width:100%;margin-bottom:14px;background:linear-gradient(135deg,#e11d48,#be123c)">👑 立即解锁播放权限</button>
+            <div class="pic-preview-desc" style="max-height:140px;overflow-y:auto;font-size:12.5px;color:var(--dim);line-height:1.6;border-top:1px solid var(--card-br);padding-top:8px">
+              <b style="color:var(--txt);display:block;margin-bottom:2px">剧情简介</b>
+              ${esc(desc)}
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    const close = () => box.remove();
+    box.addEventListener('click', (e) => { if (e.target === box) close(); });
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'modal-close'; closeBtn.textContent = '×';
+    const mbox = box.querySelector('.pic-preview-modal-box');
+    if (mbox) mbox.appendChild(closeBtn);
+    closeBtn.addEventListener('click', close);
+
+    const unlockBtn = box.querySelector('#modalBtnUnlock');
+    if (unlockBtn) {
+      unlockBtn.addEventListener('click', () => {
+        close();
+        openUnlockModal(() => route());
+      });
+    }
+
+    document.body.appendChild(box);
+  }
+
+  /* ============================================================
      视图：详情
      ============================================================ */
   async function viewDetail(key, id, alive) {
     const v = $('#view');
-    const src = State.config.sources.find((s) => s.key === key);
+    const src = findSourceByKey(key);
     if (!src) { v.innerHTML = '<div class="container empty">数据源不存在或已被后台关闭</div>'; return; }
+
+    // 私密福利访问权限拦截
+    if (src.adult) {
+      if (!State.me) {
+        v.innerHTML = `<div class="container page-wrap"><div class="empty" style="padding:48px 20px"><div class="big">🔒</div><h3>私密福利影片仅限登录会员访问</h3><p style="color:var(--dim);margin:8px 0 16px">游客试看仅限正常影视内容，请先登录或注册账号。</p><a class="btn primary" href="#/login">立即登录</a></div></div>`;
+        return;
+      }
+    }
+    const isAdultLocked = Boolean(src.adult && (!State.config || !State.config.adultUnlocked));
+
     v.innerHTML = `<div class="container page-wrap"><div class="grid"></div><div class="empty"><div class="big">📡</div>正在加载详情…</div></div>`;
 
     let r;
@@ -1094,17 +1241,26 @@
                 ${vod.vod_area ? `<span class="tag plain">${esc(vod.vod_area)}</span>` : ''}
                 ${vod.vod_lang ? `<span class="tag plain">${esc(vod.vod_lang)}</span>` : ''}
                 ${vod.vod_remarks ? `<span class="tag plain">${esc(vod.vod_remarks)}</span>` : ''}
-                <span class="tag plain">来源：${esc(src.name)}</span>
+                <span class="tag plain">来源：${esc(cleanSrcName(src))}</span>
+                ${src.adult ? '<span class="tag" style="background:var(--danger);color:#fff">🔞 私密福利</span>' : ''}
               </div>
               <div class="meta-row" style="font-size:13px;color:var(--dim)">
                 ${vod.vod_director ? `<span>导演：${esc(stripTags(vod.vod_director))}</span>` : ''}
                 ${vod.vod_actor ? `<span>主演：${esc(stripTags(vod.vod_actor).slice(0, 60))}</span>` : ''}
               </div>
               <div class="detail-actions">
-                <button class="btn primary" id="btnPlay">▶ 立即播放</button>
+                <button class="btn primary" id="btnPlay" style="${isAdultLocked ? 'background:linear-gradient(135deg,#e11d48,#be123c)' : ''}">
+                  ${isAdultLocked ? '🔒 需解锁播放（点击解锁）' : '▶ 立即播放'}
+                </button>
+                ${isAdultLocked ? `<a class="btn ghost" href="${esc(vod.vod_pic)}" target="_blank" rel="noopener">🔍 预览海报大图</a>` : ''}
                 <button class="btn ghost" id="btnFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
-                <button class="btn ghost" id="btnSrc">⇄ 换源</button>
+                ${!src.adult ? '<button class="btn ghost" id="btnSrc">⇄ 换源</button>' : ''}
               </div>
+              ${isAdultLocked ? `
+                <div class="preview-lock-banner" style="margin:12px 0 4px;padding:10px 14px;background:rgba(225,29,72,.12);border:1px solid rgba(225,29,72,.3);border-radius:8px;font-size:13px;line-height:1.5">
+                  🔒 <b style="color:var(--danger)">私密福利未解锁</b>：当前账号仅支持浏览封面海报与剧照简介，无法播放正片视频流。
+                  <a href="javascript:void(0)" id="detailUnlockLink" style="color:var(--acc);font-weight:700;margin-left:8px;text-decoration:underline">👑 立即输入卡密解锁</a>
+                </div>` : ''}
               <p class="detail-desc" id="descP">${esc(desc)}</p>
               ${desc.length > 90 ? '<button class="desc-toggle" id="descToggle">展开全部 ▾</button>' : ''}
             </div>
@@ -1128,6 +1284,11 @@
         return `<button class="ep-btn ${w ? 'watched' : ''} ${curEp ? 'current' : ''}" data-ei="${ei}" title="${esc(e.name)}">${esc(e.name)}</button>`;
       }).join('');
       $$('#epList .ep-btn').forEach((b) => b.addEventListener('click', () => {
+        if (isAdultLocked) {
+          toast('私密福利未解锁，仅限图片预览', 'err');
+          openUnlockModal(() => route());
+          return;
+        }
         location.hash = `#/play/${key}/${encodeURIComponent(id)}?ep=${b.dataset.ei}&group=${gi}`;
       }));
       $$('#epTabs .chip').forEach((c) => c.classList.toggle('on', Number(c.dataset.gi) === gi));
@@ -1136,8 +1297,13 @@
     renderEps();
 
     $('#btnPlay').addEventListener('click', () => {
+      if (isAdultLocked) {
+        openUnlockModal(() => route());
+        return;
+      }
       location.hash = `#/play/${key}/${encodeURIComponent(id)}?ep=${hist.ep != null ? hist.ep : 0}&group=${gi}`;
     });
+    $('#detailUnlockLink') && $('#detailUnlockLink').addEventListener('click', () => openUnlockModal(() => route()));
     $('#btnFav').addEventListener('click', () => {
       const list = store.get('favs', []);
       const idx = list.findIndex((f) => f.key === key && f.id === String(vod.vod_id));
@@ -1196,8 +1362,33 @@
      ============================================================ */
   async function viewPlay(key, id, query, alive) {
     const v = $('#view');
-    const src = State.config.sources.find((s) => s.key === key);
+    const src = findSourceByKey(key);
     if (!src) { v.innerHTML = '<div class="container empty">数据源不存在</div>'; return; }
+
+    // 私密福利访问权限拦截
+    if (src.adult) {
+      if (!State.me) {
+        v.innerHTML = `<div class="container page-wrap"><div class="empty" style="padding:48px 20px"><div class="big">🔒</div><h3>私密福利影片仅限登录会员访问</h3><p style="color:var(--dim);margin:8px 0 16px">游客试看仅限正常影视内容，请先登录或注册账号。</p><a class="btn primary" href="#/login">立即登录</a></div></div>`;
+        return;
+      }
+      if (!State.config || !State.config.adultUnlocked) {
+        v.innerHTML = `
+          <div class="container page-wrap">
+            <div class="empty" style="padding:48px 20px">
+              <div class="big">🔒</div>
+              <h2 style="margin:12px 0 8px">私密福利影片 · 未解锁播放</h2>
+              <p style="color:var(--dim);max-width:480px;margin:0 auto 20px">该影片属于私密福利会员特权内容，未付费解锁仅支持图片预览，无法播放视频流。</p>
+              <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+                <button class="btn primary" id="playUnlockBtn" style="background:linear-gradient(135deg,#e11d48,#be123c)">👑 输入卡密立即解锁</button>
+                <a class="btn ghost" href="#/user">返回会员中心</a>
+              </div>
+            </div>
+          </div>`;
+        $('#playUnlockBtn').addEventListener('click', () => openUnlockModal(() => route()));
+        return;
+      }
+    }
+
     v.innerHTML = `<div class="container page-wrap"><div class="video-wrap"><video id="videoEl" controls playsinline></video>
       <div class="video-tip" id="videoTip">正在加载视频…</div></div>
       <div class="empty" style="padding:20px 0">正在获取剧集信息…</div></div>`;
@@ -2203,7 +2394,7 @@
     const gridEl = () => document.getElementById('relGrid');
 
     const kws = buildRelKeywords(vod);
-    const curSrc = State.config.sources.find((s) => s.key === curKey) || null;
+    const curSrc = findSourceByKey(curKey) || null;
     const others = visibleSources().filter((s) => s.key !== curKey);
     for (let i = others.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -2476,6 +2667,7 @@
     const watchItems = data ? data.items.filter((it) => it.kind === 'watch') : [];
     const searchItems = data ? data.items.filter((it) => it.kind === 'search') : [];
     let tab = 'watch';
+    const hasAdult = Boolean(State.config && State.config.adultEnabled);
 
     v.innerHTML = `
       <div class="container page-wrap">
@@ -2488,17 +2680,23 @@
           <span>🎬 观看记录 <b>${watchItems.length}</b> 条</span>
           <span>🔍 搜索记录 <b>${searchItems.length}</b> 条</span>
           <span>★ 收藏 <b>${favs.length}</b> 部</span>
+          ${hasAdult ? `<span>${State.config.adultUnlocked ? '👑 私密福利 <b style="color:var(--ok)">已解锁</b>' : '🔒 私密福利 <b style="color:var(--danger)">未解锁(仅预览)</b>'}</span>` : ''}
         </div>
         <p class="hint" style="color:var(--dim);font-size:12px;margin:-8px 0 14px">删除记录仅对自己隐藏，管理员仍可在后台查看；彻底删除请联系管理员。</p>
         <div class="chips" id="uTabs">
           <button class="chip on" data-t="watch">🎬 观看记录</button>
           <button class="chip" data-t="fav">★ 我的收藏</button>
           <button class="chip" data-t="search">🔍 搜索记录</button>
+          ${hasAdult ? `<button class="chip" data-t="adult">🔞 私密福利影片</button>` : ''}
         </div>
         <div id="uBody"></div>
       </div>`;
 
     const body = $('#uBody');
+    let adultCurSrcKey = '';
+    let adultPg = 1;
+    let adultQuery = '';
+
     function renderBody() {
       $$('#uTabs .chip').forEach((c) => c.classList.toggle('on', c.dataset.t === tab));
       if (tab === 'fav') {
@@ -2533,7 +2731,7 @@
           renderBody();
           toast('已清空观看记录');
         });
-      } else {
+      } else if (tab === 'search') {
         body.innerHTML = searchItems.length
           ? `<div class="u-clear-row"><span></span><button class="btn ghost small" id="clearSearch">🗑 清空我的搜索记录</button></div>
              <div class="search-hist-list">${searchItems.map((it) => `
@@ -2552,7 +2750,161 @@
           renderBody();
           toast('已清空搜索记录');
         });
+      } else if (tab === 'adult') {
+        renderAdultTab();
       }
+    }
+
+    function renderAdultTab() {
+      const adultSources = (State.config && State.config.adultSources) || [];
+      if (!adultSources.length) {
+        body.innerHTML = '<div class="empty"><div class="big">🔞</div>私密福利功能已开启，但暂无可用福利源，请联系管理员在后台开启采集源。</div>';
+        return;
+      }
+      if (!adultCurSrcKey || !adultSources.some((s) => s.key === adultCurSrcKey)) {
+        adultCurSrcKey = store.get('adultCurKey', adultSources[0].key);
+      }
+      let curSrc = adultSources.find((s) => s.key === adultCurSrcKey) || adultSources[0];
+      const isUnlocked = Boolean(State.config && State.config.adultUnlocked);
+
+      body.innerHTML = `
+        <div class="vip-status-card ${isUnlocked ? 'unlocked' : 'locked'}" style="margin-bottom:16px;padding:16px 20px;border-radius:12px;background:var(--bg2);border:1.5px solid ${isUnlocked ? 'rgba(34,197,94,.4)' : 'rgba(225,29,72,.4)'};display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+          <div style="font-size:32px;line-height:1">${isUnlocked ? '👑' : '🔒'}</div>
+          <div style="flex:1;min-width:240px">
+            <h4 style="margin:0 0 4px;font-size:16px;color:${isUnlocked ? 'var(--ok)' : 'var(--danger)'}">
+              ${isUnlocked ? '私密福利VIP特权 · 已激活解锁' : '私密福利专区 · 仅图片预览模式'}
+            </h4>
+            <p style="margin:0;font-size:13px;color:var(--dim);line-height:1.5">
+              ${isUnlocked ? '您已开通私密福利播放权限，专区内所有 18+ 影片均可无限次高清在线播放。' : '当前账号未付费解锁私密福利播放权限。您可以预览影片封面海报、剧照及简介；解锁后即可直接在线播放全部影片。'}
+            </p>
+          </div>
+          ${!isUnlocked ? `
+            <div>
+              <button class="btn primary small" id="uBtnUnlock" style="background:linear-gradient(135deg,#e11d48,#be123c);white-space:nowrap">
+                👑 立即输入卡密解锁播放
+              </button>
+            </div>` : ''}
+        </div>
+
+        <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap;justify-content:space-between">
+          <div class="chips" style="margin:0" id="adultSrcChips">
+            ${adultSources.map((s) => `<button class="chip ${s.key === curSrc.key ? 'on' : ''}" data-k="${esc(s.key)}">${esc(cleanSrcName(s))}</button>`).join('')}
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="search" id="adultSearchInput" class="input" placeholder="在福利源中搜片..." value="${esc(adultQuery)}" style="font-size:13px;padding:6px 12px;max-width:200px" />
+            <button class="btn primary small" id="adultSearchBtn">搜索</button>
+            ${adultQuery ? `<button class="btn ghost small" id="adultSearchClear">清空</button>` : ''}
+          </div>
+        </div>
+
+        <div id="adultGridWrap"></div>
+        <div id="adultPgWrap" style="display:flex;gap:12px;justify-content:center;align-items:center;margin-top:20px"></div>
+      `;
+
+      $('#uBtnUnlock') && $('#uBtnUnlock').addEventListener('click', () => {
+        openUnlockModal(() => {
+          renderAdultTab();
+        });
+      });
+
+      $$('#adultSrcChips .chip').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          adultCurSrcKey = btn.dataset.k;
+          store.set('adultCurKey', adultCurSrcKey);
+          adultPg = 1;
+          renderAdultTab();
+        });
+      });
+
+      $('#adultSearchBtn').addEventListener('click', () => {
+        adultQuery = ($('#adultSearchInput').value || '').trim();
+        adultPg = 1;
+        fetchAdultList();
+      });
+      $('#adultSearchInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          adultQuery = ($('#adultSearchInput').value || '').trim();
+          adultPg = 1;
+          fetchAdultList();
+        }
+      });
+      $('#adultSearchClear') && $('#adultSearchClear').addEventListener('click', () => {
+        adultQuery = '';
+        adultPg = 1;
+        renderAdultTab();
+      });
+
+      async function fetchAdultList() {
+        const gw = $('#adultGridWrap');
+        const pw = $('#adultPgWrap');
+        if (!gw) return;
+        gw.innerHTML = `<div class="grid">${skeletons(14)}</div>`;
+        if (pw) pw.innerHTML = '';
+
+        let r;
+        try {
+          r = adultQuery ? await API.search(curSrc, adultQuery, adultPg) : await API.list(curSrc, adultPg);
+        } catch (e) {
+          gw.innerHTML = `<div class="empty"><div class="big">⚠️</div>加载失败：${esc(e.message)}</div>`;
+          return;
+        }
+        if (!alive()) return;
+        const list = (r && r.list) || [];
+        if (!list.length) {
+          gw.innerHTML = `<div class="empty"><div class="big">🙈</div>没有找到私密福利影片</div>`;
+          return;
+        }
+
+        gw.innerHTML = `<div class="grid">${list.map((v) => {
+          const pic = v.vod_pic || '';
+          const title = v.vod_name || '';
+          const remarks = v.vod_remarks || '';
+          const year = v.vod_year || '';
+          const type = v.type_name || '';
+          return `
+            <div class="card adult-vod-card" data-id="${esc(v.vod_id)}" style="cursor:pointer">
+              <div class="card-cover" style="position:relative">
+                <img src="${esc(pic)}" referrerpolicy="no-referrer" alt="${esc(title)}" loading="lazy" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>'">
+                ${remarks ? `<span class="card-tag card-tag-remarks">${esc(remarks)}</span>` : ''}
+                <span class="card-lock-badge" style="position:absolute;top:6px;left:6px;padding:3px 7px;border-radius:4px;font-size:11px;font-weight:700;background:${isUnlocked ? '#16a34a' : 'rgba(225,29,72,.9)'};color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.4)">
+                  ${isUnlocked ? '▶ 可播放' : '🔒 仅图片预览'}
+                </span>
+              </div>
+              <div class="card-title" title="${esc(title)}">${esc(title)}</div>
+              <div class="card-meta">${esc(type || '福利')} · ${esc(year || '18+')}</div>
+            </div>`;
+        }).join('')}</div>`;
+
+        $$('#adultGridWrap .adult-vod-card').forEach((el) => {
+          el.addEventListener('click', () => {
+            const vidId = el.dataset.id;
+            const vod = list.find((x) => String(x.vod_id) === String(vidId));
+            if (!vod) return;
+            if (isUnlocked) {
+              location.hash = `#/detail/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(vidId)}`;
+            } else {
+              openPicPreviewModal(vod, curSrc);
+            }
+          });
+        });
+
+        const pageCount = Number(r.pagecount || 1);
+        if (pw && (pageCount > 1 || adultPg > 1)) {
+          pw.innerHTML = `
+            <button class="btn ghost small" id="adultPrevPg" ${adultPg <= 1 ? 'disabled' : ''}>上一页</button>
+            <span style="font-size:13px;color:var(--dim)">第 ${adultPg} 页</span>
+            <button class="btn ghost small" id="adultNextPg" ${pageCount && adultPg >= pageCount ? 'disabled' : ''}>下一页</button>
+          `;
+          $('#adultPrevPg') && $('#adultPrevPg').addEventListener('click', () => {
+            if (adultPg > 1) { adultPg--; fetchAdultList(); window.scrollTo({ top: 180, behavior: 'smooth' }); }
+          });
+          $('#adultNextPg') && $('#adultNextPg').addEventListener('click', () => {
+            adultPg++; fetchAdultList(); window.scrollTo({ top: 180, behavior: 'smooth' });
+          });
+        }
+      }
+
+      fetchAdultList();
     }
     function bindHistDel() {
       $$('#uBody .hist-del[data-id]').forEach((b) => b.addEventListener('click', async () => {
@@ -2583,7 +2935,6 @@
   /* ============================================================
      视图：影视源(左侧文字源列表常驻 · 右侧该源分类/搜索/影片)
      ============================================================ */
-  const cleanSrcName = (s) => String(s.name || s.key).replace(/🔞/g, '').trim() || s.key;
   // 源小图标: 普通源=胶片放映图标, 成人源=红色 18+ 圆环徽标
   function srcIconHtml(s) {
     return s && s.adult
@@ -3567,14 +3918,14 @@
             stat.textContent = `共 ${r.users.length} 个注册用户`;
             table.innerHTML = r.users.length ? `
               <table class="adm-table" style="min-width:960px">
-                <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP / 归属地</th><th style="text-align:center">成人源</th><th>累计观看</th><th>有效/总记录</th><th style="text-align:right">操作</th></tr></thead>
+                <thead><tr><th>用户</th><th>注册时间</th><th>最近登录</th><th>登录IP / 归属地</th><th style="text-align:center">私密福利</th><th>累计观看</th><th>有效/总记录</th><th style="text-align:right">操作</th></tr></thead>
                 <tbody>${r.users.map((u) => `
                   <tr>
                     <td>${esc(u.username)}</td>
                     <td>${fmtDateTime(u.createdAt)}</td>
                     <td>${fmtDateTime(u.lastLoginAt)}</td>
                     <td>${esc(u.lastLoginIp || '—')}${u.lastLoginIpGeo ? '<br><small style="color:var(--dim)">' + esc(u.lastLoginIpGeo) + '</small>' : ''}</td>
-                    <td title="需全局「成人内容」开关开启后生效；绿色=允许观看，灰色=已隐藏"><button type="button" class="u-adult-tag ${u.adultAllowed ? 'on' : 'off'}" data-u="${esc(u.username)}">${u.adultAllowed ? '开' : '关'}</button></td>
+                    <td title="需全局「成人内容」开关开启生效；绿色=已解锁播放，灰色=未解锁(仅预览)"><button type="button" class="u-adult-tag ${u.adultAllowed ? 'on' : 'off'}" data-u="${esc(u.username)}">${u.adultAllowed ? '已解锁' : '未解锁'}</button></td>
                     <td>${fmtWatchSec(u.watchSec)}</td>
                     <td>${u.activeItems}/${u.totalItems}</td>
                     <td style="white-space:nowrap;text-align:right">
@@ -3591,8 +3942,8 @@
                 await API.adminUserAdult(el.dataset.u, to);
                 el.classList.toggle('on', to);
                 el.classList.toggle('off', !to);
-                el.textContent = to ? '开' : '关';
-                toast(to ? `已允许「${el.dataset.u}」观看成人源` : `已对「${el.dataset.u}」隐藏成人源`, 'ok');
+                el.textContent = to ? '已解锁' : '未解锁';
+                toast(to ? `已为「${el.dataset.u}」开通私密福利播放权限` : `已将「${el.dataset.u}」设为未解锁预览模式`, 'ok');
               } catch (e) { toast('操作失败：' + e.message, 'err'); }
               el.disabled = false;
             }));
@@ -3860,13 +4211,22 @@
         main.innerHTML = `
           <div class="admin-card adult-toggle-card ${s.adultEnabled ? 'on' : ''}" id="adultCard">
             <div class="admin-row">
-              <div class="admin-label">🔞 成人内容
-                <small>关闭后，服务器将在源头剔除所有成人采集源（🔞），全站不可见、接口不可达。当前状态：
+              <div class="admin-label">🔞 成人内容 / 私密福利专区
+                <small>开启后，私密福利源仅在登录会员中心可见（常规主站完全隔离纯净）。当前状态：
                   <b id="adultState" style="color:${s.adultEnabled ? 'var(--danger)' : 'var(--ok)'}">${s.adultEnabled ? '已开启' : '已关闭'}</b></small>
               </div>
               <label class="switch red"><input type="checkbox" id="adultSwitch" ${s.adultEnabled ? 'checked' : ''}><span class="track"></span></label>
             </div>
-            <p class="hint">⚠️ 本站不生产任何内容。请遵守所在地区法律法规；未满 18 岁请勿开启。</p>
+            <div id="adultExtraFields" style="${s.adultEnabled ? '' : 'display:none;'};margin-top:14px;border-top:1px dashed var(--card-br);padding-top:14px">
+              <label class="field-label">私密福利激活码 / 卡密（支持多个，逗号分隔，如：VIP888, VIP999）</label>
+              <input class="field-input" id="adultUnlockCodeInput" value="${esc(s.adultUnlockCode || 'VIP888')}" placeholder="VIP888">
+              <label class="field-label" style="margin-top:10px">付费解锁 / 赞助客服说明文案</label>
+              <textarea class="field-area" id="adultPayDescInput" style="min-height:60px">${esc(s.adultPayDesc || '')}</textarea>
+              <label class="field-label" style="margin-top:10px">收款二维码 / 客服微信图片 URL（留空则不显示）</label>
+              <input class="field-input" id="adultPayQrInput" value="${esc(s.adultPayQr || '')}" placeholder="https://example.com/pay-qr.png">
+              <button class="btn primary small" id="saveAdultConfigBtn" style="margin-top:12px">保存私密福利配置</button>
+            </div>
+            <p class="hint" style="margin-top:10px">⚠️ 网站常规页面（首页、分类、搜索、源列表）不会出现任何 18+ 源；仅登录会员可在会员中心查看私密福利，未解锁仅支持图片预览。</p>
           </div>
           <div class="admin-card">
             <h3>🎨 站点设置</h3>
@@ -3916,6 +4276,16 @@
             ${s.wmUrl ? `<div style="margin-top:12px"><img src="${esc(s.wmUrl)}" alt="预览" style="max-height:64px;max-width:180px;object-fit:contain;background:rgba(0,0,0,.35);padding:8px;border-radius:8px" onerror="this.style.display='none'"></div>` : ''}
             <button class="btn primary" id="wmSaveBtn" style="margin-top:14px">保存水印设置</button>
           </div>`;
+        $('#saveAdultConfigBtn') && $('#saveAdultConfigBtn').addEventListener('click', async () => {
+          try {
+            await API.adminSaveSettings({
+              adultUnlockCode: $('#adultUnlockCodeInput').value.trim(),
+              adultPayDesc: $('#adultPayDescInput').value.trim(),
+              adultPayQr: $('#adultPayQrInput').value.trim(),
+            });
+            toast('私密福利配置已保存', 'ok');
+          } catch (e) { toast('保存失败：' + e.message, 'err'); }
+        });
         $('#adultSwitch').addEventListener('change', async (e) => {
           const on = e.target.checked;
           try {
@@ -3925,7 +4295,9 @@
             $('#adultState').textContent = on ? '已开启' : '已关闭';
             $('#adultState').style.color = on ? 'var(--danger)' : 'var(--ok)';
             $('#adultCard').classList.toggle('on', on);
-            toast(on ? '⚠️ 成人内容已全站开启' : '✅ 成人内容已全站关闭', on ? 'err' : 'ok');
+            const extra = $('#adultExtraFields');
+            if (extra) extra.style.display = on ? '' : 'none';
+            toast(on ? '⚠️ 私密福利已开启（仅会员中心可见）' : '✅ 成人内容已全站关闭', on ? 'err' : 'ok');
           } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
         });
         $('#saveSiteBtn').addEventListener('click', async () => {

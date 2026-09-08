@@ -147,6 +147,12 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       }, 8000).catch(() => {}),
+    userUnlockAdult: (code) =>
+      jfetch('/api/user/unlock-adult', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      }, 10000),
 
     adminUsers: () => jfetch('/api/admin/users', {}, 15000),
     checkAdminPath: (p) => jfetch('/api/admin-path?p=' + encodeURIComponent(p || ''), {}, 8000),

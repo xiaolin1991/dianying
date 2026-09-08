@@ -1275,3 +1275,78 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
   .src-edit-row { grid-template-columns: auto minmax(64px, 1fr) 1.5fr auto; }
   .src-edit-col-detail { display: none !important; }
 }
+
+/* ---------------- 私密福利与VIP解锁样式 ---------------- */
+.vip-status-card {
+  transition: all .2s ease;
+}
+.vip-status-card.locked {
+  border-color: rgba(225, 29, 72, .35) !important;
+  background: color-mix(in srgb, var(--bg2) 90%, #e11d48 10%) !important;
+}
+.vip-status-card.unlocked {
+  border-color: rgba(34, 197, 94, .4) !important;
+  background: color-mix(in srgb, var(--bg2) 92%, #22c55e 8%) !important;
+}
+.vip-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.vip-status-pill.unlocked {
+  background: rgba(34, 197, 94, .15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, .3);
+}
+.vip-status-pill.locked {
+  background: rgba(225, 29, 72, .12);
+  color: #e11d48;
+  border: 1px solid rgba(225, 29, 72, .3);
+}
+.card-lock-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.5);
+}
+.card-lock-badge.locked {
+  background: rgba(225, 29, 72, .92);
+  color: #fff;
+}
+.card-lock-badge.unlocked {
+  background: rgba(22, 163, 74, .92);
+  color: #fff;
+}
+.pic-preview-modal-box {
+  background: var(--bg);
+  border: 1px solid var(--card-br);
+  box-shadow: 0 20px 50px rgba(0,0,0,.6);
+}
+.pic-lock-alert {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(225, 29, 72, .1);
+  border: 1px solid rgba(225, 29, 72, .25);
+}
+.preview-lock-banner {
+  animation: fadeIn .3s ease;
+}
+@media (max-width: 600px) {
+  .pic-preview-body { flex-direction: column; }
+  .pic-preview-poster-wrap { flex: auto !important; max-width: 100% !important; }
+  .pic-preview-poster { max-height: 220px !important; }
+}
+

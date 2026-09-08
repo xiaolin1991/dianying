@@ -66,6 +66,9 @@ const DEFAULT_SETTINGS = {
   wmUrl: '',             // 水印图片 URL(建议 png)
   wmOpacity: 0.55,       // 水印透明度 0.15-1
   wmDuration: 2,         // 正中模式显示秒数(1-60)
+  adultUnlockCode: 'VIP888', // 私密福利激活码/卡密(默认 VIP888, 后台可改, 支持逗号分隔多个)
+  adultPayDesc: '私密福利影片为会员专属特权内容。如需开通，可联系管理员获取激活卡密，或输入卡密立即解锁。', // 解锁说明
+  adultPayQr: '',            // 收款码或客服二维码图片链接
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -485,6 +488,15 @@ async function saveSettings(env, patch) {
       try { JSON.parse(cu); next.configJson = cu.slice(0, 500000); next.configUrl = ''; }
       catch (e) { /* 非法 JSON, 忽略 */ }
     }
+  }
+  if (typeof patch.adultUnlockCode === 'string') {
+    next.adultUnlockCode = patch.adultUnlockCode.trim().slice(0, 100);
+  }
+  if (typeof patch.adultPayDesc === 'string') {
+    next.adultPayDesc = patch.adultPayDesc.trim().slice(0, 500);
+  }
+  if (typeof patch.adultPayQr === 'string') {
+    next.adultPayQr = patch.adultPayQr.trim().slice(0, 500);
   }
   MEM.settings = next;
   if (kv(env)) await env.CONFIG_KV.put('settings', JSON.stringify(next));
@@ -1033,6 +1045,8 @@ export default {
           wmUrl: s.wmUrl || '',
           wmOpacity: Number(s.wmOpacity == null ? 0.55 : s.wmOpacity),
           wmDuration: Math.min(60, Math.max(1, Number(s.wmDuration == null ? 2 : s.wmDuration) || 2)),
+          adultPayDesc: s.adultPayDesc || '',
+          adultPayQr: s.adultPayQr || '',
         });
       }
       /* ---- 后台入口路径探测(只返回 是/否, 不泄露配置值; 用于自定义入口路由) ---- */
@@ -1042,34 +1056,46 @@ export default {
         return json({ ok: p === (s.adminPath || 'admin') });
       }
 
-      /* ---- 源列表(远程源 + 后台自定义源, 按停用/成人开关 + 观看者成人权限过滤) ---- */
+      /* ---- 源列表(网站常规页面仅保留正常源；成人源独立归入 adultSources 仅登录会员可见) ---- */
       if (path === '/api/config' && request.method === 'GET') {
         const settings = await getSettings(env);
         const { sources: remote } = await loadSources(env, ctx, settings);
         const { all } = mergeSources(remote, settings);
-        // 成人源可见性: 全局开关开 → 默认人人可见(含游客/试看中);
-        // 已登录用户仍可被后台单独关闭(adultAllowed=false 时隐藏)
-        let allowAdult = false;
+
+        let adultUnlocked = false;
+        let adultForYou = false;
+        let adultSources = [];
+
         if (settings.adultEnabled) {
-          if (await verifyToken(env, readToken(request, url))) allowAdult = true; // 管理员
-          else {
-            const uname = await currentUser(request, env, url);
-            if (!uname) {
-              allowAdult = true; // 游客(含试看期): 跟随全局开关
-            } else {
-              const rec = await getUserRecord(env, uname);
-              // 默认开通: 仅当明确存了 false 才关闭(旧用户无字段视为开通)
-              allowAdult = Boolean(rec && rec.adultAllowed !== false);
-            }
+          const isAdmin = await verifyToken(env, readToken(request, url));
+          const uname = await currentUser(request, env, url);
+          if (isAdmin) {
+            adultUnlocked = true;
+            adultForYou = true;
+          } else if (uname) {
+            adultForYou = true;
+            const rec = await getUserRecord(env, uname);
+            // 需明确付费/激活码解锁或管理员开通(adultAllowed === true)
+            adultUnlocked = Boolean(rec && rec.adultAllowed === true);
+          }
+          // 仅已登录用户或管理员可获取私密福利源元数据(游客完全不可见)
+          if (adultForYou) {
+            adultSources = all.filter((s) => !s.disabled && s.adult).map(({ key, name, api, detail, adult }) => ({
+              key, name, api, detail, adult: true,
+            }));
           }
         }
-        const enabled = allowAdult ? all.filter((s) => !s.disabled) : all.filter((s) => !s.disabled && !s.adult);
+
+        // 常规源：剔除所有成人源，确保主站首页、分类、搜索完全纯净
+        const normalSources = all.filter((s) => !s.disabled && !s.adult);
         return json({
-          adultEnabled: settings.adultEnabled,
-          adultForYou: allowAdult,
+          adultEnabled: Boolean(settings.adultEnabled),
+          adultForYou,
+          adultUnlocked,
           total: all.length,
-          count: enabled.length,
-          sources: enabled.map(({ key, name, api, detail, adult }) => ({ key, name, api, detail, adult })),
+          count: normalSources.length,
+          sources: normalSources.map(({ key, name, api, detail }) => ({ key, name, api, detail, adult: false })),
+          adultSources,
         });
       }
 
@@ -1084,7 +1110,7 @@ export default {
         return json(payload, 200, { 'Cache-Control': 'public, max-age=300' });
       }
 
-      /* ---- 苹果CMS API 代理(白名单) ---- */
+      /* ---- 苹果CMS API 代理(白名单 + 权限隔离 + 视频流安全脱敏) ---- */
       if (path === '/api/proxy' && request.method === 'GET') {
         const target = url.searchParams.get('url') || '';
         let tu;
@@ -1092,30 +1118,88 @@ export default {
         if (!/^https?:$/.test(tu.protocol)) return json({ error: 'bad protocol' }, 400);
 
         const settings2 = await getSettings(env);
-        const g1 = await guestState(request, env, url);
-        if (!g1.ok) return json({ error: '试看时间已到，注册/登录后继续观看', code: 'login_required' }, 401);
         const { sources: remote } = await loadSources(env, ctx, settings2);
         const { all } = mergeSources(remote, settings2);
+
         const allow = new Set();
+        let matchedSrc = null;
+        const host = tu.hostname.toLowerCase();
         for (const s of all) {
           for (const u of [s.api, s.detail]) {
-            try { if (u) allow.add(new URL(u).hostname.toLowerCase()); } catch (e) { /* ignore */ }
+            try {
+              if (u) {
+                const shost = new URL(u).hostname.toLowerCase();
+                allow.add(shost);
+                if (host === shost || host.endsWith('.' + shost)) {
+                  if (!matchedSrc) matchedSrc = s;
+                }
+              }
+            } catch (e) { /* ignore */ }
           }
         }
-        const host = tu.hostname.toLowerCase();
         const ok = allow.has(host) || [...allow].some((h) => host.endsWith('.' + h));
         if (!ok) return json({ error: 'host not allowed' }, 403);
+
+        const isAdultSrc = Boolean(matchedSrc && matchedSrc.adult);
+        const uname = await currentUser(request, env, url);
+        const isAdmin = await verifyToken(env, readToken(request, url));
+
+        let g1 = { ok: true };
+        if (isAdultSrc) {
+          // 策略 1: 私密福利(18+)内容严禁游客试看, 必须已登录会员访问
+          if (!settings2.adultEnabled) return json({ error: '私密福利内容已关闭' }, 403);
+          if (!uname && !isAdmin) {
+            return json({ error: '私密福利影片仅限会员访问，游客试看仅限正常影视', code: 'adult_login_required' }, 401);
+          }
+        } else {
+          // 正常影片: 走正常游客试看逻辑
+          g1 = await guestState(request, env, url);
+          if (!g1.ok) return json({ error: '试看时间已到，注册/登录后继续观看', code: 'login_required' }, 401);
+        }
+
+        // 判断私密福利是否解锁播放
+        let adultUnlocked = false;
+        if (isAdultSrc) {
+          if (isAdmin) adultUnlocked = true;
+          else if (uname) {
+            const rec = await getUserRecord(env, uname);
+            adultUnlocked = Boolean(rec && rec.adultAllowed === true);
+          }
+        }
 
         const upstream = await fetch(tu.toString(), {
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) XIAOLIN-TV/1.0', Accept: '*/*' },
           signal: AbortSignal.timeout(20000),
           cf: { cacheTtl: 120, cacheEverything: true },
         });
+
         const headers = new Headers();
-        headers.set('Content-Type', upstream.headers.get('Content-Type') || 'application/json; charset=utf-8');
+        const contentType = upstream.headers.get('Content-Type') || 'application/json; charset=utf-8';
+        headers.set('Content-Type', contentType);
         headers.set('Access-Control-Allow-Origin', '*');
         headers.set('Cache-Control', 'public, max-age=120');
         if (g1.newCookie) headers.set('Set-Cookie', guestSetCookie(g1.newCookie));
+
+        // 策略 2: 若访问成人源但未付费解锁(只能预览图片, 不能播放)
+        // 从源头剥离播放地址 vod_play_url, 仅保留图片、片名、简介等元数据供图片预览
+        if (isAdultSrc && !adultUnlocked) {
+          try {
+            const raw = await upstream.text();
+            const data = JSON.parse(raw);
+            if (data && Array.isArray(data.list)) {
+              for (const it of data.list) {
+                it.vod_play_url = ''; // 剥离播放串，彻底禁止未解锁播放
+                it.vod_play_from = '需解锁播放';
+                it.vod_play_note = '未付费解锁，仅提供图片预览';
+                it.locked = true;
+              }
+            }
+            return json(data, upstream.status, headers);
+          } catch (e) {
+            return json({ error: '未解锁私密福利播放权限，仅支持图片预览', code: 'adult_locked' }, 403);
+          }
+        }
+
         return new Response(upstream.body, { status: upstream.status, headers });
       }
 
@@ -1189,7 +1273,7 @@ export default {
           lastLoginAt: Date.now(),
           lastLoginIp: clientIp(request),
           lastLoginIpGeo: geoOf(request),
-          adultAllowed: true, // 新注册用户默认开通成人内容, 管理员可按用户关闭
+          adultAllowed: false, // 新注册用户默认未解锁私密福利, 需付费/卡密解锁或管理员开通
         });
         const token = await makeUserToken(env, username);
         return json({ ok: true, username }, 200, {
@@ -1219,6 +1303,33 @@ export default {
       if (path === '/api/user/logout' && request.method === 'POST') {
         return json({ ok: true }, 200, { 'Set-Cookie': `${USER_COOKIE}=; Path=/; HttpOnly; Max-Age=0` });
       }
+      /* ---- 私密福利: 卡密/激活码解锁 ---- */
+      if (path === '/api/user/unlock-adult' && request.method === 'POST') {
+        const username = await currentUser(request, env, url);
+        if (!username) return json({ error: '请先登录' }, 401);
+        if (!kv(env)) return json({ error: '未绑定 KV 存储' }, 500);
+        const settings = await getSettings(env);
+        if (!settings.adultEnabled) return json({ error: '私密福利内容暂未开放' }, 400);
+
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const code = String(body.code || '').trim().toUpperCase();
+        if (!code) return json({ error: '请输入激活卡密' }, 400);
+
+        const rawCodes = String(settings.adultUnlockCode || 'VIP888');
+        const validCodes = rawCodes.split(/[,，\s]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+        const matched = validCodes.includes(code);
+        if (!matched) {
+          return json({ error: '激活码/卡密无效或已过期，请核对后再试' }, 400);
+        }
+
+        const rec = await getUserRecord(env, username);
+        if (!rec) return json({ error: '用户不存在' }, 404);
+        rec.adultAllowed = true;
+        rec.adultUnlockedAt = Date.now();
+        await putUserRecord(env, rec);
+        return json({ ok: true, message: '🎉 私密福利VIP特权已成功激活解锁！可畅享专区全部影片在线播放。' });
+      }
       /* ---- 收藏同步: 拉取 / 整体覆盖保存(前端负责合并) ---- */
       if (path === '/api/user/favs' && request.method === 'GET') {
         const username = await currentUser(request, env, url);
@@ -1246,6 +1357,7 @@ export default {
             createdAt: rec ? rec.createdAt : null,
             lastLoginAt: rec ? rec.lastLoginAt : null,
             lastLoginIp: rec ? rec.lastLoginIp : '',
+            adultAllowed: Boolean(rec && rec.adultAllowed === true),
           },
         });
       }
@@ -1393,6 +1505,9 @@ export default {
             wmUrl: s.wmUrl || '',
             wmOpacity: Number(s.wmOpacity == null ? 0.55 : s.wmOpacity),
             wmDuration: Math.min(60, Math.max(1, Number(s.wmDuration == null ? 2 : s.wmDuration) || 2)),
+            adultUnlockCode: s.adultUnlockCode || 'VIP888',
+            adultPayDesc: s.adultPayDesc || '',
+            adultPayQr: s.adultPayQr || '',
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });
         }
@@ -1573,7 +1688,7 @@ export default {
               lastLoginAt: rec ? rec.lastLoginAt : null,
               lastLoginIp: rec ? rec.lastLoginIp : '',
               lastLoginIpGeo: rec ? (rec.lastLoginIpGeo || '') : '',
-              adultAllowed: rec ? rec.adultAllowed !== false : false,
+              adultAllowed: rec ? rec.adultAllowed === true : false,
               watchSec: hist.watchSec || 0,
               totalItems: hist.items.length,
               activeItems: hist.items.filter((it) => !it.delUser).length,
