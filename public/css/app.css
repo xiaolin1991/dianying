@@ -1577,14 +1577,210 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
   justify-content: center;
 }
 
+/* 私密福利 VIP 尊享特权大横幅与专属说明 */
+.adult-feature-banner {
+  position: relative;
+  background: linear-gradient(135deg, rgba(225,29,72,0.14) 0%, rgba(245,158,11,0.09) 45%, rgba(15,23,42,0.94) 100%), var(--card);
+  border: 1px solid rgba(245,158,11,0.28);
+  border-radius: 20px;
+  padding: 22px 26px;
+  margin-bottom: 20px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.1);
+  overflow: hidden;
+  transition: all .25s ease;
+}
+.adult-feature-banner::before {
+  content: '';
+  position: absolute;
+  top: -50px;
+  right: -40px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(225,29,72,0.28) 0%, transparent 70%);
+  pointer-events: none;
+}
+.adult-banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  position: relative;
+  z-index: 1;
+}
+.adult-banner-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--txt);
+  letter-spacing: .4px;
+}
+.adult-crown-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f59e0b, #e11d48);
+  box-shadow: 0 4px 14px rgba(245,158,11,0.45);
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.adult-banner-sub {
+  font-size: 13px;
+  color: var(--dim);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.adult-banner-toggle {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  transition: all .2s;
+}
+.adult-banner-toggle:hover {
+  color: var(--txt);
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(245,158,11,0.35);
+}
+
+.adult-status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.adult-status-banner.unlocked {
+  background: linear-gradient(90deg, rgba(34,197,94,0.14), rgba(16,185,129,0.1));
+  border: 1px solid rgba(34,197,94,0.35);
+  color: #4ade80;
+}
+.adult-status-banner.locked {
+  background: linear-gradient(90deg, rgba(225,29,72,0.14), rgba(245,158,11,0.1));
+  border: 1px solid rgba(225,29,72,0.35);
+  color: #fda4af;
+}
+
+.adult-perk-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+  position: relative;
+  z-index: 1;
+}
+.adult-perk-item {
+  background: rgba(0,0,0,0.3);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  padding: 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: transform .2s, border-color .2s, box-shadow .2s;
+}
+.adult-perk-item:hover {
+  transform: translateY(-2px);
+  border-color: rgba(245,158,11,0.45);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.3);
+}
+.adult-perk-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--txt);
+}
+.adult-perk-desc {
+  font-size: 12px;
+  color: var(--dim);
+  line-height: 1.5;
+}
+
+.adult-guide-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed rgba(255,255,255,0.14);
+  font-size: 12px;
+  color: var(--dim);
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+.adult-guide-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--txt);
+  font-weight: 600;
+}
+.adult-guide-pill span {
+  color: #f59e0b;
+}
+
+/* 瀑布流无限滚动加载指示器 */
+.infinite-loader {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 26px 0;
+  color: var(--dim);
+  font-size: 13.5px;
+  text-align: center;
+  width: 100%;
+}
+.infinite-loader.no-more {
+  color: var(--dim);
+  border-top: 1px dashed rgba(255,255,255,0.1);
+  margin-top: 16px;
+  padding-top: 20px;
+}
+.infinite-retry-btn {
+  margin-left: 10px;
+}
+
 @media (max-width: 960px) {
   .user-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .adult-perk-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 720px) {
   .user-hero-main { flex-direction: column; align-items: flex-start; }
   .user-hero-actions { width: 100%; justify-content: flex-end; }
   .user-kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
   .adult-switch-mobile { display: flex; }
+}
+@media (max-width: 600px) {
+  .adult-perk-grid { grid-template-columns: 1fr; }
+  .adult-feature-banner { padding: 16px 18px; border-radius: 16px; }
 }
 @media (max-width: 480px) {
   .user-kpi-grid { grid-template-columns: 1fr; }

@@ -343,12 +343,19 @@
   }
 
   /* ------------------------------ 卡片渲染 ------------------------------ */
+  function isMobileDevice() {
+    const ua = navigator.userAgent || '';
+    if (/Windows NT|Macintosh|Linux x86_64|CrOS/i.test(ua) && !/Android|iPhone|iPod|Mobile/i.test(ua)) return false;
+    if (/iPhone|iPod|Android.+Mobile|Mobile.+Android|xiaolin/i.test(ua)) return true;
+    if (/Android/i.test(ua) && Math.min(screen.width, screen.height) <= 820) return true;
+    return window.matchMedia('(max-width: 820px) and (hover: none) and (pointer: coarse)').matches;
+  }
+
   /** 桌面浏览器新标签打开; 手机/App 同页打开(便于返回后恢复滚动位置) */
   function preferNewTab() {
     try {
       if (typeof inApp === 'function' && inApp()) return false;
-      if (typeof isMobileUA === 'function' && isMobileUA()) return false;
-      if (typeof isTvDevice === 'function' && isTvDevice()) return false;
+      if (isMobileDevice()) return false;
       return true;
     } catch (e) { return true; }
   }
@@ -2841,8 +2848,10 @@
     let adultPg = 1;
     let adultQuery = '';
     let adultCat = '';
+    let scrollCleanup = null;
 
     function renderBody() {
+      if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
       $$('#uTabs .user-tab-btn').forEach((c) => c.classList.toggle('on', c.dataset.t === tab));
       store.set('uTab', tab);
 
@@ -2923,8 +2932,77 @@
       let curSrc = adultSources.find((s) => s.key === adultCurSrcKey) || adultSources[0];
       const isUnlocked = Boolean(State.config && State.config.adultUnlocked);
 
-      // 完全对齐影视源：左侧常驻测速源列表 + 移动端切换弹窗 + 右侧分类与搜索 + 标准瀑布流海报网格
+      let loadingMore = false;
+      let hasMore = true;
+      let totalCount = 0;
+      let loadedVods = [];
+
+      // 完全对齐影视源：顶部高阶特权说明横幅 + 左侧常驻测速源列表 + 移动端切换弹窗 + 右侧分类与搜索 + 标准瀑布流海报网格
       body.innerHTML = `
+        <!-- 👑 私密福利 VIP 尊享特权大横幅与专属说明 -->
+        <div class="adult-feature-banner" id="adultFeatureBanner">
+          <div class="adult-banner-head">
+            <div class="adult-banner-title">
+              <span class="adult-crown-ico">👑</span>
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  <span>私密福利 VIP 尊享特权影院</span>
+                  <span class="user-vip-tag ${isUnlocked ? 'unlocked' : 'locked'}" style="font-size:11.5px">
+                    ${isUnlocked ? '👑 VIP已解锁 · 全区畅播' : '🔒 注册会员 · 仅图片预览'}
+                  </span>
+                </div>
+                <div class="adult-banner-sub">全网精选福利聚合 · 4K超清极速线路 · 每日同步海量更新 · 严格隐私零痕迹</div>
+              </div>
+            </div>
+            <button class="adult-banner-toggle" id="adultBannerToggle" type="button">
+              <span id="adultToggleTxt">${store.get('adultDescFold', false) ? '展开说明 ▾' : '收起说明 ▴'}</span>
+            </button>
+          </div>
+
+          <div id="adultBannerBody" class="${store.get('adultDescFold', false) ? 'hidden' : ''}">
+            <div class="adult-status-banner ${isUnlocked ? 'unlocked' : 'locked'}">
+              <div>
+                <b>${isUnlocked ? '👑 VIP 特权状态：已激活永久解锁' : '🔒 会员特权状态：未付费解锁（仅图片预览）'}</b>
+                <div style="font-size:12.5px;opacity:.9;margin-top:2px">
+                  ${isUnlocked
+                    ? '您已享有专区全部影片无限制在线播放特权、多条超清CDN线路、智能瀑布流无限畅享！'
+                    : '当前为注册会员画册预览模式，视频流处于受限保护状态。输入卡密即可一秒升级为 VIP 尊享会员，解除全区视频在线播放！'}
+                </div>
+              </div>
+              ${!isUnlocked ? `
+                <button class="btn primary small" id="uBannerUnlockBtn" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700;white-space:nowrap">
+                  🔑 立即输入卡密解锁
+                </button>` : ''}
+            </div>
+
+            <div class="adult-perk-grid">
+              <div class="adult-perk-item">
+                <div class="adult-perk-title">⚡ 4K超清极速秒播</div>
+                <div class="adult-perk-desc">专享独立高速直连流媒体节点，低延时秒起播，告别卡顿与缓冲等待。</div>
+              </div>
+              <div class="adult-perk-item">
+                <div class="adult-perk-title">🔞 每日同步海量更新</div>
+                <div class="adult-perk-desc">聚合数十家精品成人影视采集源，热门番号、欧美大片、日韩精品实时收录。</div>
+              </div>
+              <div class="adult-perk-item">
+                <div class="adult-perk-title">🛡️ 端到端隐私零痕迹</div>
+                <div class="adult-perk-desc">主站搜索与推荐完全隔离屏蔽，游客零痕迹，守护纯粹私密的专属观影空间。</div>
+              </div>
+              <div class="adult-perk-item">
+                <div class="adult-perk-title">💻📱 多端智能交互适配</div>
+                <div class="adult-perk-desc">电脑端点击自动新标签页便捷多开，手机端轻触本标签全屏起播，支持瀑布流滑动。</div>
+              </div>
+            </div>
+
+            <div class="adult-guide-strip">
+              <div class="adult-guide-pill"><span>🖥️ 电脑端：</span>点击任意影片自动新建标签页播放，选片更惬意</div>
+              <div class="adult-guide-pill"><span>📱 手机端：</span>点击任意影片本标签内直接全屏播放，丝滑流畅</div>
+              <div class="adult-guide-pill"><span>📜 智能瀑布流：</span>下拉触底自动加载下一页，无需手动翻页</div>
+              <div class="adult-guide-pill"><span>⚠️ 声明：</span>本专区内容严禁未成年人访问，请妥善保管您的账号</div>
+            </div>
+          </div>
+        </div>
+
         <div class="adult-src-wrapper">
           <button class="btn ghost small adult-switch-mobile" id="adultSrcPickBtn">
             🔀 切换福利源：当前「${esc(cleanSrcName(curSrc))}」 ${speedBadge(curSrc.key)}
@@ -2969,11 +3047,26 @@
               <!-- 影片瀑布流海报网格 (使用站点统一的 .grid 与 .card 规范) -->
               <div class="grid" id="adultGrid"></div>
 
-              <!-- 分页器 -->
-              <div id="adultPgWrap" style="display:flex;gap:12px;justify-content:center;align-items:center;margin-top:24px;padding-bottom:16px"></div>
+              <!-- 瀑布流触底监听与加载指示器 -->
+              <div class="infinite-loader" id="adultSentinel"></div>
             </div>
           </div>
         </div>`;
+
+      // 说明折叠切换
+      const bannerToggle = $('#adultBannerToggle');
+      const bannerBody = $('#adultBannerBody');
+      const toggleTxt = $('#adultToggleTxt');
+      if (bannerToggle && bannerBody) {
+        bannerToggle.addEventListener('click', () => {
+          const isFold = bannerBody.classList.toggle('hidden');
+          store.set('adultDescFold', isFold);
+          if (toggleTxt) toggleTxt.textContent = isFold ? '展开说明 ▾' : '收起说明 ▴';
+        });
+      }
+      $('#uBannerUnlockBtn') && $('#uBannerUnlockBtn').addEventListener('click', () => {
+        openUnlockModal(() => renderAdultTab());
+      });
 
       // 绑定福利源测速
       for (const s of adultSources) {
@@ -3049,21 +3142,19 @@
       // 搜索表单
       $('#adultSearchBtn') && $('#adultSearchBtn').addEventListener('click', () => {
         adultQuery = ($('#adultSearchInput').value || '').trim();
-        adultPg = 1;
-        fetchAdultList();
+        fetchAdultList(true);
       });
       $('#adultSearchInput') && $('#adultSearchInput').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           adultQuery = ($('#adultSearchInput').value || '').trim();
-          adultPg = 1;
-          fetchAdultList();
+          fetchAdultList(true);
         }
       });
       $('#adultSearchClear') && $('#adultSearchClear').addEventListener('click', () => {
         adultQuery = '';
-        adultPg = 1;
-        renderAdultTab();
+        if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
+        fetchAdultList(true);
       });
 
       // 动态加载上游分类
@@ -3082,9 +3173,8 @@
               adultCat = c.dataset.cat || '';
               adultQuery = '';
               if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
-              adultPg = 1;
               $$('#adultCats .chip').forEach((x) => x.classList.toggle('on', x === c));
-              fetchAdultList();
+              fetchAdultList(true);
             });
           });
         } else {
@@ -3092,15 +3182,96 @@
         }
       })();
 
-      async function fetchAdultList() {
+      function bindAdultCardClicks(container) {
+        const cards = container.querySelectorAll('.adult-vod-card:not([data-bound])');
+        cards.forEach((el) => {
+          el.setAttribute('data-bound', '1');
+          el.addEventListener('click', (ev) => {
+            const vidId = el.dataset.id;
+            const vod = loadedVods.find((x) => String(x.vod_id) === String(vidId));
+            if (!vod) return;
+
+            if (!isUnlocked) {
+              ev.preventDefault();
+              openPicPreviewModal(vod, curSrc);
+              return;
+            }
+
+            const playHref = `#/play/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(vidId)}?ep=0&group=0`;
+            if (!isMobileDevice()) {
+              // 电脑端：新建独立标签页打开播放
+              ev.preventDefault();
+              window.open(playHref, '_blank');
+            } else {
+              // 手机端：本标签直接全屏播放
+              ev.preventDefault();
+              location.hash = playHref;
+            }
+          });
+        });
+      }
+
+      function initInfiniteScroll() {
+        if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
+        const sentinel = $('#adultSentinel');
+        if (!sentinel) return;
+
+        const triggerNext = () => {
+          if (!alive() || loadingMore || !hasMore) return;
+          adultPg++;
+          fetchAdultList(false);
+        };
+
+        let obs = null;
+        if (window.IntersectionObserver) {
+          obs = new IntersectionObserver((entries) => {
+            if (entries[0] && entries[0].isIntersecting) {
+              triggerNext();
+            }
+          }, { rootMargin: '450px 0px' });
+          obs.observe(sentinel);
+        }
+
+        const onScroll = () => {
+          if (!alive() || loadingMore || !hasMore) return;
+          const rect = sentinel.getBoundingClientRect();
+          if (rect.top <= window.innerHeight + 450) {
+            triggerNext();
+          }
+        };
+        window.addEventListener('scroll', onScroll, { passive: true });
+
+        scrollCleanup = () => {
+          if (obs) { obs.disconnect(); obs = null; }
+          window.removeEventListener('scroll', onScroll);
+        };
+      }
+
+      async function fetchAdultList(isFirstPage = false) {
         const grid = $('#adultGrid');
         const statusEl = $('#adultStatus');
-        const pw = $('#adultPgWrap');
-        if (!grid) return;
+        const sentinel = $('#adultSentinel');
+        if (!grid || !alive()) return;
 
-        grid.innerHTML = skeletons(14);
-        if (statusEl) statusEl.textContent = '⏳ 正在加载福利影片…';
-        if (pw) pw.innerHTML = '';
+        if (isFirstPage) {
+          if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
+          adultPg = 1;
+          hasMore = true;
+          loadingMore = false;
+          loadedVods = [];
+          grid.innerHTML = skeletons(14);
+          if (statusEl) statusEl.textContent = '⏳ 正在加载福利影片…';
+          if (sentinel) {
+            sentinel.className = 'infinite-loader';
+            sentinel.innerHTML = '<span class="spin"></span> 正在加载影片…';
+          }
+        }
+
+        loadingMore = true;
+        if (sentinel && !isFirstPage) {
+          sentinel.className = 'infinite-loader';
+          sentinel.innerHTML = `<span class="spin"></span> 正在自动加载第 ${adultPg} 页影片…`;
+        }
 
         let r;
         try {
@@ -3108,31 +3279,62 @@
             ? await API.search(curSrc, adultQuery, adultPg)
             : await API.list(curSrc, adultPg, adultCat);
         } catch (e) {
-          grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">⚠️</div>加载失败：${esc(e.message)}</div>`;
-          if (statusEl) statusEl.textContent = '❌ 加载失败';
+          loadingMore = false;
+          if (!alive()) return;
+          if (isFirstPage) {
+            grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">⚠️</div>加载失败：${esc(e.message)}<div style="margin-top:12px"><button class="btn primary small" id="adultRetryBtn">🔄 重试</button></div></div>`;
+            $('#adultRetryBtn') && $('#adultRetryBtn').addEventListener('click', () => fetchAdultList(true));
+            if (statusEl) statusEl.textContent = '❌ 加载失败';
+            if (sentinel) sentinel.innerHTML = '';
+          } else {
+            if (sentinel) {
+              sentinel.innerHTML = `<span>⚠️ 第 ${adultPg} 页加载失败</span> <button class="btn ghost small infinite-retry-btn" id="adultMoreRetryBtn">🔄 点击重试</button>`;
+              $('#adultMoreRetryBtn') && $('#adultMoreRetryBtn').addEventListener('click', () => fetchAdultList(false));
+            }
+          }
           return;
         }
+
         if (!alive()) return;
+        loadingMore = false;
+
         const list = (r && r.list) || [];
-        if (!list.length) {
-          grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">🙈</div>没有找到符合条件的私密福利影片</div>`;
-          if (statusEl) statusEl.textContent = '未检索到影片';
-          return;
+        const pageCount = Number(r && r.pagecount) || 1;
+        totalCount = Number(r && r.total) || (isFirstPage ? list.length : totalCount + list.length);
+
+        if (isFirstPage) {
+          if (!list.length) {
+            hasMore = false;
+            grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">🙈</div>没有找到符合条件的私密福利影片</div>`;
+            if (statusEl) statusEl.textContent = '未检索到影片';
+            if (sentinel) sentinel.innerHTML = '';
+            return;
+          }
+          grid.innerHTML = '';
         }
 
-        if (statusEl) {
-          statusEl.textContent = `⚡ 加载成功 · 第 ${adultPg} 页 (共 ${r.total != null ? r.total : list.length} 部)`;
+        if (!list.length || (pageCount && adultPg >= pageCount)) {
+          hasMore = false;
         }
 
-        // 使用网站标准 .card, .card-poster, .card-badge, .card-name, .card-sub
-        grid.innerHTML = list.map((v) => {
+        // 保存加载记录
+        list.forEach((v) => {
+          if (v && v.vod_id && !loadedVods.some((x) => String(x.vod_id) === String(v.vod_id))) {
+            loadedVods.push(v);
+          }
+        });
+
+        const isMobile = isMobileDevice();
+        const htmlChunk = list.map((v) => {
           const pic = v.vod_pic || '';
           const title = v.vod_name || '';
           const remarks = v.vod_remarks || '';
           const year = v.vod_year || '';
           const type = v.type_name || '';
+          const playHref = `#/play/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(v.vod_id)}?ep=0&group=0`;
+          const targetAttr = isUnlocked ? (isMobile ? '_self' : '_blank') : '_self';
           return `
-            <div class="card adult-vod-card" data-id="${esc(v.vod_id)}" style="cursor:pointer">
+            <a class="card adult-vod-card" href="${isUnlocked ? playHref : 'javascript:;'}" target="${targetAttr}" data-id="${esc(v.vod_id)}" title="${esc(title)}">
               <div class="card-poster">
                 <img loading="lazy" referrerpolicy="no-referrer" src="${esc(pic)}" alt="${esc(title)}"
                      onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>'">
@@ -3144,45 +3346,35 @@
               </div>
               <div class="card-name" title="${esc(title)}">${esc(title)}</div>
               <div class="card-sub">${esc(year || '福利')}${type ? ' · ' + esc(type) : ''}</div>
-            </div>`;
+            </a>`;
         }).join('');
 
-        $$('#adultGrid .adult-vod-card').forEach((el) => {
-          el.addEventListener('click', () => {
-            const vidId = el.dataset.id;
-            const vod = list.find((x) => String(x.vod_id) === String(vidId));
-            if (!vod) return;
-            if (isUnlocked) {
-              location.hash = `#/play/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(vidId)}?ep=0&group=0`;
-            } else {
-              openPicPreviewModal(vod, curSrc);
-            }
-          });
-        });
+        grid.insertAdjacentHTML('beforeend', htmlChunk);
 
-        const pageCount = Number(r.pagecount || 1);
-        if (pw && (pageCount > 1 || adultPg > 1)) {
-          pw.innerHTML = `
-            <button class="btn ghost small" id="adultPrevPg" ${adultPg <= 1 ? 'disabled' : ''}>上一页</button>
-            <span style="font-size:13px;color:var(--dim)">第 ${adultPg} / ${pageCount || adultPg} 页</span>
-            <button class="btn ghost small" id="adultNextPg" ${pageCount && adultPg >= pageCount ? 'disabled' : ''}>下一页</button>
-          `;
-          $('#adultPrevPg') && $('#adultPrevPg').addEventListener('click', () => {
-            if (adultPg > 1) {
-              adultPg--;
-              fetchAdultList();
-              window.scrollTo({ top: $('#uBody').offsetTop - 60, behavior: 'smooth' });
-            }
-          });
-          $('#adultNextPg') && $('#adultNextPg').addEventListener('click', () => {
-            adultPg++;
-            fetchAdultList();
-            window.scrollTo({ top: $('#uBody').offsetTop - 60, behavior: 'smooth' });
-          });
+        // 绑定卡片点击
+        bindAdultCardClicks(grid);
+
+        if (statusEl) {
+          statusEl.textContent = `⚡ 已瀑布流加载 ${loadedVods.length} 部 · 第 1~${adultPg} 页 (共 ${totalCount} 部)`;
+        }
+
+        if (sentinel) {
+          if (!hasMore) {
+            sentinel.className = 'infinite-loader no-more';
+            sentinel.innerHTML = `🎉 已加载全部内容（共 ${loadedVods.length} 部影片）`;
+          } else {
+            sentinel.className = 'infinite-loader';
+            sentinel.innerHTML = `<span class="spin"></span> 向下滑动自动加载更多精彩影片…`;
+          }
+        }
+
+        // 初始化无限滚动
+        if (isFirstPage && hasMore) {
+          initInfiniteScroll();
         }
       }
 
-      fetchAdultList();
+      fetchAdultList(true);
     }
     function bindHistDel() {
       $$('#uBody .hist-del[data-id]').forEach((b) => b.addEventListener('click', async (ev) => {
