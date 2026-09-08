@@ -935,9 +935,18 @@
     if (sentinel && 'IntersectionObserver' in window) {
       const io = new IntersectionObserver((es) => {
         es.forEach((en) => { if (en.isIntersecting && !exhausted) loadNext(); });
-      }, { rootMargin: '500px' });
+      }, { rootMargin: '600px' });
       io.observe(sentinel);
     }
+    const onBrowseScroll = () => {
+      if (waving || exhausted || !life.ok()) return;
+      const sen = $('#browseSentinel');
+      if (!sen) return;
+      const r = sen.getBoundingClientRect();
+      if (r.top < window.innerHeight + 650) loadNext();
+    };
+    window.addEventListener('scroll', onBrowseScroll, { passive: true });
+
     const browseKey = listRouteKey(['browse', cat], query);
     activeListPage = {
       key: browseKey,
@@ -953,12 +962,13 @@
         if (sen && 'IntersectionObserver' in window) {
           const io2 = new IntersectionObserver((es) => {
             es.forEach((en) => { if (en.isIntersecting && !exhausted) loadNext(); });
-          }, { rootMargin: '500px' });
+          }, { rootMargin: '600px' });
           io2.observe(sen);
         }
+        window.addEventListener('scroll', onBrowseScroll, { passive: true });
         // 贴底时立即补一批, 避免返回后需手动再滑才触发
         const r = sen && sen.getBoundingClientRect();
-        if (r && r.top < window.innerHeight + 500 && !exhausted) loadNext();
+        if (r && r.top < window.innerHeight + 650 && !exhausted) loadNext();
       },
     };
   }
@@ -1035,13 +1045,26 @@
     // 滚动分批展示更多结果
     function bindRevealIO() {
       const srSen = $('#srSentinel');
-      if (!srSen || !('IntersectionObserver' in window)) return;
-      const io = new IntersectionObserver((es) => {
-        es.forEach((en) => {
-          if (en.isIntersecting && reveal < merged.size) { reveal += 48; renderGrid(); }
-        });
-      }, { rootMargin: '400px' });
-      io.observe(srSen);
+      if (!srSen) return;
+      if ('IntersectionObserver' in window) {
+        const io = new IntersectionObserver((es) => {
+          es.forEach((en) => {
+            if (en.isIntersecting && reveal < merged.size) { reveal += 48; renderGrid(); }
+          });
+        }, { rootMargin: '600px' });
+        io.observe(srSen);
+      }
+      const onSearchScroll = () => {
+        if (!life.ok() || reveal >= merged.size) return;
+        const sen = $('#srSentinel');
+        if (!sen) return;
+        const r = sen.getBoundingClientRect();
+        if (r.top <= window.innerHeight + 650) {
+          reveal += 48;
+          renderGrid();
+        }
+      };
+      window.addEventListener('scroll', onSearchScroll, { passive: true });
     }
     bindRevealIO();
     // 节流渲染: 任一源返回后 120ms 内合并刷新, 结果逐步出现
@@ -1125,7 +1148,7 @@
         else {
           const sen = $('#srSentinel');
           const r = sen && sen.getBoundingClientRect();
-          if (r && r.top < window.innerHeight + 500) { reveal += 24; renderGrid(); }
+          if (r && r.top < window.innerHeight + 650 && reveal < merged.size) { reveal += 48; renderGrid(); }
         }
       },
     };
@@ -2774,16 +2797,50 @@
     setTimeout(() => { const i = $('.t-user', box); i && i.focus(); }, 80);
   }
 
+  /* ------------------------------ 会员中心全量实时刷新 ------------------------------ */
+  async function doGlobalUserRefresh(btnEl) {
+    if (btnEl) {
+      btnEl.disabled = true;
+      btnEl.innerHTML = '<span class="spin"></span> 刷新中…';
+    }
+    LIST_PAGE_CACHE.delete('user');
+    try {
+      const [cRes, sRes, mRes, hRes] = await Promise.allSettled([
+        API.getConfig(),
+        API.getSettings(),
+        API.userMe(),
+        API.userHistory(),
+      ]);
+      if (cRes.status === 'fulfilled' && cRes.value) State.config = cRes.value;
+      if (sRes.status === 'fulfilled' && sRes.value) State.settings = sRes.value;
+      if (mRes.status === 'fulfilled' && mRes.value && mRes.value.me) {
+        State.me = mRes.value.me.username;
+        State.meCreated = Number(mRes.value.me.createdAt || 0);
+      }
+      updateUserBox();
+      toast('会员数据已刷新至最新', 'ok');
+    } catch (err) {
+      toast('刷新失败，请检查网络连接', 'err');
+    } finally {
+      const { parts } = parseHash();
+      if (parts[0] === 'user') {
+        const alive = makeAlive();
+        viewUser(alive);
+      }
+    }
+  }
+
   /* ============================================================
      视图：个人中心(现代流媒体 UI · 观看记录 / 我的收藏 / 搜索历史 / 独立私密福利专区)
      ============================================================ */
   async function viewUser(alive) {
+    const life = { ok: alive };
     const v = $('#view');
     if (!State.me) { location.hash = '#/login'; return; }
 
     let data = null;
     try { data = await API.userHistory(); } catch (e) { /* 未登录/KV异常 */ }
-    if (!alive()) return;
+    if (!life.ok()) return;
 
     const favs = store.get('favs', []);
     const watchItems = data ? data.items.filter((it) => it.kind === 'watch') : [];
@@ -2885,6 +2942,7 @@
     let adultQuery = '';
     let adultCat = '';
     let scrollCleanup = null;
+    let adultRebind = null;
 
     function renderBody() {
       if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
@@ -3196,8 +3254,8 @@
       // 动态加载上游分类
       const catsEl = $('#adultCats');
       (async () => {
-        const cats = await loadSourceCats(curSrc, alive);
-        if (!alive() || !catsEl) return;
+        const cats = await loadSourceCats(curSrc, life.ok);
+        if (!life.ok() || !catsEl) return;
         if (cats && cats.length) {
           catsEl.classList.remove('hidden');
           catsEl.innerHTML = `
@@ -3253,7 +3311,7 @@
         if (!sentinel) return;
 
         const triggerNext = () => {
-          if (!alive() || loadingMore || !hasMore) return;
+          if (!life.ok() || loadingMore || !hasMore) return;
           adultPg++;
           fetchAdultList(false);
         };
@@ -3264,18 +3322,24 @@
             if (entries[0] && entries[0].isIntersecting) {
               triggerNext();
             }
-          }, { rootMargin: '450px 0px' });
+          }, { rootMargin: '600px 0px' });
           obs.observe(sentinel);
         }
 
         const onScroll = () => {
-          if (!alive() || loadingMore || !hasMore) return;
+          if (!life.ok() || loadingMore || !hasMore) return;
           const rect = sentinel.getBoundingClientRect();
-          if (rect.top <= window.innerHeight + 450) {
+          if (rect.top <= window.innerHeight + 650) {
             triggerNext();
           }
         };
         window.addEventListener('scroll', onScroll, { passive: true });
+
+        // 若当前已经靠近底部，立即加载下一页，避免返回后卡死
+        const r = sentinel.getBoundingClientRect();
+        if (r.top <= window.innerHeight + 650 && hasMore && !loadingMore) {
+          triggerNext();
+        }
 
         scrollCleanup = () => {
           if (obs) { obs.disconnect(); obs = null; }
@@ -3287,7 +3351,7 @@
         const grid = $('#adultGrid');
         const statusEl = $('#adultStatus');
         const sentinel = $('#adultSentinel');
-        if (!grid || !alive()) return;
+        if (!grid || !life.ok()) return;
 
         if (isFirstPage) {
           if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
@@ -3316,7 +3380,7 @@
             : await API.list(curSrc, adultPg, adultCat);
         } catch (e) {
           loadingMore = false;
-          if (!alive()) return;
+          if (!life.ok()) return;
           if (isFirstPage) {
             grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">⚠️</div>加载失败：${esc(e.message)}<div style="margin-top:12px"><button class="btn primary small" id="adultRetryBtn">🔄 重试</button></div></div>`;
             $('#adultRetryBtn') && $('#adultRetryBtn').addEventListener('click', () => fetchAdultList(true));
@@ -3331,7 +3395,10 @@
           return;
         }
 
-        if (!alive()) return;
+        if (!life.ok()) {
+          loadingMore = false;
+          return;
+        }
         loadingMore = false;
 
         const list = (r && r.list) || [];
@@ -3404,11 +3471,61 @@
           }
         }
 
-        // 初始化无限滚动
-        if (isFirstPage && hasMore) {
+        // 初始化/更新无限滚动
+        if (hasMore) {
           initInfiniteScroll();
         }
       }
+
+      adultRebind = (alive2) => {
+        life.ok = alive2;
+        loadingMore = false;
+        const grid = $('#adultGrid');
+        if (grid) bindAdultCardClicks(grid);
+        initInfiniteScroll();
+        const bannerToggle = $('#adultBannerToggle');
+        const bannerBody = $('#adultBannerBody');
+        const toggleTxt = $('#adultToggleTxt');
+        if (bannerToggle && bannerBody) {
+          bannerToggle.addEventListener('click', () => {
+            const isFold = bannerBody.classList.toggle('hidden');
+            store.set('adultDescFold', isFold);
+            if (toggleTxt) toggleTxt.textContent = isFold ? '展开说明 ▾' : '收起说明 ▴';
+          });
+        }
+        $('#uBannerUnlockBtn') && $('#uBannerUnlockBtn').addEventListener('click', () => openUnlockModal(() => renderAdultTab()));
+        $('#uBtnUnlock') && $('#uBtnUnlock').addEventListener('click', () => openUnlockModal(() => renderAdultTab()));
+        $('#adultSearchBtn') && $('#adultSearchBtn').addEventListener('click', () => {
+          adultQuery = ($('#adultSearchInput').value || '').trim();
+          fetchAdultList(true);
+        });
+        $('#adultSearchInput') && $('#adultSearchInput').addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); adultQuery = ($('#adultSearchInput').value || '').trim(); fetchAdultList(true); }
+        });
+        $('#adultSearchClear') && $('#adultSearchClear').addEventListener('click', () => {
+          adultQuery = '';
+          if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
+          fetchAdultList(true);
+        });
+        $$('#adultCats .chip').forEach((c) => {
+          c.addEventListener('click', () => {
+            adultCat = c.dataset.cat || '';
+            adultQuery = '';
+            if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
+            $$('#adultCats .chip').forEach((x) => x.classList.toggle('on', x === c));
+            fetchAdultList(true);
+          });
+        });
+        $$('#adultSrcList .src-row').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            if (adultCurSrcKey === btn.dataset.k) return;
+            adultCurSrcKey = btn.dataset.k;
+            store.set('adultCurKey', adultCurSrcKey);
+            adultPg = 1; adultCat = ''; adultQuery = '';
+            renderAdultTab();
+          });
+        });
+      };
 
       fetchAdultList(true);
     }
@@ -3432,9 +3549,9 @@
       $$('#uTabs .user-tab-btn').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.t; renderBody(); }));
       $$('.user-kpi-card[data-jump]').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.jump; renderBody(); }));
       $('#uHeroUnlockBtn') && $('#uHeroUnlockBtn').addEventListener('click', () => {
-        openUnlockModal(() => { viewUser(alive); });
+        openUnlockModal(() => { viewUser(life.ok); });
       });
-      $('#uRefreshBtn') && $('#uRefreshBtn').addEventListener('click', () => { viewUser(alive); });
+      $('#uRefreshBtn') && $('#uRefreshBtn').addEventListener('click', () => { doGlobalUserRefresh($('#uRefreshBtn')); });
       $('#uLogout') && $('#uLogout').addEventListener('click', async () => {
         try { await API.userLogout(); } catch (e) {}
         State.me = null;
@@ -3448,55 +3565,14 @@
       key: 'user',
       getState: () => ({ tab }),
       rebind: (alive2, state) => {
-        if (!alive2()) return;
+        life.ok = alive2;
+        if (!life.ok()) return;
         if (state && state.tab) tab = state.tab;
         bindUserHeaderEvents();
         if (tab === 'adult') {
-          const grid = $('#adultGrid');
-          if (grid) bindAdultCardClicks(grid);
-          initInfiniteScroll();
-          const bannerToggle = $('#adultBannerToggle');
-          const bannerBody = $('#adultBannerBody');
-          const toggleTxt = $('#adultToggleTxt');
-          if (bannerToggle && bannerBody) {
-            bannerToggle.addEventListener('click', () => {
-              const isFold = bannerBody.classList.toggle('hidden');
-              store.set('adultDescFold', isFold);
-              if (toggleTxt) toggleTxt.textContent = isFold ? '展开说明 ▾' : '收起说明 ▴';
-            });
+          if (typeof adultRebind === 'function') {
+            adultRebind(alive2);
           }
-          $('#uBannerUnlockBtn') && $('#uBannerUnlockBtn').addEventListener('click', () => openUnlockModal(() => renderAdultTab()));
-          $('#uBtnUnlock') && $('#uBtnUnlock').addEventListener('click', () => openUnlockModal(() => renderAdultTab()));
-          $('#adultSearchBtn') && $('#adultSearchBtn').addEventListener('click', () => {
-            adultQuery = ($('#adultSearchInput').value || '').trim();
-            fetchAdultList(true);
-          });
-          $('#adultSearchInput') && $('#adultSearchInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); adultQuery = ($('#adultSearchInput').value || '').trim(); fetchAdultList(true); }
-          });
-          $('#adultSearchClear') && $('#adultSearchClear').addEventListener('click', () => {
-            adultQuery = '';
-            if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
-            fetchAdultList(true);
-          });
-          $$('#adultCats .chip').forEach((c) => {
-            c.addEventListener('click', () => {
-              adultCat = c.dataset.cat || '';
-              adultQuery = '';
-              if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
-              $$('#adultCats .chip').forEach((x) => x.classList.toggle('on', x === c));
-              fetchAdultList(true);
-            });
-          });
-          $$('#adultSrcList .src-row').forEach((btn) => {
-            btn.addEventListener('click', () => {
-              if (adultCurSrcKey === btn.dataset.k) return;
-              adultCurSrcKey = btn.dataset.k;
-              store.set('adultCurKey', adultCurSrcKey);
-              adultPg = 1; adultCat = ''; adultQuery = '';
-              renderAdultTab();
-            });
-          });
         } else if (tab === 'watch' || tab === 'fav' || tab === 'search') {
           bindHistDel();
         }
@@ -3789,9 +3865,18 @@
       if (senEl && 'IntersectionObserver' in window) {
         const io2 = new IntersectionObserver((es) => {
           es.forEach((en) => { if (en.isIntersecting && !exhausted) loadPage(); });
-        }, { rootMargin: '500px' });
+        }, { rootMargin: '600px' });
         io2.observe(senEl);
       }
+      const onSourcesScroll = () => {
+        if (busy || exhausted || !life.ok()) return;
+        const sen = $('#srcSentinel');
+        if (!sen) return;
+        const r = sen.getBoundingClientRect();
+        if (r.top <= window.innerHeight + 650) loadPage();
+      };
+      window.addEventListener('scroll', onSourcesScroll, { passive: true });
+
       const form = $('#srcPageSearch');
       if (form) form.addEventListener('submit', (e) => {
         e.preventDefault();
@@ -3824,7 +3909,7 @@
           if (bindSourcesChrome) bindSourcesChrome();
           const senEl = $('#srcSentinel');
           const r = senEl && senEl.getBoundingClientRect();
-          if (r && r.top < window.innerHeight + 500 && !exhausted) loadPage();
+          if (r && r.top < window.innerHeight + 650 && !exhausted) loadPage();
         },
       };
     }
@@ -5434,6 +5519,108 @@
       try { history.scrollRestoration = 'manual'; } catch (e) {}
     }
     window.addEventListener('hashchange', route);
+
+    /* ------------------------------ 移动端顶部下拉刷新手势 (Pull-to-Refresh) ------------------------------ */
+    function initPullToRefresh() {
+      let startY = 0;
+      let isTracking = false;
+      let isRefreshing = false;
+
+      let bar = $('#pullRefreshBar');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'pullRefreshBar';
+        bar.className = 'pull-refresh-bar';
+        bar.innerHTML = '<span class="ptr-icon">↓</span> <span class="ptr-text">下拉即可刷新</span>';
+        document.body.appendChild(bar);
+      }
+      const ptrIcon = bar.querySelector('.ptr-icon');
+      const ptrText = bar.querySelector('.ptr-text');
+
+      window.addEventListener('touchstart', (e) => {
+        if (isRefreshing) return;
+        if (e.target.closest('#videoWrap, .player-wrap, input, textarea, select')) return;
+        const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+        if (scrollY <= 2) {
+          startY = e.touches[0].clientY;
+          isTracking = true;
+        } else {
+          isTracking = false;
+        }
+      }, { passive: true });
+
+      window.addEventListener('touchmove', (e) => {
+        if (!isTracking || isRefreshing) return;
+        const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+        if (scrollY > 2) {
+          isTracking = false;
+          bar.classList.remove('pulling', 'active', 'ready');
+          bar.style.height = '0px';
+          return;
+        }
+        const curY = e.touches[0].clientY;
+        const diff = curY - startY;
+        if (diff > 10) {
+          const pullDist = Math.min(65, Math.round(diff * 0.42));
+          bar.classList.add('pulling');
+          bar.style.height = pullDist + 'px';
+          bar.style.opacity = Math.min(1, pullDist / 35);
+          if (pullDist >= 50) {
+            bar.classList.add('ready');
+            ptrText.textContent = '释放立即刷新';
+          } else {
+            bar.classList.remove('ready');
+            ptrText.textContent = '下拉即可刷新';
+          }
+        }
+      }, { passive: true });
+
+      const endPull = async () => {
+        if (!isTracking || isRefreshing) return;
+        isTracking = false;
+        if (bar.classList.contains('ready')) {
+          isRefreshing = true;
+          bar.classList.remove('pulling', 'ready');
+          bar.classList.add('active');
+          bar.style.height = '46px';
+          bar.style.opacity = '1';
+          bar.innerHTML = '<span class="spin"></span> <span class="ptr-text">正在刷新数据…</span>';
+
+          try {
+            const { parts, query } = parseHash();
+            const rKey = listRouteKey(parts, query);
+            if (rKey) LIST_PAGE_CACHE.delete(rKey);
+
+            if (parts[0] === 'user') {
+              await doGlobalUserRefresh();
+            } else {
+              await route();
+            }
+            bar.innerHTML = '<span style="color:var(--ok)">✓</span> <span class="ptr-text">刷新完成</span>';
+          } catch (err) {
+            bar.innerHTML = '<span style="color:var(--danger)">⚠️</span> <span class="ptr-text">刷新失败</span>';
+          } finally {
+            setTimeout(() => {
+              bar.classList.remove('active');
+              bar.style.height = '0px';
+              bar.style.opacity = '0';
+              setTimeout(() => {
+                bar.innerHTML = '<span class="ptr-icon">↓</span> <span class="ptr-text">下拉即可刷新</span>';
+                isRefreshing = false;
+              }, 220);
+            }, 500);
+          }
+        } else {
+          bar.classList.remove('pulling', 'ready', 'active');
+          bar.style.height = '0px';
+          bar.style.opacity = '0';
+        }
+      };
+
+      window.addEventListener('touchend', endPull, { passive: true });
+      window.addEventListener('touchcancel', endPull, { passive: true });
+    }
+    initPullToRefresh();
 
     buildThemePop();
     buildNav();

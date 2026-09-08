@@ -1776,3 +1776,52 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
   .user-kpi-grid { grid-template-columns: 1fr; }
 }
 
+/* 移动端下拉刷新组件 (Pull to Refresh) */
+.pull-refresh-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 0;
+  max-height: 56px;
+  overflow: hidden;
+  background: var(--card);
+  border-bottom: 1px solid var(--card-br);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  color: var(--txt);
+  font-size: 13.5px;
+  font-weight: 600;
+  opacity: 0;
+  pointer-events: none;
+  transition: height 0.22s cubic-bezier(0.2, 0, 0, 1), opacity 0.2s ease;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.pull-refresh-bar.pulling {
+  transition: none;
+}
+.pull-refresh-bar.active {
+  height: 48px;
+  opacity: 1;
+}
+.pull-refresh-bar .ptr-icon {
+  display: inline-block;
+  font-size: 16px;
+  transition: transform 0.22s ease;
+  line-height: 1;
+}
+.pull-refresh-bar.ready .ptr-icon {
+  transform: rotate(180deg);
+  color: var(--acc);
+}
+.pull-refresh-bar .spin {
+  width: 14px;
+  height: 14px;
+}
+
+
