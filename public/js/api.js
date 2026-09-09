@@ -94,6 +94,22 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ changelog: changelog || '' }),
       }, 20000),
+    adminGithubTest: (params) =>
+      jfetch('/api/admin/github-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params || {}),
+      }, 25000),
+    adminGithubPush: () =>
+      jfetch('/api/admin/github-sync-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }, 40000),
+    adminGithubPull: () =>
+      jfetch('/api/admin/github-sync-pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }, 40000),
     adminChangePassword: (oldPassword, newPassword) =>
       jfetch('/api/admin/password', {
         method: 'POST',

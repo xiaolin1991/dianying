@@ -4436,7 +4436,7 @@
       ['sources', '🧩 影视源管理'],
       ['site', '⚙️ 站点设置'],
       ['app', '📲 APP推广'],
-      ['backup', '🗄️ 数据备份'],
+      ['backup', '🗄️ 数据与 GitHub 同步'],
       ['sec', '🔐 安全中心'],
       ['sys', 'ℹ️ 系统信息'],
     ];
@@ -5322,6 +5322,24 @@
               ① <b>Android APK 编译</b>：自动打包手机端与电视版 APK，发布至 GitHub Releases 并写入 <code>/APP</code> 目录；<br>
               ② <b>Docker 镜像构建</b>：自动编译多架构镜像并推送至 GitHub Packages (<code>ghcr.io</code>)。
             </div>
+
+            <!-- GitHub Token 状态提示 / 快捷输入 -->
+            ${s.hasGithubToken ? `
+              <div style="margin:12px 0;padding:10px 14px;border-radius:10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);font-size:13px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                <span style="color:#4ade80">🟢 <b>GitHub Token 已就绪</b>：目标仓库 <code>${esc(s.githubRepoFull || 'xiaolin1991/dianying')}</code> (PAT: <code>${esc(s.githubTokenMasked || '已配置')}</code>)</span>
+                <button type="button" class="btn ghost small" id="jumpToGhSyncBtn" style="padding:2px 10px;font-size:12px">⚙️ 管理 GitHub 仓库与同步</button>
+              </div>
+            ` : `
+              <div style="margin:12px 0;padding:12px 14px;border-radius:10px;background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.3);font-size:13px">
+                <div style="font-weight:700;color:#facc15;margin-bottom:6px">⚠️ 尚未配置 GitHub Token（直接在此输入即可，无需前往 Cloudflare）</div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <input class="field-input" id="quickGhTokenInput" type="password" placeholder="直接粘贴以 ghp_ 开头的 Personal Access Token" style="flex:1;min-width:240px">
+                  <button type="button" class="btn primary small" id="quickSaveGhTokenBtn" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);white-space:nowrap">💾 保存 Token</button>
+                </div>
+                <div style="font-size:12px;color:var(--dim);margin-top:6px">提示：可在 GitHub ➔ Settings ➔ Developer settings ➔ Personal access tokens 生成（需勾选 repo 与 workflow 权限）。保存后无需在 Cloudflare 配置环境变量！</div>
+              </div>
+            `}
+
             <div style="margin-top:12px">
               <label class="field-label">本次构建更新说明（选填，将作为 Release 说明写入）</label>
               <input class="field-input" id="apkBuildChangelogInput" placeholder="例如：优化私密福利双栏体验、会员中心UI全面升级" />
@@ -5329,10 +5347,10 @@
                 <button class="btn primary" id="dispatchBuildApkBtn" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);font-weight:700" type="button">
                   🚀 确认网页正常，一键构建 APK + Docker 镜像
                 </button>
-                <a class="btn ghost" href="https://github.com/xiaolin1991/dianying/actions/workflows/android.yml" target="_blank" rel="noopener">
+                <a class="btn ghost" href="https://github.com/${esc(s.githubRepoFull || 'xiaolin1991/dianying')}/actions/workflows/android.yml" target="_blank" rel="noopener">
                   📋 前往 GitHub Actions 查看构建进度
                 </a>
-                <a class="btn ghost" href="https://github.com/xiaolin1991/dianying/pkgs/container/dianying" target="_blank" rel="noopener">
+                <a class="btn ghost" href="https://github.com/${esc(s.githubRepoFull || 'xiaolin1991/dianying')}/pkgs/container/dianying" target="_blank" rel="noopener">
                   🐳 查看 GHCR Docker 镜像
                 </a>
               </div>
@@ -5493,9 +5511,37 @@
         });
 
         // 一键构建 APK + Docker 镜像
+        $('#jumpToGhSyncBtn') && $('#jumpToGhSyncBtn').addEventListener('click', () => {
+          admTab = 'backup';
+          $$('#admSide .adm-nav-item').forEach((x) => x.classList.toggle('on', x.dataset.tab === admTab));
+          renderAdmTab(lastSettings);
+        });
+
+        $('#quickSaveGhTokenBtn') && $('#quickSaveGhTokenBtn').addEventListener('click', async () => {
+          const tok = ($('#quickGhTokenInput') && $('#quickGhTokenInput').value.trim()) || '';
+          if (!tok) return toast('请先输入有效的 GitHub Token', 'err');
+          try {
+            await API.adminSaveSettings({ githubToken: tok });
+            const fresh = await API.adminGetSettings();
+            lastSettings = fresh;
+            State.settings = { ...State.settings, ...fresh };
+            toast('GitHub Token 已保存，可直接点击下方按钮一键打包！', 'ok');
+            renderAdmTab(fresh);
+          } catch (e) { toast('保存失败：' + e.message, 'err'); }
+        });
+
         $('#dispatchBuildApkBtn') && $('#dispatchBuildApkBtn').addEventListener('click', async () => {
           const btn = $('#dispatchBuildApkBtn');
           const changelog = ($('#apkBuildChangelogInput') && $('#apkBuildChangelogInput').value.trim()) || '';
+          const quickTok = ($('#quickGhTokenInput') && $('#quickGhTokenInput').value.trim()) || '';
+          if (!s.hasGithubToken && quickTok) {
+            try {
+              await API.adminSaveSettings({ githubToken: quickTok });
+              const fresh = await API.adminGetSettings();
+              lastSettings = fresh;
+              s = fresh;
+            } catch (e) { /* ignore */ }
+          }
           if (!confirm('已确认当前网页版功能与浏览一切正常，确认立即触发 GitHub Actions 打包构建 APK 与 Docker 镜像？')) return;
           btn.disabled = true;
           btn.textContent = '⏳ 正在向 GitHub 发送调度指令...';
@@ -5517,11 +5563,66 @@
         });
       }
 
-      /* ---------------- 🗄️ 数据备份 ---------------- */
+      /* ---------------- 🗄️ 数据与 GitHub 同步 ---------------- */
       else if (admTab === 'backup') {
         main.innerHTML = `
+          <!-- 🐙 GitHub 数据中心双向同步 (依托 GitHub 为持久化存储) -->
           <div class="admin-card">
-            <h3>🗄️ 数据备份 / 迁移 <small style="color:var(--dim);font-weight:400;font-size:12px">（Cloudflare ↔ VPS/Docker 互通）</small></h3>
+            <h3>GitHub 数据中心双向同步 <small style="color:var(--dim);font-weight:400;font-size:12px">（依托 GitHub 为持久化存储）</small></h3>
+            <p class="hint">无需购买昂贵的数据库，直接将影视源、系统设置、用户信息及历史收藏自动同步至您的专属 GitHub 仓库中！即使 Cloudflare 未绑定 KV 命名空间，也能永久保存！</p>
+
+            <div style="margin:14px 0 16px">
+              <div style="font-size:12px;color:var(--dim);margin-bottom:6px">开启 GitHub 双向持久化同步</div>
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                <span class="switch"><input type="checkbox" id="ghSyncSw" ${s.githubSyncEnabled ? 'checked' : ''}><span class="track"></span></span>
+                <b>激活 GitHub 仓库同步驱动</b>
+              </label>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:14px">
+              <div>
+                <label class="field-label">GitHub 用户名或组织名 (Owner)</label>
+                <input class="field-input" id="ghOwnerInput" value="${esc(s.githubOwner || 'xiaolin1991')}" placeholder="xiaolin1991">
+              </div>
+              <div>
+                <label class="field-label">仓库名称 (Repo)</label>
+                <input class="field-input" id="ghRepoInput" value="${esc(s.githubRepo || 'dianying')}" placeholder="dianying">
+              </div>
+              <div>
+                <label class="field-label">分支名称 (Branch)</label>
+                <input class="field-input" id="ghBranchInput" value="${esc(s.githubBranch || 'main')}" placeholder="main">
+              </div>
+              <div>
+                <label class="field-label">存储文件夹目录前缀</label>
+                <input class="field-input" id="ghPrefixInput" value="${esc(s.githubPrefix || 'data')}" placeholder="data">
+              </div>
+            </div>
+
+            <div style="margin-top:14px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <label class="field-label" style="margin-bottom:0">GitHub Personal Access Token (PAT，需具备 repo 写入权限)</label>
+                ${s.hasGithubToken ? `<span style="font-size:12px;color:var(--ok)">已配置: <code>${esc(s.githubTokenMasked)}</code></span>` : ''}
+              </div>
+              <div style="position:relative;display:flex;align-items:center">
+                <input class="field-input" id="ghTokenInput" type="password" placeholder="${s.hasGithubToken ? '若无需更改请留空 (当前已保存: ' + esc(s.githubTokenMasked) + ')' : 'ghp_xxxxxxxxxxxxxxxxxxxx'}" style="padding-right:42px">
+                <button type="button" id="toggleGhTokenBtn" style="position:absolute;right:8px;background:none;border:none;cursor:pointer;font-size:16px;opacity:.7" title="切换显示明文/密码">👁️</button>
+              </div>
+              <p class="hint" style="margin-top:6px">提示：可在 GitHub ➔ Settings ➔ Developer settings ➔ Personal access tokens 生成（需勾选 <b>repo</b> 与 <b>workflow</b> 权限）。保存后后台打包与数据同步立即生效，无需配置 Cloudflare 环境变量！</p>
+            </div>
+
+            <div id="ghSyncStat" style="display:none;margin-top:14px;padding:12px 16px;border-radius:10px;font-size:13px;line-height:1.6"></div>
+
+            <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;align-items:center">
+              <button type="button" class="btn ghost" id="ghTestBtn">🔍 测试仓库连通性</button>
+              <button type="button" class="btn primary" id="ghSaveBtn" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);font-weight:700">💾 保存 GitHub 配置</button>
+              <button type="button" class="btn ghost" id="ghPushBtn">⬆️ 一键备份所有数据到 GitHub (Push)</button>
+              <button type="button" class="btn ghost" id="ghPullBtn">⬇️ 从 GitHub 拉取数据恢复 (Pull)</button>
+            </div>
+          </div>
+
+          <!-- 🗄️ 本地数据备份 / 迁移 -->
+          <div class="admin-card" style="margin-top:16px">
+            <h3>🗄️ 本地数据备份 / 迁移 <small style="color:var(--dim);font-weight:400;font-size:12px">（JSON 文件导入导出，Cloudflare ↔ VPS/Docker 互通）</small></h3>
             <p class="hint">导出内容：<b>站点设置 · 注册用户 · 观看历史 · 收藏 · 流量统计</b>。迁移到自托管服务器：旧环境导出 JSON → 新环境后台「恢复备份」即可无缝搬家（详见 docs/DEPLOY-VPS.md、docs/DEPLOY-BT.md）。</p>
             <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
               <button class="btn primary" id="bkExpBtn">⬇️ 导出备份(JSON)</button>
@@ -5535,6 +5636,131 @@
             </div>
             <p class="hint" style="margin-top:10px">💡 自托管(Docker/宝塔)用户也可直接备份数据目录里的 <code>kv.json</code> 文件，效果等同。</p>
           </div>`;
+
+        // 切换 PAT 密码明文显示
+        let ghTokenVisible = false;
+        $('#toggleGhTokenBtn') && $('#toggleGhTokenBtn').addEventListener('click', () => {
+          const inp = $('#ghTokenInput');
+          if (!inp) return;
+          ghTokenVisible = !ghTokenVisible;
+          inp.type = ghTokenVisible ? 'text' : 'password';
+          $('#toggleGhTokenBtn').textContent = ghTokenVisible ? '🔒' : '👁️';
+        });
+
+        const showGhStat = (msg, isOk) => {
+          const el = $('#ghSyncStat');
+          if (!el) return;
+          el.style.display = 'block';
+          el.style.background = isOk ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.12)';
+          el.style.border = isOk ? '1px solid rgba(34,197,94,.3)' : '1px solid rgba(239,68,68,.3)';
+          el.style.color = isOk ? 'var(--ok)' : 'var(--danger)';
+          el.innerHTML = msg;
+        };
+
+        // 测试仓库连通性
+        $('#ghTestBtn') && $('#ghTestBtn').addEventListener('click', async () => {
+          const btn = $('#ghTestBtn');
+          const token = ($('#ghTokenInput') && $('#ghTokenInput').value.trim()) || '';
+          const owner = ($('#ghOwnerInput') && $('#ghOwnerInput').value.trim()) || '';
+          const repo = ($('#ghRepoInput') && $('#ghRepoInput').value.trim()) || '';
+          btn.disabled = true; btn.textContent = '⏳ 测试中…';
+          try {
+            const r = await API.adminGithubTest({ token, owner, repo });
+            if (r.ok) {
+              showGhStat(esc(r.msg), true);
+              toast('GitHub 连通测试通过！', 'ok');
+            } else {
+              showGhStat('❌ ' + esc(r.error || '连通失败'), false);
+              toast('测试失败：' + (r.error || '未知错误'), 'err');
+            }
+          } catch (e) {
+            showGhStat('❌ 测试失败：' + esc(e.message), false);
+            toast('测试失败：' + e.message, 'err');
+          } finally {
+            btn.disabled = false; btn.textContent = '🔍 测试仓库连通性';
+          }
+        });
+
+        // 保存 GitHub 配置
+        $('#ghSaveBtn') && $('#ghSaveBtn').addEventListener('click', async () => {
+          const btn = $('#ghSaveBtn');
+          const token = ($('#ghTokenInput') && $('#ghTokenInput').value.trim()) || '';
+          const owner = ($('#ghOwnerInput') && $('#ghOwnerInput').value.trim()) || 'xiaolin1991';
+          const repo = ($('#ghRepoInput') && $('#ghRepoInput').value.trim()) || 'dianying';
+          const branch = ($('#ghBranchInput') && $('#ghBranchInput').value.trim()) || 'main';
+          const prefix = ($('#ghPrefixInput') && $('#ghPrefixInput').value.trim()) || 'data';
+          const enabled = Boolean($('#ghSyncSw') && $('#ghSyncSw').checked);
+          btn.disabled = true; btn.textContent = '⏳ 保存中…';
+          try {
+            const patch = {
+              githubOwner: owner,
+              githubRepo: repo,
+              githubBranch: branch,
+              githubPrefix: prefix,
+              githubSyncEnabled: enabled,
+            };
+            if (token) patch.githubToken = token;
+            await API.adminSaveSettings(patch);
+            const fresh = await API.adminGetSettings();
+            lastSettings = fresh;
+            State.settings = { ...State.settings, ...fresh };
+            toast('GitHub 配置已保存！后台打包与数据同步已绑定', 'ok');
+            renderAdmTab(fresh);
+          } catch (e) {
+            toast('保存失败：' + e.message, 'err');
+          } finally {
+            btn.disabled = false; btn.textContent = '💾 保存 GitHub 配置';
+          }
+        });
+
+        // 一键备份数据到 GitHub (Push)
+        $('#ghPushBtn') && $('#ghPushBtn').addEventListener('click', async () => {
+          const btn = $('#ghPushBtn');
+          btn.disabled = true; btn.textContent = '⏳ 正在向 GitHub 推送备份…';
+          try {
+            const r = await API.adminGithubPush();
+            if (r.ok) {
+              showGhStat(`✅ ${esc(r.msg)} (包含 ${r.keyCount || 0} 个数据键)`, true);
+              toast('全站数据已成功备份至 GitHub 仓库！', 'ok');
+            } else {
+              showGhStat('❌ 备份失败：' + esc(r.error || '未知错误'), false);
+              toast('备份失败：' + (r.error || '未知错误'), 'err');
+            }
+          } catch (e) {
+            showGhStat('❌ 备份异常：' + esc(e.message), false);
+            toast('备份失败：' + e.message, 'err');
+          } finally {
+            btn.disabled = false; btn.textContent = '⬆️ 一键备份所有数据到 GitHub (Push)';
+          }
+        });
+
+        // 从 GitHub 拉取数据恢复 (Pull)
+        $('#ghPullBtn') && $('#ghPullBtn').addEventListener('click', async () => {
+          if (!confirm('确认从 GitHub 仓库拉取备份数据并恢复？这将合并更新当前系统的配置与数据。')) return;
+          const btn = $('#ghPullBtn');
+          btn.disabled = true; btn.textContent = '⏳ 正在从 GitHub 拉取恢复…';
+          try {
+            const r = await API.adminGithubPull();
+            if (r.ok) {
+              showGhStat(`✅ ${esc(r.msg)} (更新了 ${r.restored} 项数据)`, true);
+              toast('已成功从 GitHub 恢复全站数据！', 'ok');
+              State.config = await API.getConfig();
+              const fresh = await API.adminGetSettings();
+              lastSettings = fresh;
+              renderPanel();
+            } else {
+              showGhStat('❌ 恢复失败：' + esc(r.error || '未知错误'), false);
+              toast('恢复失败：' + (r.error || '未知错误'), 'err');
+            }
+          } catch (e) {
+            showGhStat('❌ 恢复异常：' + esc(e.message), false);
+            toast('恢复失败：' + e.message, 'err');
+          } finally {
+            btn.disabled = false; btn.textContent = '⬇️ 从 GitHub 拉取数据恢复 (Pull)';
+          }
+        });
+
+        // 本地 JSON 导出
         $('#bkExpBtn').addEventListener('click', async () => {
           const btn = $('#bkExpBtn');
           btn.disabled = true; btn.textContent = '⏳ 导出中…';

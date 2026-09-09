@@ -84,6 +84,13 @@ const DEFAULT_SETTINGS = {
   adultUnlockCode: 'VIP888', // 私密福利激活码/卡密(默认 VIP888, 后台可改, 支持逗号分隔多个)
   adultPayDesc: '私密福利影片为会员专属特权内容。如需开通，可联系管理员获取激活卡密，或输入卡密立即解锁。', // 解锁说明
   adultPayQr: '',            // 收款码或客服二维码图片链接
+  // GitHub 数据中心与双向持久化同步配置 (支持后台直接填 Token 免去 Cloudflare 环境变量)
+  githubToken: '',       // Personal Access Token (ghp_... 或 github_pat_...)
+  githubOwner: 'xiaolin1991', // GitHub 用户名或组织名
+  githubRepo: 'dianying',     // 仓库名称
+  githubBranch: 'main',       // 分支名称
+  githubPrefix: 'data',       // 存储文件夹目录前缀
+  githubSyncEnabled: false,   // 是否激活 GitHub 仓库同步驱动
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -189,20 +196,50 @@ function effectiveDownloadUrls(s) {
 
 const APP_MANIFEST_KEY = 'app_manifest';
 
-function githubRepo(env) {
-  return String((env && (env.GITHUB_REPO || env.GH_REPO)) || '').trim().replace(/^\/+|\/+$/g, '');
+function maskToken(token) {
+  if (!token || typeof token !== 'string') return '';
+  const s = token.trim();
+  if (s.length <= 8) return '****';
+  return s.slice(0, 4) + '****' + s.slice(-4);
 }
 
-function githubToken(env) {
-  return String((env && (env.GITHUB_TOKEN || env.GH_TOKEN || env.GH_PAT)) || '').trim();
+function getGithubConfig(env, s) {
+  const cur = s || MEM.settings || {};
+  const token = String(cur.githubToken || (env && (env.GITHUB_TOKEN || env.GH_TOKEN || env.GH_PAT)) || '').trim();
+  const owner = String(cur.githubOwner || '').trim() || 'xiaolin1991';
+  const repoName = String(cur.githubRepo || '').trim() || 'dianying';
+  const branch = String(cur.githubBranch || '').trim() || 'main';
+  const prefix = String(cur.githubPrefix || 'data').trim().replace(/^\/+|\/+$/g, '') || 'data';
+  const envRepo = String((env && (env.GITHUB_REPO || env.GH_REPO)) || '').trim().replace(/^\/+|\/+$/g, '');
+  const repo = envRepo || `${owner}/${repoName}`;
+  return {
+    token,
+    owner,
+    repoName,
+    branch,
+    prefix,
+    repo,
+    syncEnabled: Boolean(cur.githubSyncEnabled),
+    fromAdmin: Boolean(cur.githubToken),
+    fromEnv: Boolean(!cur.githubToken && env && (env.GITHUB_TOKEN || env.GH_TOKEN || env.GH_PAT)),
+  };
+}
+
+function githubRepo(env, s) {
+  return getGithubConfig(env, s).repo;
+}
+
+function githubToken(env, s) {
+  return getGithubConfig(env, s).token;
 }
 
 /** 从 GitHub Contents API 读取仓库文件（私有仓需配置 GITHUB_TOKEN） */
-async function githubReadFile(env, filePath, ref) {
-  const repo = githubRepo(env);
-  const token = githubToken(env);
+async function githubReadFile(env, filePath, ref, s) {
+  const cfg = getGithubConfig(env, s);
+  const repo = cfg.repo;
+  const token = cfg.token;
   if (!repo || !token) return null;
-  const url = `https://api.github.com/repos/${repo}/contents/${String(filePath).replace(/^\/+/, '')}?ref=${encodeURIComponent(ref || 'main')}`;
+  const url = `https://api.github.com/repos/${repo}/contents/${String(filePath).replace(/^\/+/, '')}?ref=${encodeURIComponent(ref || cfg.branch || 'main')}`;
   const r = await fetch(url, {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -220,6 +257,61 @@ async function githubReadFile(env, filePath, ref) {
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return { bytes, sha: data.sha || '', name: data.name || '' };
+}
+
+/** 向 GitHub 仓库写入或更新文件 (Contents API, 自动处理已存在文件的 SHA) */
+async function githubWriteFile(env, filePath, contentBytesOrStr, commitMsg, branch, s) {
+  const cfg = getGithubConfig(env, s);
+  const repo = cfg.repo;
+  const token = cfg.token;
+  if (!repo || !token) throw new Error('未配置 GITHUB_TOKEN 或仓库信息');
+  const targetBranch = branch || cfg.branch || 'main';
+  const cleanPath = String(filePath).replace(/^\/+/, '');
+
+  let existingSha = null;
+  try {
+    const existing = await githubReadFile(env, cleanPath, targetBranch, s);
+    if (existing && existing.sha) existingSha = existing.sha;
+  } catch (e) { /* ignore */ }
+
+  let b64 = '';
+  if (typeof contentBytesOrStr === 'string') {
+    const bytes = new TextEncoder().encode(contentBytesOrStr);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    b64 = btoa(bin);
+  } else {
+    let bin = '';
+    for (let i = 0; i < contentBytesOrStr.length; i++) bin += String.fromCharCode(contentBytesOrStr[i]);
+    b64 = btoa(bin);
+  }
+
+  const url = `https://api.github.com/repos/${repo}/contents/${cleanPath}`;
+  const body = {
+    message: commitMsg || `Update ${cleanPath} via XiaolinTV admin`,
+    content: b64,
+    branch: targetBranch,
+  };
+  if (existingSha) body.sha = existingSha;
+
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'User-Agent': 'xiaolin-tv-worker',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  if (!r.ok) {
+    const errText = await r.text();
+    throw new Error(`GitHub 写入失败 (${r.status}): ${errText}`);
+  }
+  return await r.json();
 }
 
 async function readKvAppManifest(env) {
@@ -416,8 +508,10 @@ function effectiveAppVersion(s, manifest) {
 
 /** 供后台一键提取最新版本信息 (GitHub Releases + 站内 Manifest) */
 async function fetchAppRelease(env, request) {
-  const repo = githubRepo(env) || 'xiaolin1991/dianying';
-  const token = githubToken(env);
+  const s = await getSettings(env);
+  const cfg = getGithubConfig(env, s);
+  const repo = cfg.repo || 'xiaolin1991/dianying';
+  const token = cfg.token;
   let ghData = null;
   let ghErr = '';
 
@@ -666,6 +760,20 @@ async function saveSettings(env, patch) {
   if (typeof patch.adultPayQr === 'string') {
     next.adultPayQr = patch.adultPayQr.trim().slice(0, 500);
   }
+  // GitHub 数据中心与双向持久化同步配置
+  if (typeof patch.githubToken === 'string') {
+    const t = patch.githubToken.trim();
+    if (t && !t.includes('****') && !t.startsWith('[UNCHANGED]')) {
+      next.githubToken = t;
+    } else if (t === '') {
+      next.githubToken = '';
+    }
+  }
+  if (typeof patch.githubOwner === 'string') next.githubOwner = patch.githubOwner.trim().slice(0, 50);
+  if (typeof patch.githubRepo === 'string') next.githubRepo = patch.githubRepo.trim().slice(0, 100);
+  if (typeof patch.githubBranch === 'string') next.githubBranch = patch.githubBranch.trim().slice(0, 50);
+  if (typeof patch.githubPrefix === 'string') next.githubPrefix = patch.githubPrefix.trim().replace(/^\/+|\/+$/g, '').slice(0, 50);
+  if (typeof patch.githubSyncEnabled === 'boolean') next.githubSyncEnabled = patch.githubSyncEnabled;
   MEM.settings = next;
   if (kv(env)) await env.CONFIG_KV.put('settings', JSON.stringify(next));
   return next;
@@ -1725,6 +1833,16 @@ export default {
             adultUnlockCode: s.adultUnlockCode || 'VIP888',
             adultPayDesc: s.adultPayDesc || '',
             adultPayQr: s.adultPayQr || '',
+            // GitHub 数据中心与双向持久化配置
+            hasGithubToken: Boolean(getGithubConfig(env, s).token),
+            githubTokenMasked: maskToken(getGithubConfig(env, s).token),
+            githubTokenSource: getGithubConfig(env, s).fromAdmin ? 'admin' : (getGithubConfig(env, s).fromEnv ? 'env' : 'none'),
+            githubOwner: getGithubConfig(env, s).owner,
+            githubRepo: getGithubConfig(env, s).repoName,
+            githubBranch: getGithubConfig(env, s).branch,
+            githubPrefix: getGithubConfig(env, s).prefix,
+            githubSyncEnabled: getGithubConfig(env, s).syncEnabled,
+            githubRepoFull: getGithubConfig(env, s).repo,
             allSources: all.map(({ key, name, api, detail, adult, custom }) => ({ key, name, api, detail, adult, custom: Boolean(custom) })),
           });
         }
@@ -1802,22 +1920,213 @@ export default {
             return json({ ok: false, error: e.message || String(e) }, 500);
           }
         }
+        /* ---- 辅助: 统一采集全量备份数据(KV或内存) ---- */
+        const collectBackupData = async () => {
+          const out = { version: 1, exportedAt: new Date().toISOString(), kv: {} };
+          if (kv(env)) {
+            const grab = async (k) => { const v = await env.CONFIG_KV.get(k); if (v != null) out.kv[k] = v; };
+            await grab('settings');
+            await grab('users:index');
+            let idx = [];
+            try { idx = JSON.parse(out.kv['users:index'] || '[]'); } catch (e) { idx = []; }
+            for (const u of idx) {
+              await grab('user:' + u);
+              await grab('uhist:' + u);
+              await grab('favs:' + u);
+            }
+            await grab(STATS_LOG_KEY);
+            await grab(STATS_AGG_KEY);
+          } else {
+            out.kv['settings'] = JSON.stringify(MEM.settings || {});
+          }
+          return out;
+        };
+
+        /* ---- 辅助: 统一恢复备份数据 ---- */
+        const restoreBackupData = async (body, mode) => {
+          const data = body && body.kv && typeof body.kv === 'object' ? body.kv : (body && typeof body === 'object' && body.settings ? { settings: JSON.stringify(body.settings) } : null);
+          if (!data || !Object.keys(data).length) throw new Error('备份数据无效：缺少 kv 字段');
+          const merge = mode !== 'replace';
+          let n = 0;
+          if (kv(env)) {
+            for (const [k, v] of Object.entries(data)) {
+              if (typeof v !== 'string') continue;
+              if (merge && v === '') continue;
+              await env.CONFIG_KV.put(String(k).slice(0, 120), String(v).slice(0, 900000));
+              n++;
+            }
+            try {
+              const freshSettings = await env.CONFIG_KV.get('settings');
+              if (freshSettings) MEM.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(freshSettings) };
+            } catch (e) { /* ignore */ }
+          } else {
+            if (data['settings']) {
+              try {
+                const parsed = JSON.parse(data['settings']);
+                MEM.settings = { ...(MEM.settings || DEFAULT_SETTINGS), ...parsed };
+                n++;
+              } catch (e) { /* ignore */ }
+            }
+          }
+          return { ok: true, restored: n, mode: merge ? 'merge' : 'replace' };
+        };
+
+        /* ---- 测试 GitHub Token 与仓库连通性 ---- */
+        if (path === '/api/admin/github-test' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const s = await getSettings(env);
+          const ghCfg = getGithubConfig(env, s);
+          let token = String(body.token || '').trim();
+          if (!token || token.includes('****') || token.startsWith('[UNCHANGED]')) {
+            token = ghCfg.token;
+          }
+          const owner = String(body.owner || ghCfg.owner).trim() || 'xiaolin1991';
+          const repoName = String(body.repo || ghCfg.repoName).trim() || 'dianying';
+          const repo = `${owner}/${repoName}`;
+
+          if (!token) {
+            return json({ ok: false, error: '请先输入 GitHub Personal Access Token (PAT)' }, 400);
+          }
+
+          try {
+            // 1. 验证用户和 Token 权限 scopes
+            const userRes = await fetch('https://api.github.com/user', {
+              headers: {
+                Accept: 'application/vnd.github+json',
+                Authorization: `Bearer ${token}`,
+                'User-Agent': 'xiaolin-tv-worker',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+              signal: AbortSignal.timeout(12000),
+            });
+            if (userRes.status === 401) {
+              return json({ ok: false, error: 'Token 校验失败 (HTTP 401 Unauthorized)：Token 无效、已过期或格式不正确' }, 400);
+            }
+            const scopes = userRes.headers.get('x-oauth-scopes') || '';
+            const userData = await userRes.json();
+            const userLogin = userData.login || '';
+
+            // 2. 验证仓库访问与读写权限
+            const repoRes = await fetch(`https://api.github.com/repos/${repo}`, {
+              headers: {
+                Accept: 'application/vnd.github+json',
+                Authorization: `Bearer ${token}`,
+                'User-Agent': 'xiaolin-tv-worker',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+              signal: AbortSignal.timeout(12000),
+            });
+            if (repoRes.status === 404) {
+              return json({
+                ok: false,
+                user: userLogin,
+                scopes,
+                error: `仓库 ${repo} 无法访问 (HTTP 404)。请核对仓库名是否正确；若是私有仓库，需确保 Token 勾选了 repo 权限。`,
+              }, 400);
+            }
+            const repoData = await repoRes.json();
+            const permissions = repoData.permissions || {};
+            const canPush = Boolean(permissions.push || permissions.admin);
+            const hasWorkflow = scopes.includes('workflow') || scopes.includes('repo');
+
+            return json({
+              ok: true,
+              user: userLogin,
+              repo: repoData.full_name,
+              isPrivate: Boolean(repoData.private),
+              scopes,
+              canPush,
+              hasWorkflow,
+              defaultBranch: repoData.default_branch,
+              msg: `✅ 仓库连通正常！用户: ${userLogin} · 仓库: ${repoData.full_name} (${repoData.private ? '私有' : '公开'}) · 写入权限: ${canPush ? '正常' : '只读'} · Actions调度: ${hasWorkflow ? '正常' : '⚠️未检测到workflow权限'}`,
+            });
+          } catch (err) {
+            return json({ ok: false, error: '连接 GitHub API 失败：' + (err.message || String(err)) }, 500);
+          }
+        }
+
+        /* ---- GitHub 双向同步: 一键备份数据至 GitHub (Push) ---- */
+        if (path === '/api/admin/github-sync-push' && request.method === 'POST') {
+          try {
+            const s = await getSettings(env);
+            const cfg = getGithubConfig(env, s);
+            if (!cfg.token) {
+              return json({ ok: false, error: '未配置 GitHub Token，无法向 GitHub 推送备份。请先保存 Token。' }, 400);
+            }
+            const backup = await collectBackupData();
+            const targetPath = `${cfg.prefix}/backup.json`;
+            const text = JSON.stringify(backup, null, 2);
+            const res = await githubWriteFile(
+              env,
+              targetPath,
+              text,
+              `Backup XiaolinTV data at ${new Date().toISOString()}`,
+              cfg.branch,
+              s
+            );
+            return json({
+              ok: true,
+              msg: `🎉 成功备份全站数据至 GitHub (${cfg.repo} @ ${cfg.branch}/${targetPath})！`,
+              commitSha: res.commit ? res.commit.sha : '',
+              keyCount: Object.keys(backup.kv).length,
+              time: backup.exportedAt,
+            });
+          } catch (e) {
+            return json({ ok: false, error: e.message || String(e) }, 500);
+          }
+        }
+
+        /* ---- GitHub 双向同步: 从 GitHub 拉取数据恢复 (Pull) ---- */
+        if (path === '/api/admin/github-sync-pull' && request.method === 'POST') {
+          try {
+            const s = await getSettings(env);
+            const cfg = getGithubConfig(env, s);
+            if (!cfg.token) {
+              return json({ ok: false, error: '未配置 GitHub Token，无法从 GitHub 拉取数据。' }, 400);
+            }
+            const targetPath = `${cfg.prefix}/backup.json`;
+            const file = await githubReadFile(env, targetPath, cfg.branch, s);
+            if (!file) {
+              return json({ ok: false, error: `在远程仓库 ${cfg.repo} (${cfg.branch} 分支) 未找到 ${targetPath} 文件，请先执行一次备份或确认目录。` }, 404);
+            }
+            const text = new TextDecoder().decode(file.bytes);
+            let data = null;
+            try { data = JSON.parse(text); } catch (err) {
+              return json({ ok: false, error: '远程 backup.json 解析失败，不是有效的 JSON 文件' }, 400);
+            }
+            const r = await restoreBackupData(data, 'merge');
+            return json({
+              ok: true,
+              msg: `🎉 成功从 GitHub 恢复 ${r.restored} 项数据！`,
+              restored: r.restored,
+              mode: r.mode,
+              exportedAt: data.exportedAt,
+            });
+          } catch (e) {
+            return json({ ok: false, error: e.message || String(e) }, 500);
+          }
+        }
+
         /* ---- 后台手动确认触发 GitHub Actions 构建 APK + Docker ---- */
         if (path === '/api/admin/dispatch-build-apk' && request.method === 'POST') {
           try {
-            const token = githubToken(env);
-            const repo = githubRepo(env) || 'xiaolin1991/dianying';
+            const s = await getSettings(env);
+            const ghCfg = getGithubConfig(env, s);
+            const token = ghCfg.token;
+            const repo = ghCfg.repo || 'xiaolin1991/dianying';
             if (!token) {
               return json({
                 ok: false,
                 needToken: true,
                 repo,
-                error: '未配置 GITHUB_TOKEN，无法自动向 GitHub 发送调度指令。请在 Cloudflare 环境变量中配置 GITHUB_TOKEN，或直接在 GitHub Actions 页面手动点击 Run workflow。'
+                error: '未检测到 GITHUB_TOKEN。您可直接在后台「数据与 GitHub 同步」或当前卡片中填写 Personal Access Token (PAT)，无需前往 Cloudflare 控制台添加环境变量。'
               }, 400);
             }
             let body = {};
             try { body = await request.json(); } catch (e) { /* ignore */ }
             const changelog = String(body.changelog || '').trim();
+            const branch = ghCfg.branch || 'main';
             const url = `https://api.github.com/repos/${repo}/actions/workflows/android.yml/dispatches`;
             const r = await fetch(url, {
               method: 'POST',
@@ -1829,7 +2138,7 @@ export default {
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                ref: 'main',
+                ref: branch,
                 inputs: {
                   confirm: 'yes',
                   changelog: changelog,
@@ -1838,7 +2147,7 @@ export default {
               signal: AbortSignal.timeout(15000),
             });
             if (r.status === 204 || r.ok) {
-              return json({ ok: true, msg: '🎉 已成功触发 GitHub Actions 构建任务（同时打包 APK 与推送 Docker 镜像）！请稍后前往 GitHub Actions 查看构建进度。' });
+              return json({ ok: true, msg: `🎉 已成功向 GitHub (${repo} @ ${branch}) 触发 Actions 构建任务（同时打包 APK 与推送 Docker 镜像）！请稍后前往 GitHub Actions 查看构建进度。` });
             }
             const errText = await r.text();
             return json({ ok: false, error: `GitHub API 返回错误(${r.status}): ${errText}` }, 500);
@@ -1878,38 +2187,19 @@ export default {
         }
         /* ---- 数据备份: 导出全部业务 KV(settings/用户/历史/收藏/统计) ---- */
         if (path === '/api/admin/backup' && request.method === 'GET') {
-          if (!kv(env)) return json({ error: '未绑定 KV 存储，无可备份数据' }, 500);
-          const out = { version: 1, exportedAt: new Date().toISOString(), kv: {} };
-          const grab = async (k) => { const v = await env.CONFIG_KV.get(k); if (v != null) out.kv[k] = v; };
-          await grab('settings');
-          await grab('users:index');
-          let idx = [];
-          try { idx = JSON.parse(out.kv['users:index'] || '[]'); } catch (e) { idx = []; }
-          for (const u of idx) {
-            await grab('user:' + u);
-            await grab('uhist:' + u);
-            await grab('favs:' + u);
-          }
-          await grab(STATS_LOG_KEY);
-          await grab(STATS_AGG_KEY);
+          const out = await collectBackupData();
           return json(out);
         }
         /* ---- 数据恢复: mode=merge(跳过空值,推荐) | replace(逐键覆盖) ---- */
         if (path === '/api/admin/restore' && request.method === 'POST') {
-          if (!kv(env)) return json({ error: '未绑定 KV 存储' }, 500);
           let body = {};
           try { body = await request.json(); } catch (e) { /* ignore */ }
-          const data = body && body.kv && typeof body.kv === 'object' ? body.kv : null;
-          if (!data || !Object.keys(data).length) return json({ error: '备份文件无效：缺少 kv 字段' }, 400);
-          const merge = body.mode !== 'replace';
-          let n = 0;
-          for (const [k, v] of Object.entries(data)) {
-            if (typeof v !== 'string') continue;
-            if (merge && v === '') continue;
-            await env.CONFIG_KV.put(String(k).slice(0, 120), String(v).slice(0, 900000));
-            n++;
+          try {
+            const r = await restoreBackupData(body, body.mode);
+            return json(r);
+          } catch (e) {
+            return json({ error: e.message || String(e) }, 400);
           }
-          return json({ ok: true, restored: n, mode: merge ? 'merge' : 'replace' });
         }
         /* ---- 流量统计 ---- */
         if (path === '/api/admin/stats' && request.method === 'GET') {
