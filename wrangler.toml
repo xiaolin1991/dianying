@@ -32,7 +32,7 @@ database_id = "9641ac16-a43d-423a-af0f-501fd6705d4c"        # ← 必填: 替换
 # ============================================================
 # [[kv_namespaces]]
 # binding = "dianying_KV"
-# id = "YOUR_KV_NAMESPACE_ID"               # ← 必填: 替换为您创建的 dianying_KV 命名空间 ID (若继续使用旧空间可填旧 ID)
+# id = "d9668315368748f4acf94a8de30a171b"               # ← 必填: 替换为您创建的 dianying_KV 命名空间 ID (若继续使用旧空间可填旧 ID)
 
 [vars]
 # 后台管理密码(强烈建议修改; 也可在 Dashboard → Worker → 设置 → 环境变量 里配置为加密变量)
