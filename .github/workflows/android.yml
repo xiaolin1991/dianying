@@ -15,11 +15,6 @@ on:
         description: '本次构建更新说明(选填)'
         required: false
         default: ''
-  push:
-    branches: [main]
-    tags: ['v*']
-    paths-ignore:
-      - 'public/APP/**'
 
 concurrency:
   group: apk-docker-${{ github.ref }}
@@ -36,12 +31,7 @@ jobs:
   build-apk:
     name: Build APK
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'workflow_dispatch' && (github.event.inputs.confirm == 'yes' || github.event.inputs.confirm == 'true')) ||
-      github.event_name == 'release' ||
-      startsWith(github.ref, 'refs/tags/v') ||
-      contains(github.event.head_commit.message, '[build-apk]') ||
-      contains(github.event.head_commit.message, '[apk]')
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -234,12 +224,7 @@ jobs:
   docker:
     name: Build Docker
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'workflow_dispatch' && (github.event.inputs.confirm == 'yes' || github.event.inputs.confirm == 'true')) ||
-      github.event_name == 'release' ||
-      startsWith(github.ref, 'refs/tags/v') ||
-      contains(github.event.head_commit.message, '[build-apk]') ||
-      contains(github.event.head_commit.message, '[apk]')
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
 

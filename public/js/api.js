@@ -123,6 +123,7 @@
         body: JSON.stringify({ customSources, disabledSources }),
       }, 15000),
     adminTvboxCheck: () => jfetch('/api/admin/tvbox-check', {}, 20000),
+    adminStorageCheck: () => jfetch('/api/admin/storage-check', { method: 'POST' }, 15000),
 
     /* ---- 用户体系 ---- */
     userRegister: (username, password) =>

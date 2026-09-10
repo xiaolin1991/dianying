@@ -4479,6 +4479,237 @@
       renderAdmTab(s);
     }
 
+    /* ---- Cloudflare D1 数据库 & KV 存储连通性交互卡片 ---- */
+    function buildStorageCardHtml(s) {
+      const isDual = s.storage === 'd1+kv';
+      const isD1 = s.storage === 'd1';
+      const isKv = s.storage === 'kv';
+      const isMem = s.storage === 'memory';
+
+      const pillClass = isDual || isD1 ? 'ok' : (isKv ? 'warn' : 'warn');
+      const pillText = isDual ? '🟢 D1+KV 双轨就绪' : (isD1 ? '🟢 D1 数据库就绪' : (isKv ? '🟡 KV 存储就绪' : '🔴 临时内存模式'));
+
+      const d1InitialPill = isDual || isD1 ? '<span class="status-pill ok" id="storageD1Pill">🟢 已连接</span>' : '<span class="status-pill warn" id="storageD1Pill">🔴 未检测到绑定</span>';
+      const kvInitialPill = isDual || isKv ? '<span class="status-pill ok" id="storageKvPill">🟢 已连接</span>' : '<span class="status-pill warn" id="storageKvPill">🔴 未检测到绑定</span>';
+
+      const d1InitialDesc = isDual || isD1
+        ? 'D1 关系型数据库已接入（主存储）。点击上方按钮可执行 SQL 写入/读取/删除完整闭环探针测试。'
+        : '未检测到 D1 数据库绑定（变量名需为 dianying）。若未配置，全局站点设置将无法使用 SQL 存储。';
+
+      const kvInitialDesc = isDual || isKv
+        ? 'KV 命名空间已接入（灾备双写）。点击上方按钮可执行边缘键值写入/读取/删除闭环探针测试。'
+        : '未检测到 KV 命名空间绑定（变量名需为 dianying_KV）。建议配置以实现边缘多节点灾备双写备份。';
+
+      const summaryStyle = (isDual || isD1)
+        ? 'background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:var(--ok)'
+        : (isKv ? 'background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.3);color:var(--warning, #eab308)' : 'background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:var(--danger)');
+
+      let summaryHtml = '';
+      if (isDual) {
+        summaryHtml = '<b>🟢 存储架构卓越【D1+KV 双轨持久存储】</b>：已检测到 Cloudflare D1 (<code>dianying</code>) 数据库与 KV (<code>dianying_KV</code>) 双重绑定！所有修改实时存储至 D1 SQL 数据库并自动双写备份至 KV，全球边缘秒级同步，高可靠防丢。';
+      } else if (isD1) {
+        summaryHtml = '<b>🟢 存储架构正常【D1 数据库持久存储】</b>：已检测到 Cloudflare D1 (<code>dianying</code>) 数据库持久化绑定，所有配置与修改已永久保存在 SQL 数据库并在边缘节点同步。建议在控制台同时绑定 KV (<code>dianying_KV</code>) 开启灾备双写。';
+      } else if (isKv) {
+        summaryHtml = '<b>🟡 存储架构基础【KV 持久存储】</b>：已检测到 Cloudflare KV (<code>dianying_KV</code>) 绑定。推荐在控制台或 wrangler.toml 同时绑定 D1 (<code>dianying</code>) 数据库，享受双轨 SQL 备份与更快读写体验！';
+      } else {
+        summaryHtml = '<b>⚠️ 当前运行在【临时内存模式】（未绑定 Cloudflare D1 或 KV）</b>：在此模式下，后台修改的配置仅保存在当前单个边缘节点内存中，无痕窗口、换设备或节点重启后将还原为默认设置！请按下方指引绑定 D1 与 KV。';
+      }
+
+      return `
+        <div class="admin-card" id="storageCard" style="margin-bottom:18px;border:1px solid var(--card-br);box-shadow:0 6px 20px rgba(0,0,0,.06)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <h3 style="margin-bottom:0;font-size:16px">🗄️ Cloudflare D1 数据库与 KV 存储检测</h3>
+              <span class="status-pill ${pillClass}" id="storageOverallPill">${pillText}</span>
+            </div>
+            <button type="button" class="btn primary small" id="runStorageCheckBtn" style="font-weight:700;display:inline-flex;align-items:center;gap:6px">
+              <span id="storageCheckBtnText">🔍 一键检测存储连通性</span>
+            </button>
+          </div>
+          <p class="hint" style="margin-top:0;margin-bottom:14px">
+            实时执行写-读-删闭环探针，真实校验 Cloudflare D1 (<code>dianying</code>) 与 KV (<code>dianying_KV</code>) 的数据库权限、延迟及表结构完整性，避免因未绑定或配置错误导致前后台修改丢失。
+          </p>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:12px">
+            <!-- D1 数据库卡片 -->
+            <div id="storageD1Box" style="background:var(--bg2);border:1px solid ${isDual || isD1 ? 'rgba(34,197,94,.3)' : 'rgba(239,68,68,.3)'};border-radius:12px;padding:14px 16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <div style="font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:6px">
+                  <span>🗄️ D1 数据库</span>
+                  <code style="font-size:11.5px;color:var(--dim)">dianying</code>
+                </div>
+                ${d1InitialPill}
+              </div>
+              <div id="storageD1Msg" style="font-size:12.5px;color:var(--txt);line-height:1.6">${d1InitialDesc}</div>
+              <div style="margin-top:8px;font-size:11.5px;color:var(--dim);display:flex;justify-content:space-between;align-items:center;border-top:1px dashed var(--card-br);padding-top:6px">
+                <span>绑定变量名：<b id="storageD1Binding">${isDual || isD1 ? 'dianying' : '未检测到'}</b></span>
+                <span id="storageD1Latency">耗时：—</span>
+              </div>
+            </div>
+
+            <!-- KV 命名空间卡片 -->
+            <div id="storageKvBox" style="background:var(--bg2);border:1px solid ${isDual || isKv ? 'rgba(34,197,94,.3)' : 'rgba(239,68,68,.3)'};border-radius:12px;padding:14px 16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <div style="font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:6px">
+                  <span>⚡ KV 命名空间</span>
+                  <code style="font-size:11.5px;color:var(--dim)">dianying_KV</code>
+                </div>
+                ${kvInitialPill}
+              </div>
+              <div id="storageKvMsg" style="font-size:12.5px;color:var(--txt);line-height:1.6">${kvInitialDesc}</div>
+              <div style="margin-top:8px;font-size:11.5px;color:var(--dim);display:flex;justify-content:space-between;align-items:center;border-top:1px dashed var(--card-br);padding-top:6px">
+                <span>绑定变量名：<b id="storageKvBinding">${isDual || isKv ? 'dianying_KV' : '未检测到'}</b></span>
+                <span id="storageKvLatency">耗时：—</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="storageSummaryBox" style="padding:10px 14px;border-radius:10px;font-size:12.5px;line-height:1.6;${summaryStyle}">
+            ${summaryHtml}
+          </div>
+
+          <details class="adm-details" id="storageHelpDetails" style="margin-top:12px;background:var(--bg2);border:1px dashed var(--card-br);border-radius:10px;padding:10px 14px;font-size:12.5px" ${isMem ? 'open' : ''}>
+            <summary style="font-size:13px;font-weight:600;color:var(--dim)">📘 查看 Cloudflare 控制台 D1 & KV 快速绑定步骤（只需 30 秒）</summary>
+            <div style="margin-top:10px;line-height:1.7;color:var(--txt)">
+              <div style="margin-bottom:8px">
+                <b>步骤 1：进入项目设置</b><br>
+                登录 <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" style="color:var(--acc);text-decoration:underline">Cloudflare 仪表板</a> ➔ <b>Workers 和 Pages</b> ➔ 点击您的影视项目（如 <code>dianying</code>） ➔ 顶部<b>「设置」 (Settings)</b> ➔ <b>「绑定」 (Bindings)</b>。
+              </div>
+              <div style="margin-bottom:8px">
+                <b>步骤 2：添加 D1 数据库绑定</b><br>
+                点击「添加」➔ 选择 <b>D1 数据库</b> ➔ 变量名称必须填写：<code style="user-select:all;font-weight:700">dianying</code> ➔ D1 数据库选择：<code>dianying</code>（若无请先在左侧存储菜单创建）。
+              </div>
+              <div style="margin-bottom:8px">
+                <b>步骤 3：添加 KV 命名空间绑定</b><br>
+                点击「添加」➔ 选择 <b>KV 命名空间</b> ➔ 变量名称必须填写：<code style="user-select:all;font-weight:700">dianying_KV</code> ➔ KV 命名空间选择：<code>dianying_KV</code>（若无请先在左侧存储菜单创建）。
+              </div>
+              <div style="margin-top:8px;color:var(--dim)">
+                💡 添加完成后点击 <b>「保存并部署」 (Save and deploy)</b>，随后回到本页面点击上方「🔍 一键检测存储连通性」即可完成实时在线校验！
+              </div>
+            </div>
+          </details>
+        </div>`;
+    }
+
+    function setupStorageCard(s) {
+      const btn = $('#runStorageCheckBtn');
+      const btnText = $('#storageCheckBtnText');
+      if (!btn) return;
+
+      const runCheck = async (isManual = true) => {
+        btn.disabled = true;
+        if (btnText) btnText.innerHTML = '<span class="spin"></span> 正在深度探测 D1 & KV 读写…';
+        try {
+          const res = await API.adminStorageCheck();
+          applyStorageResult(res);
+          if (isManual) {
+            if (res.d1 && res.d1.ok && res.kv && res.kv.ok) {
+              toast(`🎉 D1 & KV 存储检测 100% 通过！D1 (${res.d1.latencyMs}ms) · KV (${res.kv.latencyMs}ms)`, 'ok');
+            } else if (res.d1 && res.d1.ok) {
+              toast(`✅ D1 数据库检测通过（${res.d1.latencyMs}ms）！建议补充绑定 dianying_KV`, 'ok');
+            } else if (res.kv && res.kv.ok) {
+              toast(`✅ KV 存储检测通过（${res.kv.latencyMs}ms）！推荐绑定 dianying 升级为关系型数据库`, 'ok');
+            } else {
+              toast('⚠️ 未检测到有效存储绑定，当前处于临时内存模式', 'err');
+            }
+          }
+        } catch (err) {
+          if (isManual) toast('存储检测失败：' + (err.message || '网络超时'), 'err');
+        } finally {
+          btn.disabled = false;
+          if (btnText) btnText.textContent = '🔍 重新检测连通性';
+        }
+      };
+
+      const applyStorageResult = (res) => {
+        if (!res) return;
+        const d1Box = $('#storageD1Box');
+        const d1Pill = $('#storageD1Pill');
+        const d1Msg = $('#storageD1Msg');
+        const d1Binding = $('#storageD1Binding');
+        const d1Latency = $('#storageD1Latency');
+
+        const kvBox = $('#storageKvBox');
+        const kvPill = $('#storageKvPill');
+        const kvMsg = $('#storageKvMsg');
+        const kvBinding = $('#storageKvBinding');
+        const kvLatency = $('#storageKvLatency');
+
+        const overallPill = $('#storageOverallPill');
+        const sumBox = $('#storageSummaryBox');
+
+        // D1 状态更新
+        if (d1Box && res.d1) {
+          d1Box.style.borderColor = res.d1.ok ? 'rgba(34,197,94,.4)' : 'rgba(239,68,68,.4)';
+          if (d1Pill) {
+            d1Pill.className = `status-pill ${res.d1.ok ? 'ok' : 'warn'}`;
+            d1Pill.textContent = res.d1.ok ? `🟢 读写通过 (${res.d1.latencyMs}ms)` : (res.d1.missing ? '🔴 未检测到绑定' : '❌ 读写异常');
+          }
+          if (d1Msg) d1Msg.textContent = res.d1.msg || (res.d1.ok ? 'D1 数据库连接与读写正常' : 'D1 未就绪');
+          if (d1Binding) d1Binding.textContent = res.d1.binding || (res.d1.missing ? '未绑定' : 'dianying');
+          if (d1Latency) d1Latency.textContent = res.d1.ok ? `耗时：${res.d1.latencyMs}ms` : '耗时：—';
+        }
+
+        // KV 状态更新
+        if (kvBox && res.kv) {
+          kvBox.style.borderColor = res.kv.ok ? 'rgba(34,197,94,.4)' : 'rgba(239,68,68,.4)';
+          if (kvPill) {
+            kvPill.className = `status-pill ${res.kv.ok ? 'ok' : 'warn'}`;
+            kvPill.textContent = res.kv.ok ? `🟢 读写通过 (${res.kv.latencyMs}ms)` : (res.kv.missing ? '🔴 未检测到绑定' : '❌ 读写异常');
+          }
+          if (kvMsg) kvMsg.textContent = res.kv.msg || (res.kv.ok ? 'KV 命名空间连接与读写正常' : 'KV 未就绪');
+          if (kvBinding) kvBinding.textContent = res.kv.binding || (res.kv.missing ? '未绑定' : 'dianying_KV');
+          if (kvLatency) kvLatency.textContent = res.kv.ok ? `耗时：${res.kv.latencyMs}ms` : '耗时：—';
+        }
+
+        // 总体状态更新
+        const isDual = res.d1 && res.d1.ok && res.kv && res.kv.ok;
+        const isD1 = res.d1 && res.d1.ok;
+        const isKv = res.kv && res.kv.ok;
+        const isMem = !isD1 && !isKv;
+
+        if (overallPill) {
+          overallPill.className = `status-pill ${isDual || isD1 ? 'ok' : (isKv ? 'warn' : 'warn')}`;
+          overallPill.textContent = isDual ? '🟢 D1+KV 双轨就绪' : (isD1 ? '🟢 D1 数据库就绪' : (isKv ? '🟡 KV 存储就绪' : '🔴 临时内存模式'));
+        }
+
+        // 同步更新顶栏 status-pill
+        const topPill = $('.adm-top-actions .status-pill');
+        if (topPill) {
+          topPill.className = `status-pill ${isMem ? 'warn' : 'ok'}`;
+          topPill.textContent = isDual ? 'D1+KV 双轨存储' : (isD1 ? 'D1 数据库' : (isKv ? 'KV 持久存储' : '内存临时存储'));
+        }
+
+        if (sumBox) {
+          if (isDual) {
+            sumBox.style.background = 'rgba(34,197,94,.1)';
+            sumBox.style.borderColor = 'rgba(34,197,94,.3)';
+            sumBox.style.color = 'var(--ok)';
+            sumBox.innerHTML = `<b>🟢 存储架构卓越【D1+KV 双轨持久存储】</b>：已完成 D1 (<code>${esc(res.d1.binding || 'dianying')}</code>) 与 KV (<code>${esc(res.kv.binding || 'dianying_KV')}</code>) 实时闭环读写测试（响应延迟：D1 ${res.d1.latencyMs}ms，KV ${res.kv.latencyMs}ms）。所有配置与用户数据均受双重保障，全球边缘秒级同步！`;
+          } else if (isD1) {
+            sumBox.style.background = 'rgba(34,197,94,.1)';
+            sumBox.style.borderColor = 'rgba(34,197,94,.3)';
+            sumBox.style.color = 'var(--ok)';
+            sumBox.innerHTML = `<b>🟢 存储架构正常【D1 数据库持久存储】</b>：D1 (<code>${esc(res.d1.binding || 'dianying')}</code>) 读写校验通过（响应耗时 ${res.d1.latencyMs}ms）。建议在 Cloudflare 仪表板同时绑定 KV (<code>dianying_KV</code>) 开启全球边缘秒级容灾备份。`;
+          } else if (isKv) {
+            sumBox.style.background = 'rgba(234,179,8,.1)';
+            sumBox.style.borderColor = 'rgba(234,179,8,.3)';
+            sumBox.style.color = 'var(--warning, #eab308)';
+            sumBox.innerHTML = `<b>🟡 存储架构基础【KV 命名空间持久存储】</b>：KV (<code>${esc(res.kv.binding || 'dianying_KV')}</code>) 读写校验通过（响应耗时 ${res.kv.latencyMs}ms）。推荐在 Cloudflare 仪表板添加 D1 数据库 <code>dianying</code> 绑定，享受更强的 SQL 关系存储体验！`;
+          } else {
+            sumBox.style.background = 'rgba(239,68,68,.12)';
+            sumBox.style.borderColor = 'rgba(239,68,68,.3)';
+            sumBox.style.color = 'var(--danger)';
+            sumBox.innerHTML = '<b>⚠️ 当前运行在【临时内存模式】（未检测到 D1 或 KV 绑定）</b>：在此模式下，后台修改的配置仅保存在当前单个边缘节点内存中，无痕窗口、换设备或节点重启后将还原为默认设置！请展开下方步骤完成 Cloudflare 绑定。';
+          }
+        }
+      };
+
+      btn.addEventListener('click', () => runCheck(true));
+      // 进入该标签页时自动静默探测一次，精准获取当前毫秒延迟
+      runCheck(false);
+    }
+
     function renderAdmTab(s) {
       const main = $('#admMain');
       if (!main || !s) return;
@@ -4963,38 +5194,8 @@
 
       /* ---------------- ⚙️ 站点设置 ---------------- */
       else if (admTab === 'site') {
-        let storageNotice = '';
-        if (s.storage === 'd1+kv') {
-          storageNotice = `
-            <div class="adm-storage-ok" style="margin-bottom:16px;padding:12px 18px;border-radius:12px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);font-size:13px;line-height:1.6;color:var(--ok)">
-              <div style="font-weight:700;font-size:14px;margin-bottom:2px">🟢 存储状态卓越【D1+KV 双轨持久存储】</div>
-              <div>已检测到 Cloudflare D1 (<code>dianying</code>) 数据库与 KV (<code>dianying_KV</code>) 双重绑定！所有修改实时存储至 D1 SQL 数据库并自动双写备份至 KV，全球边缘秒级同步，高可靠防丢。</div>
-            </div>`;
-        } else if (s.storage === 'd1') {
-          storageNotice = `
-            <div class="adm-storage-ok" style="margin-bottom:16px;padding:12px 18px;border-radius:12px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);font-size:13px;line-height:1.6;color:var(--ok)">
-              <div style="font-weight:700;font-size:14px;margin-bottom:2px">🟢 存储状态正常【D1 数据库持久存储】</div>
-              <div>已检测到 Cloudflare D1 (<code>dianying</code>) 数据库持久化绑定，所有修改已永久保存在 SQL 数据库并在全球边缘节点同步。</div>
-            </div>`;
-        } else if (s.storage === 'kv') {
-          storageNotice = `
-            <div class="adm-storage-ok" style="margin-bottom:16px;padding:12px 18px;border-radius:12px;background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.3);font-size:13px;line-height:1.6;color:var(--warning, #eab308)">
-              <div style="font-weight:700;font-size:14px;margin-bottom:2px">🟡 存储状态正常【KV 持久存储】</div>
-              <div>已检测到 Cloudflare KV (<code>dianying_KV</code>) 绑定。推荐在控制台或 wrangler.toml 同时绑定 D1 (<code>dianying</code>) 数据库，享受双轨 SQL 备份与更快读写体验！</div>
-            </div>`;
-        } else {
-          storageNotice = `
-            <div class="adm-storage-alert" style="margin-bottom:16px;padding:14px 18px;border-radius:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);line-height:1.6">
-              <div style="font-weight:700;color:var(--danger);font-size:14px;margin-bottom:4px">⚠️ 当前运行在【临时内存模式】（未绑定 Cloudflare D1 或 KV）</div>
-              <div style="font-size:13px;color:var(--text)">在此模式下，后台修改的配置仅保存在当前单个边缘节点内存中，无痕窗口、换设备或节点重启后将还原为默认设置！</div>
-              <div style="margin-top:6px;font-size:12px;color:var(--dim)">
-                👉 <b>永久保存教程</b>：登录 Cloudflare 控制台 → Workers 与 Pages → dianying → 设置(Settings) → 绑定(Bindings) → 绑定 D1 数据库 <code>dianying</code> (变量名填 <code>dianying</code>) 与 KV 命名空间 <code>dianying_KV</code> (变量名填 <code>dianying_KV</code>)，重新部署即可彻底永久保存所有配置！详细步骤见 <code>部署指南.md</code>。
-              </div>
-            </div>`;
-        }
-
         main.innerHTML = `
-          ${storageNotice}
+          ${buildStorageCardHtml(s)}
           <div class="admin-card adult-toggle-card ${s.adultEnabled ? 'on' : ''}" id="adultCard">
             <div class="admin-row">
               <div class="admin-label">🔞 成人内容 / 私密福利专区
@@ -5180,6 +5381,7 @@
           lb.textContent = on ? '已开启（记得点保存）' : '已关闭（记得点保存）';
           lb.style.color = on ? 'var(--ok)' : 'var(--dim)';
         });
+        setupStorageCard(s);
       }
 
       /* ---------------- 📲 APP推广 / 版本更新 ---------------- */
@@ -5868,6 +6070,7 @@
       /* ---------------- ℹ️ 系统信息 ---------------- */
       else if (admTab === 'sys') {
         main.innerHTML = `
+          ${buildStorageCardHtml(s)}
           <div class="admin-card">
             <h3>🧾 系统信息</h3>
             <div class="admin-row"><div class="admin-label">设置存储<small>${
@@ -5889,6 +6092,7 @@
             <div class="admin-row"><div class="admin-label">后台入口<small>${s.adminPath ? `已自定义：#/${esc(s.adminPath)}` : '默认：#/admin（可在安全中心自定义）'}</small></div>
               <span class="status-pill ${s.adminPath ? 'ok' : 'warn'}">${s.adminPath ? '自定义' : '默认'}</span></div>
           </div>`;
+        setupStorageCard(s);
       }
     }
   }
