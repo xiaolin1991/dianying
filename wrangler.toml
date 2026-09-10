@@ -2,8 +2,9 @@
 # 晓林影视 XIAOLIN-TV — Cloudflare Workers 部署配置
 # 用法:
 #   1. npm install          (安装 wrangler)
-#   2. 创建 KV: npx wrangler kv namespace create CONFIG_KV
-#      把输出的 id 填到下面 [[kv_namespaces]] 的 id 中
+#   2. 创建 D1 数据库: npx wrangler d1 create dianying
+#      创建 KV 存储:   npx wrangler kv namespace create dianying_KV
+#      把输出的 database_id 和 namespace id 填到下方配置中
 #   3. npm run deploy
 # ============================================================
 name = "xiaolin-tv"
@@ -16,9 +17,22 @@ binding = "ASSETS"
 # /api/* 与 /APP/* 先进入 Worker（APP 可在静态资源过期时从 GitHub 拉最新包）
 run_worker_first = ["/api/*", "/APP/*"]
 
-[[kv_namespaces]]
-binding = "CONFIG_KV"
-id = "58efcbbdb6db4324afdf4f13155298e2"        # ← 必填: 替换为你的 KV namespace id
+# ============================================================
+# D1 关系型数据库绑定 (核心主存储，高性能 SQL 存储)
+# 数据库名: dianying，绑定名: dianying (代码同时兼容 dianying 与 DB)
+# ============================================================
+[[d1_databases]]
+binding = "dianying"
+database_name = "dianying"
+database_id = "9641ac16-a43d-423a-af0f-501fd6705d4c"        # ← 必填: 替换为您创建的 dianying D1 数据库 ID
+
+# ============================================================
+# KV 命名空间绑定 (保留双写备份 / 容灾降级)
+# 命名空间名: dianying_KV，绑定名: dianying_KV (代码同时兼容 dianying_KV 与 CONFIG_KV)
+# ============================================================
+# [[kv_namespaces]]
+# binding = "dianying_KV"
+# id = "YOUR_KV_NAMESPACE_ID"               # ← 必填: 替换为您创建的 dianying_KV 命名空间 ID (若继续使用旧空间可填旧 ID)
 
 [vars]
 # 后台管理密码(强烈建议修改; 也可在 Dashboard → Worker → 设置 → 环境变量 里配置为加密变量)

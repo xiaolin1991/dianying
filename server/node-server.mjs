@@ -46,12 +46,14 @@ function persist() {
     } catch (e) { console.error('[kv] persist failed:', e.message); }
   }, 150);
 }
+const kvShim = {
+  async get(k) { return Object.prototype.hasOwnProperty.call(kvData, k) ? kvData[k] : null; },
+  async put(k, v) { kvData[String(k)] = String(v); persist(); },
+  async delete(k) { delete kvData[String(k)]; persist(); },
+};
 const env = {
-  CONFIG_KV: {
-    async get(k) { return Object.prototype.hasOwnProperty.call(kvData, k) ? kvData[k] : null; },
-    async put(k, v) { kvData[String(k)] = String(v); persist(); },
-    async delete(k) { delete kvData[String(k)]; persist(); },
-  },
+  dianying_KV: kvShim,
+  CONFIG_KV: kvShim,
   ADULT_ENABLED: process.env.ADULT_ENABLED || '',
   ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || '',
   async getAppManifest() {

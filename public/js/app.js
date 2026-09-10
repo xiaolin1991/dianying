@@ -4456,7 +4456,9 @@
               <div class="adm-brand-sub">${esc(s.siteName || '晓林影视')}</div>
             </div>
             <div class="adm-top-actions">
-              <span class="status-pill ${s.storage === 'kv' ? 'ok' : 'warn'}">${s.storage === 'kv' ? 'KV 持久存储' : '内存临时存储'}</span>
+              <span class="status-pill ${s.storage === 'memory' ? 'warn' : 'ok'}">${
+                s.storage === 'd1+kv' ? 'D1+KV 双轨存储' : (s.storage === 'd1' ? 'D1 数据库' : (s.storage === 'kv' ? 'KV 持久存储' : '内存临时存储'))
+              }</span>
               <a class="btn ghost small" href="#/home">回前台</a>
               <button class="btn ghost small" id="logoutBtn">退出登录</button>
             </div>
@@ -4961,17 +4963,35 @@
 
       /* ---------------- ⚙️ 站点设置 ---------------- */
       else if (admTab === 'site') {
-        const storageNotice = s.storage === 'memory' ? `
-          <div class="adm-storage-alert" style="margin-bottom:16px;padding:14px 18px;border-radius:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);line-height:1.6">
-            <div style="font-weight:700;color:var(--danger);font-size:14px;margin-bottom:4px">⚠️ 当前运行在【临时内存模式】（未绑定 Cloudflare CONFIG_KV）</div>
-            <div style="font-size:13px;color:var(--text)">在此模式下，后台修改的配置仅保存在当前单个边缘节点内存中，无痕窗口、换设备或节点重启后将还原为默认设置！</div>
-            <div style="margin-top:6px;font-size:12px;color:var(--dim)">
-              👉 <b>永久保存教程</b>：登录 Cloudflare 仪表板 → Workers 与 Pages → dianying → 设置(Settings) → 变量和 KV(Variables and KV) → 在 <b>KV 命名空间绑定</b> 中添加变量名 <code>CONFIG_KV</code> 并绑定一个命名空间，重新部署即可彻底永久保存所有配置！
-            </div>
-          </div>` : `
-          <div class="adm-storage-ok" style="margin-bottom:16px;padding:10px 16px;border-radius:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);font-size:13px;color:var(--ok)">
-            ✅ <b>存储状态正常</b>：已检测到 Cloudflare CONFIG_KV 持久化绑定，所有修改已永久存储并在全球边缘节点同步。
-          </div>`;
+        let storageNotice = '';
+        if (s.storage === 'd1+kv') {
+          storageNotice = `
+            <div class="adm-storage-ok" style="margin-bottom:16px;padding:12px 18px;border-radius:12px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);font-size:13px;line-height:1.6;color:var(--ok)">
+              <div style="font-weight:700;font-size:14px;margin-bottom:2px">🟢 存储状态卓越【D1+KV 双轨持久存储】</div>
+              <div>已检测到 Cloudflare D1 (<code>dianying</code>) 数据库与 KV (<code>dianying_KV</code>) 双重绑定！所有修改实时存储至 D1 SQL 数据库并自动双写备份至 KV，全球边缘秒级同步，高可靠防丢。</div>
+            </div>`;
+        } else if (s.storage === 'd1') {
+          storageNotice = `
+            <div class="adm-storage-ok" style="margin-bottom:16px;padding:12px 18px;border-radius:12px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);font-size:13px;line-height:1.6;color:var(--ok)">
+              <div style="font-weight:700;font-size:14px;margin-bottom:2px">🟢 存储状态正常【D1 数据库持久存储】</div>
+              <div>已检测到 Cloudflare D1 (<code>dianying</code>) 数据库持久化绑定，所有修改已永久保存在 SQL 数据库并在全球边缘节点同步。</div>
+            </div>`;
+        } else if (s.storage === 'kv') {
+          storageNotice = `
+            <div class="adm-storage-ok" style="margin-bottom:16px;padding:12px 18px;border-radius:12px;background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.3);font-size:13px;line-height:1.6;color:var(--warning, #eab308)">
+              <div style="font-weight:700;font-size:14px;margin-bottom:2px">🟡 存储状态正常【KV 持久存储】</div>
+              <div>已检测到 Cloudflare KV (<code>dianying_KV</code>) 绑定。推荐在控制台或 wrangler.toml 同时绑定 D1 (<code>dianying</code>) 数据库，享受双轨 SQL 备份与更快读写体验！</div>
+            </div>`;
+        } else {
+          storageNotice = `
+            <div class="adm-storage-alert" style="margin-bottom:16px;padding:14px 18px;border-radius:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);line-height:1.6">
+              <div style="font-weight:700;color:var(--danger);font-size:14px;margin-bottom:4px">⚠️ 当前运行在【临时内存模式】（未绑定 Cloudflare D1 或 KV）</div>
+              <div style="font-size:13px;color:var(--text)">在此模式下，后台修改的配置仅保存在当前单个边缘节点内存中，无痕窗口、换设备或节点重启后将还原为默认设置！</div>
+              <div style="margin-top:6px;font-size:12px;color:var(--dim)">
+                👉 <b>永久保存教程</b>：登录 Cloudflare 控制台 → Workers 与 Pages → dianying → 设置(Settings) → 绑定(Bindings) → 绑定 D1 数据库 <code>dianying</code> (变量名填 <code>dianying</code>) 与 KV 命名空间 <code>dianying_KV</code> (变量名填 <code>dianying_KV</code>)，重新部署即可彻底永久保存所有配置！详细步骤见 <code>部署指南.md</code>。
+              </div>
+            </div>`;
+        }
 
         main.innerHTML = `
           ${storageNotice}
@@ -5850,8 +5870,18 @@
         main.innerHTML = `
           <div class="admin-card">
             <h3>🧾 系统信息</h3>
-            <div class="admin-row"><div class="admin-label">设置存储<small>${s.storage === 'kv' ? '已绑定 Cloudflare KV(CONFIG_KV)，重启不丢失' : '未绑定 KV，当前保存在实例内存，重部署后恢复默认。绑定方法见 README'}</small></div>
-              <span class="status-pill ${s.storage === 'kv' ? 'ok' : 'warn'}">${s.storage === 'kv' ? 'KV' : 'Memory'}</span></div>
+            <div class="admin-row"><div class="admin-label">设置存储<small>${
+              s.storage === 'd1+kv'
+                ? '已绑定 Cloudflare D1 数据库 (dianying) + KV 缓存 (dianying_KV)，双轨持久容灾'
+                : (s.storage === 'd1'
+                  ? '已绑定 Cloudflare D1 数据库 (dianying)，SQL 持久存储，重启不丢失'
+                  : (s.storage === 'kv'
+                    ? '已绑定 Cloudflare KV (dianying_KV)，重启不丢失'
+                    : '未绑定 D1/KV，当前保存在实例内存，重部署后恢复默认。绑定方法见部署指南'))
+            }</small></div>
+              <span class="status-pill ${s.storage === 'memory' ? 'warn' : 'ok'}">${
+                s.storage === 'd1+kv' ? 'D1 + KV 双轨' : (s.storage === 'd1' ? 'D1 数据库' : (s.storage === 'kv' ? 'KV 存储' : 'Memory'))
+              }</span></div>
             <div class="admin-row"><div class="admin-label">管理密码<small>${s.hasCustomPassword ? '后台已自定义 ✔（修改请用「安全中心」）' : s.passwordFromEnv ? '来自环境变量 ADMIN_PASSWORD ✔' : '使用默认密码 admin123，建议尽快修改'}</small></div>
               <span class="status-pill ${s.hasCustomPassword || s.passwordFromEnv ? 'ok' : 'warn'}">${s.hasCustomPassword ? '后台自定义' : s.passwordFromEnv ? '环境变量' : '默认'}</span></div>
             <div class="admin-row"><div class="admin-label">影视源配置<small>${(s.customSources || []).length} 个自定义源 · ${(s.disabledSources || []).length} 个停用中 · 内置源每日同步自 LunaTV-config</small></div>

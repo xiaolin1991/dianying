@@ -6,10 +6,11 @@
  *   - Cloudflare Pages   (高级模式: _worker.js 与静态文件同目录, env.ASSETS 兜底)
  *
  * 可选绑定 / 环境变量:
- *   KV  CONFIG_KV        持久化后台设置(未绑定时退化为内存, 重启丢失)
- *   VAR ADMIN_PASSWORD   后台密码(默认 admin123, 请务必修改)
- *   VAR ADULT_ENABLED    初始成人内容开关 "true"/"false"(默认 false)
- *   VAR CONFIG_URL       LunaTV-config 源配置地址(默认官方 main 分支完整版)
+ *   D1  dianying / DB           持久化关系型数据库(优先使用, 高性能 SQL 存储)
+ *   KV  dianying_KV / CONFIG_KV 持久化后台设置与双写容灾备份
+ *   VAR ADMIN_PASSWORD          后台密码(默认 admin123, 请务必修改)
+ *   VAR ADULT_ENABLED           初始成人内容开关 "true"/"false"(默认 false)
+ *   VAR CONFIG_URL              LunaTV-config 源配置地址(默认官方 main 分支完整版)
  */
 
 const DEFAULT_CONFIG_URL =
@@ -143,15 +144,159 @@ function safeEqual(a, b) {
   return d === 0;
 }
 
-/* ------------------------------ 设置存取 --------------------------------- */
+/* ------------------------------ 持久化存储抽象层 (D1 + KV 双轨引擎) --------------------------------- */
+let d1TableReady = false;
+
+/** 获取 Cloudflare D1 数据库句柄 (兼容绑定名 dianying 或 DB) */
+function d1(env) {
+  const db = env && (env.dianying || env.DB);
+  return db && typeof db.prepare === 'function' ? db : null;
+}
+
+/** 获取 Cloudflare KV 命名空间句柄 (兼容绑定名 dianying_KV 或 CONFIG_KV) */
 function kv(env) {
-  const k = env && env.CONFIG_KV;
+  const k = env && (env.dianying_KV || env.CONFIG_KV);
   return k && typeof k.get === 'function' ? k : null;
 }
+
+/** 是否配置了任一持久化存储 (D1 或 KV) */
+function hasStorage(env) {
+  return Boolean(d1(env) || kv(env));
+}
+
+/** 获取当前存储架构类型: d1+kv (双轨) | d1 (纯D1) | kv (纯KV) | memory (内存临时) */
+function getStorageType(env) {
+  const hasD1 = Boolean(d1(env));
+  const hasKv = Boolean(kv(env));
+  if (hasD1 && hasKv) return 'd1+kv';
+  if (hasD1) return 'd1';
+  if (hasKv) return 'kv';
+  return 'memory';
+}
+
+/** 确保 D1 数据库的 kv_store 数据表已就绪 (Zero-Config 自动建表) */
+async function ensureD1Table(db) {
+  if (d1TableReady) return;
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS kv_store (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`).run();
+    d1TableReady = true;
+  } catch (e) {
+    console.warn('D1 auto-init table notice:', (e && e.message) || e);
+  }
+}
+
+/**
+ * 统一读取键值:
+ * 1. 优先从 D1 数据库查询
+ * 2. 若 D1 中无此键但 KV 中存在，则自动执行热迁移写入 D1 并返回
+ * 3. 若未绑定 D1 则直接从 KV 读取
+ */
+async function storageGet(env, key) {
+  const db = d1(env);
+  const k = kv(env);
+
+  if (db) {
+    try {
+      await ensureD1Table(db);
+      const row = await db.prepare('SELECT value FROM kv_store WHERE key = ?').bind(key).first('value');
+      if (row != null && typeof row === 'string') {
+        return row;
+      }
+      // D1 未命中时，若 KV 存在，执行平滑热迁移
+      if (k) {
+        try {
+          const kvVal = await k.get(key);
+          if (kvVal != null && typeof kvVal === 'string') {
+            try {
+              await db.prepare(
+                'INSERT INTO kv_store (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at'
+              ).bind(key, kvVal, Date.now()).run();
+            } catch (migErr) { /* ignore */ }
+            return kvVal;
+          }
+        } catch (e) { /* ignore */ }
+      }
+      return null;
+    } catch (e) {
+      // D1 异常时降级读取 KV
+      if (k) {
+        try { return await k.get(key); } catch (ke) { return null; }
+      }
+      return null;
+    }
+  }
+
+  if (k) {
+    try { return await k.get(key); } catch (e) { return null; }
+  }
+
+  return null;
+}
+
+/**
+ * 统一写入键值:
+ * 1. 若配置了 D1，写入 D1 (UPSERT)
+ * 2. 若配置了 KV，同步双写写入 KV 进行灾备备份
+ */
+async function storagePut(env, key, value) {
+  const strVal = typeof value === 'string' ? value : JSON.stringify(value);
+  const db = d1(env);
+  const k = kv(env);
+
+  if (db) {
+    try {
+      await ensureD1Table(db);
+      await db.prepare(
+        'INSERT INTO kv_store (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at'
+      ).bind(key, strVal, Date.now()).run();
+    } catch (e) {
+      console.warn('storagePut D1 error:', (e && e.message) || e);
+    }
+  }
+
+  if (k) {
+    try {
+      await k.put(key, strVal);
+    } catch (e) {
+      console.warn('storagePut KV error:', (e && e.message) || e);
+    }
+  }
+}
+
+/**
+ * 统一删除键值:
+ * 同步删除 D1 与 KV 对应键
+ */
+async function storageDelete(env, key) {
+  const db = d1(env);
+  const k = kv(env);
+
+  if (db) {
+    try {
+      await ensureD1Table(db);
+      await db.prepare('DELETE FROM kv_store WHERE key = ?').bind(key).run();
+    } catch (e) {
+      console.warn('storageDelete D1 error:', (e && e.message) || e);
+    }
+  }
+
+  if (k) {
+    try {
+      await k.delete(key);
+    } catch (e) {
+      console.warn('storageDelete KV error:', (e && e.message) || e);
+    }
+  }
+}
+
 async function getSettings(env) {
   try {
-    if (kv(env)) {
-      const raw = await env.CONFIG_KV.get('settings');
+    if (hasStorage(env)) {
+      const raw = await storageGet(env, 'settings');
       if (raw) {
         const s = { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
         // 一次性迁移: 旧默认站名自动改为新站名(管理员改过的自定义名不受影响)
@@ -315,9 +460,9 @@ async function githubWriteFile(env, filePath, contentBytesOrStr, commitMsg, bran
 }
 
 async function readKvAppManifest(env) {
-  if (!kv(env)) return null;
+  if (!hasStorage(env)) return null;
   try {
-    const raw = await env.CONFIG_KV.get(APP_MANIFEST_KEY);
+    const raw = await storageGet(env, APP_MANIFEST_KEY);
     if (!raw) return null;
     const m = JSON.parse(raw);
     return m && typeof m === 'object' ? m : null;
@@ -327,7 +472,7 @@ async function readKvAppManifest(env) {
 }
 
 async function writeKvAppManifest(env, manifest) {
-  if (!kv(env) || !manifest || typeof manifest !== 'object') return;
+  if (!hasStorage(env) || !manifest || typeof manifest !== 'object') return;
   const code = Math.max(0, Math.round(Number(manifest.versionCode == null ? 0 : manifest.versionCode)) || 0);
   if (!code) return;
   const clean = {
@@ -338,7 +483,7 @@ async function writeKvAppManifest(env, manifest) {
     phone: manifest.phone && typeof manifest.phone === 'object' ? manifest.phone : undefined,
     tv: manifest.tv && typeof manifest.tv === 'object' ? manifest.tv : undefined,
   };
-  await env.CONFIG_KV.put(APP_MANIFEST_KEY, JSON.stringify(clean));
+  await storagePut(env, APP_MANIFEST_KEY, JSON.stringify(clean));
 }
 
 /** Cloudflare：从 GitHub main / publish/app 拉取 manifest 写入 KV（不依赖 git） */
@@ -775,7 +920,7 @@ async function saveSettings(env, patch) {
   if (typeof patch.githubPrefix === 'string') next.githubPrefix = patch.githubPrefix.trim().replace(/^\/+|\/+$/g, '').slice(0, 50);
   if (typeof patch.githubSyncEnabled === 'boolean') next.githubSyncEnabled = patch.githubSyncEnabled;
   MEM.settings = next;
-  if (kv(env)) await env.CONFIG_KV.put('settings', JSON.stringify(next));
+  if (hasStorage(env)) await storagePut(env, 'settings', JSON.stringify(next));
   return next;
 }
 
@@ -1115,45 +1260,45 @@ function geoOf(req) {
 }
 
 async function getUserRecord(env, username) {
-  if (!kv(env)) return null;
+  if (!hasStorage(env)) return null;
   try {
-    const raw = await env.CONFIG_KV.get('user:' + username);
+    const raw = await storageGet(env, 'user:' + username);
     return raw ? JSON.parse(raw) : null;
   } catch (e) { return null; }
 }
 async function putUserRecord(env, rec) {
-  if (!kv(env)) return;
-  await env.CONFIG_KV.put('user:' + rec.u, JSON.stringify(rec));
-  const indexRaw = (await env.CONFIG_KV.get('users:index')) || '[]';
+  if (!hasStorage(env)) return;
+  await storagePut(env, 'user:' + rec.u, JSON.stringify(rec));
+  const indexRaw = (await storageGet(env, 'users:index')) || '[]';
   let list;
   try { list = JSON.parse(indexRaw); } catch (e) { list = []; }
   if (!Array.isArray(list)) list = [];
-  if (!list.includes(rec.u)) { list.push(rec.u); await env.CONFIG_KV.put('users:index', JSON.stringify(list.slice(-500))); }
+  if (!list.includes(rec.u)) { list.push(rec.u); await storagePut(env, 'users:index', JSON.stringify(list.slice(-500))); }
 }
 async function loadUhist(env, username) {
-  if (!kv(env)) return { watchSec: 0, items: [] };
+  if (!hasStorage(env)) return { watchSec: 0, items: [] };
   try {
-    const raw = await env.CONFIG_KV.get('uhist:' + username);
+    const raw = await storageGet(env, 'uhist:' + username);
     if (raw) { const p = JSON.parse(raw); return { watchSec: p.watchSec || 0, items: Array.isArray(p.items) ? p.items : [] }; }
   } catch (e) { /* ignore */ }
   return { watchSec: 0, items: [] };
 }
 async function saveUhist(env, username, hist) {
-  if (!kv(env)) return;
+  if (!hasStorage(env)) return;
   hist.items = hist.items.slice(0, 800);
-  await env.CONFIG_KV.put('uhist:' + username, JSON.stringify(hist));
+  await storagePut(env, 'uhist:' + username, JSON.stringify(hist));
 }
-/* ---- 收藏服务端同步(KV): 换设备登录不丢 ---- */
+/* ---- 收藏服务端同步(D1/KV): 换设备登录不丢 ---- */
 async function loadFavs(env, username) {
-  if (!kv(env)) return [];
+  if (!hasStorage(env)) return [];
   try {
-    const raw = await env.CONFIG_KV.get('favs:' + username);
+    const raw = await storageGet(env, 'favs:' + username);
     const p = raw ? JSON.parse(raw) : [];
     return Array.isArray(p) ? p : [];
   } catch (e) { return []; }
 }
 async function saveFavs(env, username, list) {
-  if (!kv(env)) return;
+  if (!hasStorage(env)) return;
   // 只保留白名单字段, 上限 200 条
   const clean = list.slice(0, 200).map((f) => ({
     key: String(f.key || '').slice(0, 60),
@@ -1162,7 +1307,7 @@ async function saveFavs(env, username, list) {
     pic: String(f.pic || '').slice(0, 600),
     remarks: String(f.remarks || '').slice(0, 120),
   })).filter((f) => f.key && f.id);
-  await env.CONFIG_KV.put('favs:' + username, JSON.stringify(clean));
+  await storagePut(env, 'favs:' + username, JSON.stringify(clean));
 }
 let entrySeq = 0;
 function newEntryId() { return Date.now().toString(36) + '-' + (++entrySeq % 1296).toString(36); }
@@ -1183,26 +1328,26 @@ async function appendUhist(env, username, entry) {
   return entry.id;
 }
 
-/* ========================= 访问统计(KV 轻量) =========================
+/* ========================= 访问统计(D1/KV 轻量) =========================
    stats:log -> 最近明细(≤600条) {kind:'page'|'search', path/q, ts, ip, geo, u}
    stats:agg -> { pvTotal, days:{yyyy-mm-dd:n}, searches:n, paths:{k:n}, ips:{ip:{c,ts}} }
 ====================================================================== */
 const STATS_LOG_KEY = 'stats:log';
 const STATS_AGG_KEY = 'stats:agg';
 async function statRecord(env, entry) {
-  if (!kv(env)) return;
+  if (!hasStorage(env)) return;
   entry.ts = Date.now();
   entry.geo = entry.geo || '';
   entry.u = entry.u || '';
   try {
-    const raw = await env.CONFIG_KV.get(STATS_LOG_KEY);
+    const raw = await storageGet(env, STATS_LOG_KEY);
     let arr = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(arr)) arr = [];
     arr.unshift(entry);
-    await env.CONFIG_KV.put(STATS_LOG_KEY, JSON.stringify(arr.slice(0, 600)));
+    await storagePut(env, STATS_LOG_KEY, JSON.stringify(arr.slice(0, 600)));
   } catch (e) { /* ignore */ }
   try {
-    const raw = await env.CONFIG_KV.get(STATS_AGG_KEY);
+    const raw = await storageGet(env, STATS_AGG_KEY);
     const agg = raw ? JSON.parse(raw) : {};
     agg.pvTotal = (agg.pvTotal || 0) + 1;
     const day = new Date().toISOString().slice(0, 10);
@@ -1222,7 +1367,7 @@ async function statRecord(env, entry) {
       ipKeys.sort((a, b) => agg.ips[a].ts - agg.ips[b].ts);
       while (ipKeys.length > 400) delete agg.ips[ipKeys.shift()];
     }
-    await env.CONFIG_KV.put(STATS_AGG_KEY, JSON.stringify(agg));
+    await storagePut(env, STATS_AGG_KEY, JSON.stringify(agg));
   } catch (e) { /* ignore */ }
 }
 
@@ -1567,7 +1712,7 @@ export default {
       if (path === '/api/user/register' && request.method === 'POST') {
         const settings = await getSettings(env);
         if (settings.allowRegister === false) return json({ error: '当前未开放注册，请联系管理员' }, 403);
-        if (!kv(env)) return json({ error: '未绑定 KV 存储，无法注册用户（见 README 绑定 CONFIG_KV）' }, 500);
+        if (!hasStorage(env)) return json({ error: '未配置 D1 或 KV 存储，无法注册用户（见部署指南绑定 D1 或 KV）' }, 500);
         if (rateLimited('reg:' + clientIp(request))) return json({ error: '尝试过于频繁，请稍后再试' }, 429);
         let body = {};
         try { body = await request.json(); } catch (e) { /* ignore */ }
@@ -1593,7 +1738,7 @@ export default {
         });
       }
       if (path === '/api/user/login' && request.method === 'POST') {
-        if (!kv(env)) return json({ error: '未绑定 KV 存储，无法登录（见 README）' }, 500);
+        if (!hasStorage(env)) return json({ error: '未配置 D1 或 KV 存储，无法登录（见部署指南）' }, 500);
         if (rateLimited('usr:' + clientIp(request))) return json({ error: '尝试过于频繁，请稍后再试' }, 429);
         let body = {};
         try { body = await request.json(); } catch (e) { /* ignore */ }
@@ -1619,7 +1764,7 @@ export default {
       if (path === '/api/user/unlock-adult' && request.method === 'POST') {
         const username = await currentUser(request, env, url);
         if (!username) return json({ error: '请先登录' }, 401);
-        if (!kv(env)) return json({ error: '未绑定 KV 存储' }, 500);
+        if (!hasStorage(env)) return json({ error: '未配置持久化存储' }, 500);
         const settings = await getSettings(env);
         if (!settings.adultEnabled) return json({ error: '私密福利内容暂未开放' }, 400);
 
@@ -1646,13 +1791,13 @@ export default {
       if (path === '/api/user/favs' && request.method === 'GET') {
         const username = await currentUser(request, env, url);
         if (!username) return json({ error: '请先登录' }, 401);
-        if (!kv(env)) return json({ favs: [] });
+        if (!hasStorage(env)) return json({ favs: [] });
         return json({ favs: await loadFavs(env, username) });
       }
       if (path === '/api/user/favs' && request.method === 'POST') {
         const username = await currentUser(request, env, url);
         if (!username) return json({ error: '请先登录' }, 401);
-        if (!kv(env)) return json({ error: '未绑定 KV 存储' }, 500);
+        if (!hasStorage(env)) return json({ error: '未配置持久化存储' }, 500);
         let body = {};
         try { body = await request.json(); } catch (e) { /* ignore */ }
         const list = Array.isArray(body.favs) ? body.favs : [];
@@ -1781,7 +1926,7 @@ export default {
             liveSources: s.liveSources,
             customSources: s.customSources || [],
             disabledSources: s.disabledSources || [],
-            storage: kv(env) ? 'kv' : 'memory',
+            storage: getStorageType(env),
             passwordFromEnv: Boolean(env.ADMIN_PASSWORD),
             hasCustomPassword: Boolean(s.passwordHash),
             effectiveConfigUrl: s.configUrl || env.CONFIG_URL || DEFAULT_CONFIG_URL,
@@ -1887,7 +2032,7 @@ export default {
           try { body = await request.json(); } catch (e) { /* ignore */ }
           const saved = await saveSettings(env, body);
           const { passwordHash, salt, ...safeSettings } = saved;
-          return json({ ok: true, settings: safeSettings, storage: kv(env) ? 'kv' : 'memory' });
+          return json({ ok: true, settings: safeSettings, storage: getStorageType(env) });
         }
         /* ---- 同步 APK 版本：Node=git checkout；Cloudflare=GitHub API → KV ---- */
         if (path === '/api/admin/sync-app' && request.method === 'POST') {
@@ -1920,11 +2065,28 @@ export default {
             return json({ ok: false, error: e.message || String(e) }, 500);
           }
         }
-        /* ---- 辅助: 统一采集全量备份数据(KV或内存) ---- */
+        /* ---- 辅助: 统一采集全量备份数据(D1/KV或内存) ---- */
         const collectBackupData = async () => {
           const out = { version: 1, exportedAt: new Date().toISOString(), kv: {} };
-          if (kv(env)) {
-            const grab = async (k) => { const v = await env.CONFIG_KV.get(k); if (v != null) out.kv[k] = v; };
+          if (hasStorage(env)) {
+            const db = d1(env);
+            if (db) {
+              try {
+                await ensureD1Table(db);
+                const allRows = await db.prepare('SELECT key, value FROM kv_store').all();
+                if (allRows && Array.isArray(allRows.results)) {
+                  for (const row of allRows.results) {
+                    if (row && row.key) out.kv[row.key] = row.value;
+                  }
+                }
+              } catch (e) { /* fallback to grab */ }
+            }
+            // 确保核心必要键完整抓取 (在纯 KV 或补齐时)
+            const grab = async (k) => {
+              if (out.kv[k] != null) return;
+              const v = await storageGet(env, k);
+              if (v != null) out.kv[k] = v;
+            };
             await grab('settings');
             await grab('users:index');
             let idx = [];
@@ -1948,15 +2110,15 @@ export default {
           if (!data || !Object.keys(data).length) throw new Error('备份数据无效：缺少 kv 字段');
           const merge = mode !== 'replace';
           let n = 0;
-          if (kv(env)) {
+          if (hasStorage(env)) {
             for (const [k, v] of Object.entries(data)) {
               if (typeof v !== 'string') continue;
               if (merge && v === '') continue;
-              await env.CONFIG_KV.put(String(k).slice(0, 120), String(v).slice(0, 900000));
+              await storagePut(env, String(k).slice(0, 120), String(v).slice(0, 900000));
               n++;
             }
             try {
-              const freshSettings = await env.CONFIG_KV.get('settings');
+              const freshSettings = await storageGet(env, 'settings');
               if (freshSettings) MEM.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(freshSettings) };
             } catch (e) { /* ignore */ }
           } else {
@@ -2182,7 +2344,7 @@ export default {
             ok: true,
             customSources: saved.customSources,
             disabledSources: saved.disabledSources,
-            storage: kv(env) ? 'kv' : 'memory',
+            storage: getStorageType(env),
           });
         }
         /* ---- 数据备份: 导出全部业务 KV(settings/用户/历史/收藏/统计) ---- */
@@ -2205,8 +2367,8 @@ export default {
         if (path === '/api/admin/stats' && request.method === 'GET') {
           let log = [];
           let agg = {};
-          try { log = JSON.parse((await env.CONFIG_KV.get(STATS_LOG_KEY)) || '[]'); } catch (e) { /* ignore */ }
-          try { agg = JSON.parse((await env.CONFIG_KV.get(STATS_AGG_KEY)) || '{}'); } catch (e) { /* ignore */ }
+          try { log = JSON.parse((await storageGet(env, STATS_LOG_KEY)) || '[]'); } catch (e) { /* ignore */ }
+          try { agg = JSON.parse((await storageGet(env, STATS_AGG_KEY)) || '{}'); } catch (e) { /* ignore */ }
           if (!Array.isArray(log)) log = [];
           const today = new Date().toISOString().slice(0, 10);
           const byPath = Object.entries(agg.paths || {})
@@ -2227,16 +2389,16 @@ export default {
           });
         }
         if (path === '/api/admin/stats/clear' && request.method === 'POST') {
-          if (kv(env)) {
-            await env.CONFIG_KV.delete(STATS_LOG_KEY);
-            await env.CONFIG_KV.delete(STATS_AGG_KEY);
+          if (hasStorage(env)) {
+            await storageDelete(env, STATS_LOG_KEY);
+            await storageDelete(env, STATS_AGG_KEY);
           }
           return json({ ok: true });
         }
         /* ---- 用户管理: 列表 ---- */
         if (path === '/api/admin/users' && request.method === 'GET') {
           let list = [];
-          try { list = JSON.parse((await env.CONFIG_KV.get('users:index')) || '[]'); } catch (e) { /* ignore */ }
+          try { list = JSON.parse((await storageGet(env, 'users:index')) || '[]'); } catch (e) { /* ignore */ }
           if (!Array.isArray(list)) list = [];
           const users = [];
           for (const u of list) {
@@ -2306,13 +2468,14 @@ export default {
           try { body = await request.json(); } catch (e) { /* ignore */ }
           const u = String(body.u || '');
           if (!u) return json({ error: 'no user' }, 400);
-          if (!kv(env)) return json({ error: 'no kv' }, 500);
-          await env.CONFIG_KV.delete('user:' + u);
-          await env.CONFIG_KV.delete('uhist:' + u);
+          if (!hasStorage(env)) return json({ error: 'no storage' }, 500);
+          await storageDelete(env, 'user:' + u);
+          await storageDelete(env, 'uhist:' + u);
+          await storageDelete(env, 'favs:' + u);
           let list = [];
-          try { list = JSON.parse((await env.CONFIG_KV.get('users:index')) || '[]'); } catch (e) { /* ignore */ }
+          try { list = JSON.parse((await storageGet(env, 'users:index')) || '[]'); } catch (e) { /* ignore */ }
           list = list.filter((x) => x !== u);
-          await env.CONFIG_KV.put('users:index', JSON.stringify(list));
+          await storagePut(env, 'users:index', JSON.stringify(list));
           return json({ ok: true });
         }
         return json({ error: 'not found' }, 404);
