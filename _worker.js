@@ -29,6 +29,7 @@ const FALLBACK_SOURCES = [
 ];
 
 const DEFAULT_LIVE_SOURCES = [
+  'https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.m3u',
   'https://live.zbds.top/tv/iptv4.m3u',
   'https://iptv-org.github.io/iptv/countries/cn.m3u',
 ];
@@ -1373,10 +1374,25 @@ async function statRecord(env, entry) {
 
 /* --------------------------- 直播 m3u 解析与代理 ------------------------------- */
 const OFFICIAL_LIVE_CHANNELS = [
+  // 央视频道官方极速 1080p 高可用 CDN
   { name: 'CCTV-13 新闻 (1080p)', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV13.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel21/1080p.m3u8', tag: 'official' },
+  { name: 'CCTV-4 中文国际 (1080p)', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV4.png', url: 'https://dash2.antik.sk/live/test_cctv_tizen/playlist.m3u8', tag: 'official' },
+  { name: 'CCTV+ 全球直播 (1080p)', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV13.png', url: 'https://cd-live-stream.news.cctvplus.com/live/smil:CHANNEL1.smil/playlist.m3u8', tag: 'official' },
+  { name: 'CGTN 国际纪实 (1080p)', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV9.png', url: 'https://global.cgtn.cicc.media.caton.cloud/master/cgtn-america.m3u8', tag: 'official' },
+  // 卫视频道官方极速 1080p 高可用 CDN
   { name: '浙江卫视 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel01/1080p.m3u8', tag: 'official' },
-  { name: '浙江教科 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/浙江教科.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel03/1080p.m3u8', tag: 'official' },
-  { name: '浙江民生 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/浙江民生.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel05/1080p.m3u8', tag: 'official' },
+  { name: '湖南卫视 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/湖南卫视.png', url: 'https://txmov2.a.kwimgs.com/bs3/video-hls/5199687338554291078_hlsb.m3u8', tag: 'official' },
+  { name: '东方卫视 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/东方卫视.png', url: 'https://txmov2.a.kwimgs.com/bs3/video-hls/5219953535631090825_hlsb.m3u8', tag: 'official' },
+  // 地方/特色官方极速 1080p 高可用 CDN
+  { name: '钱江都市 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel02/1080p.m3u8', tag: 'official' },
+  { name: '经济生活 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel03/1080p.m3u8', tag: 'official' },
+  { name: '教科影院 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江教科.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel04/1080p.m3u8', tag: 'official' },
+  { name: '影视剧场 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江影视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel05/1080p.m3u8', tag: 'official' },
+  { name: '民生休闲 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江民生.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel06/1080p.m3u8', tag: 'official' },
+  { name: '浙江新闻 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel07/1080p.m3u8', tag: 'official' },
+  { name: '浙江少儿 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel08/1080p.m3u8', tag: 'official' },
+  { name: '浙江国际 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel10/1080p.m3u8', tag: 'official' },
+  // 国际频道官方极速高可用
   { name: 'ABN 国际新闻 (HTTPS)', group: '国际频道', logo: 'https://tb.zbds.top/logo/CCTV4.png', url: 'https://mediaserver.abnvideos.com/live/ABN_China/index.m3u8', tag: 'official' },
 ];
 
@@ -1458,12 +1474,24 @@ function isAllowedLiveProxyUrl(rawUrl) {
   }
 }
 
+// Cloudflare Workers fetch() 支持的标准 HTTP/HTTPS 端口白名单
+const CF_ALLOWED_PORTS = new Set(['', '80', '443', '8080', '8880', '2052', '2082', '2086', '2095', '2053', '2083', '2087', '2096', '8443']);
+
+function isSupportedLiveProxyPort(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    return CF_ALLOWED_PORTS.has(u.port);
+  } catch (e) {
+    return false;
+  }
+}
+
 async function loadLive(env, ctx) {
   const settings = await getSettings(env);
   let list = (settings.liveSources && settings.liveSources.length ? settings.liveSources : DEFAULT_LIVE_SOURCES);
   if (!list || !list.length) list = [...DEFAULT_LIVE_SOURCES];
 
-  const cacheKey = new Request('https://cache.internal/XIAOLIN-TV/live/v2');
+  const cacheKey = new Request('https://cache.internal/XIAOLIN-TV/live/v3');
   try {
     const hit = await caches.default.match(cacheKey);
     if (hit) return await hit.json();
@@ -1759,6 +1787,17 @@ export default {
           return new Response('Invalid or disallowed live stream URL', {
             status: 400,
             headers: { 'Access-Control-Allow-Origin': '*' },
+          });
+        }
+        // 若目标为非标端口(如 :82, :9901, :6610 等)，Cloudflare 边缘防火墙会返回 403 阻断
+        // 服务端前置返回 422 明确错误，使前端播放器秒级切换至备用线路或弹出原生 App 播放指引
+        if (!isSupportedLiveProxyPort(targetUrl)) {
+          return new Response('Non-standard port live stream requires native App or standard port fallback', {
+            status: 422,
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'X-Live-Error': 'non-standard-port',
+            },
           });
         }
         try {

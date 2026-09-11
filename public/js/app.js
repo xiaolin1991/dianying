@@ -4280,6 +4280,10 @@
         <div class="video-tip hidden" id="videoTip"></div>
       </div>
       <div class="live-now" id="nowName">📺 正在加载频道列表…</div>
+      <div id="liveLinesWrap" style="display:none;margin-top:8px;padding:6px 12px;background:rgba(255,255,255,0.04);border-radius:8px;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--dim);font-weight:600;display:flex;align-items:center;gap:4px">📡 线路切换:</span>
+        <div id="liveLinesList" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      </div>
       <div class="live-layout" style="margin-top:14px">
         <div class="live-groups" id="liveGroups"></div>
         <div class="live-channels" id="liveChs"><div class="empty" style="grid-column:1/-1;padding:40px">频道加载中，若较慢请稍候…</div></div>
@@ -4340,32 +4344,110 @@
       }));
     }
 
-    function findBackupCh(name, excludeUrl) {
-      if (!name || !data || !data.groups) return null;
-      const m = name.match(/CCTV-?\d+\+?/i) || name.match(/[\u4e00-\u9fa5]{2,4}卫视/);
-      const coreName = m ? m[0].toUpperCase().replace('-', '') : name.trim();
+    // 频道核心名归一化 (如 "CCTV-1 综合 (1080p)" / "CCTV-1" / "CCTV1" 统一归为 "CCTV1")
+    function getChannelCoreKey(name) {
+      if (!name) return '';
+      const cctv = name.match(/CCTV[-_\s]*(\d+\+?)/i);
+      if (cctv) return 'CCTV' + cctv[1].toUpperCase();
+      const ws = name.match(/([\u4e00-\u9fa5]{2,4})卫视/);
+      if (ws) return ws[1] + '卫视';
+      return name.trim().toUpperCase().replace(/[\s\-_]+/g, '');
+    }
 
+    // 线路播放能力评分 (越大越优先起播)
+    function scoreLine(url, tag) {
+      if (tag === 'official') return 100; // 官方 1080p CDN (443端口) 最高优先
+      try {
+        const u = new URL(url);
+        const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+        const isHttps = u.protocol === 'https:';
+        // 标准端口 HTTPS (443)
+        if (isHttps && port === '443') return 80;
+        // 标准端口 HTTP (80/8080)
+        if (port === '80' || port === '8080') return 60;
+        // 专网/非标端口 (如 82, 9901, 6610)
+        return 10;
+      } catch (e) {
+        return 0;
+      }
+    }
+
+    // 获取当前频道的所有候选线路，并按播放成功率智能排序
+    function getCandidateLines(chName, currentUrl) {
+      if (!chName || !data || !data.groups) return currentUrl ? [{ name: chName, url: currentUrl, score: scoreLine(currentUrl) }] : [];
+      const coreKey = getChannelCoreKey(chName);
+      const lines = [];
+      const seenUrls = new Set();
+
+      // 先收集所有同名候选流
       for (const g of data.groups) {
         for (const ch of g.channels) {
-          if (ch.url === excludeUrl) continue;
-          const chCore = (ch.name.match(/CCTV-?\d+\+?/i) || ch.name.match(/[\u4e00-\u9fa5]{2,4}卫视/) || [])[0];
-          if (chCore && chCore.toUpperCase().replace('-', '') === coreName) {
-            return ch;
+          if (seenUrls.has(ch.url)) continue;
+          const k = getChannelCoreKey(ch.name);
+          if (k && k === coreKey) {
+            seenUrls.add(ch.url);
+            lines.push({ name: ch.name, url: ch.url, tag: ch.tag, score: scoreLine(ch.url, ch.tag) });
           }
         }
       }
-      return null;
+
+      // 若传入的 currentUrl 不在同名匹配中，额外追加
+      if (currentUrl && !seenUrls.has(currentUrl)) {
+        lines.push({ name: chName, url: currentUrl, score: scoreLine(currentUrl) });
+      }
+
+      // 按评分降序排序，优质/官方/标准端口线路排前面
+      lines.sort((a, b) => b.score - a.score);
+      return lines.length ? lines : [{ name: chName, url: currentUrl, score: scoreLine(currentUrl) }];
     }
 
-    function playCh(url, name, isBackupRetry) {
+    let curPlayingLines = [];
+    let curLineIndex = 0;
+
+    function renderLineButtons() {
+      const wrap = $('#liveLinesWrap');
+      const list = $('#liveLinesList');
+      if (!wrap || !list) return;
+      if (!curPlayingLines || curPlayingLines.length <= 1) {
+        wrap.style.display = 'none';
+        return;
+      }
+      wrap.style.display = 'flex';
+      list.innerHTML = curPlayingLines.map((line, idx) => {
+        const isCur = idx === curLineIndex;
+        let label = `线路 ${idx + 1}`;
+        if (line.tag === 'official') label += ' (极速官方)';
+        else if (line.score >= 80) label += ' (超清)';
+        else if (line.score >= 60) label += ' (标清)';
+        else label += ' (备用)';
+        return `<button type="button" class="btn small ${isCur ? 'primary' : 'outline'}" data-lidx="${idx}" style="font-size:11px;padding:3px 9px;border-radius:12px;font-weight:${isCur ? '700' : '500'}">${esc(label)}</button>`;
+      }).join('');
+      $$('#liveLinesList button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.dataset.lidx);
+          if (idx !== curLineIndex && curPlayingLines[idx]) {
+            curLineIndex = idx;
+            playCurrentLine(true);
+          }
+        });
+      });
+    }
+
+    function playCurrentLine(isManual) {
+      if (!curPlayingLines.length) return;
+      const cur = curPlayingLines[curLineIndex];
+      const url = cur.url;
+      const name = cur.name;
+
       if (checkMobileWebLimit($('#videoEl'))) return;
       if (inApp()) maybeAppUpdate();
+
+      renderLineButtons();
 
       const isHttpsPage = location.protocol === 'https:';
       const isHttpStream = /^http:\/\//i.test(url);
       const isAlreadyProxied = url.includes('/api/live/stream?url=');
 
-      // 当处于 HTTPS 网页环境且直播流为 HTTP 时，自动接入站点 Worker 的安全网关转接，彻底解决 Mixed Content 拦截
       let targetPlayUrl = url;
       let isProxied = false;
       if (isHttpsPage && isHttpStream && !isAlreadyProxied) {
@@ -4373,40 +4455,54 @@
         isProxied = true;
       }
 
-      $('#nowName').textContent = '📺 正在播放：' + name + (isBackupRetry ? ' (已切至备用可用线路)' : (isProxied ? ' (🛡️ HTTPS安全流代理)' : ''));
+      const lineText = `[线路 ${curLineIndex + 1}/${curPlayingLines.length}]`;
+      $('#nowName').innerHTML = `📺 正在播放：<b>${esc(name)}</b> <span style="font-size:12px;color:var(--dim);margin-left:6px">${lineText}</span>` +
+        (cur.tag === 'official' ? ' <span class="badge ok" style="font-size:10px">⚡官方1080p</span>' : (isProxied ? ' <span class="badge dim" style="font-size:10px">🛡️代理</span>' : ''));
+
       Player.play($('#videoEl'), targetPlayUrl, $('#videoTip'), {
         optimize: !!(State.settings && State.settings.playerOptimize),
         onError: (err) => {
-          // 步骤 1: 若直接播放失败（如跨域受限），优先转入服务端代理通道重试
-          if (!isProxied && !isAlreadyProxied && /^https?:\/\//i.test(url)) {
-            console.warn('[live] 播放直接连接失败，自动转入服务端安全流代理:', url, err);
-            const fallbackUrl = '/api/live/stream?url=' + encodeURIComponent(url);
-            $('#nowName').textContent = '📺 正在播放：' + name + ' (🛡️ 安全流代理转接中)';
-            Player.play($('#videoEl'), fallbackUrl, $('#videoTip'), {
-              optimize: !!(State.settings && State.settings.playerOptimize),
-              onError: () => {
-                // 代理后仍失败（如源地址本身 403 或专网单播失效），自动切至同名备用可用线路
-                handleStreamFailure(url, name, isBackupRetry);
-              },
-            });
-            return;
+          console.warn(`[live] 线路 ${curLineIndex + 1} 播放异常:`, url, err);
+          // 自动故障切换到下一条线路
+          if (curLineIndex + 1 < curPlayingLines.length) {
+            const nextIdx = curLineIndex + 1;
+            console.warn(`[live] 线路 ${curLineIndex + 1} 异常，正在自动切至 线路 ${nextIdx + 1}...`);
+            toast(`当前线路异常，已自动切换至线路 ${nextIdx + 1}`, 'info');
+            curLineIndex = nextIdx;
+            playCurrentLine(false);
+          } else {
+            // 所有线路均尝试完毕
+            let tipHtml = `<div style="padding:16px;line-height:1.6;font-size:13px;text-align:center">
+              <div style="font-size:15px;font-weight:700;margin-bottom:6px">⚠️ 该频道所有线路暂无法直接在网页播放</div>
+              <div style="color:var(--dim);margin-bottom:12px;font-size:12px">由于部分地方台及运营商源使用专网非标端口，浏览器受安全策略限制无法直接拉取。</div>
+              <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+                <button type="button" class="btn small primary" id="copyLiveUrlBtn">📋 复制当前源地址</button>
+                <a href="#/download" class="btn small success">📱 下载App无限制播放</a>
+              </div>
+            </div>`;
+            const tipEl = $('#videoTip');
+            if (tipEl) {
+              tipEl.classList.remove('hidden');
+              tipEl.innerHTML = tipHtml;
+              const copyBtn = $('#copyLiveUrlBtn');
+              if (copyBtn) {
+                copyBtn.onclick = () => {
+                  navigator.clipboard.writeText(url).then(() => toast('已复制直播源地址', 'ok')).catch(() => toast(url, 'ok'));
+                };
+              }
+            }
           }
-          // 步骤 2: 原流无法播放时，自动寻找备用可用线路秒切起播
-          handleStreamFailure(url, name, isBackupRetry);
         },
       });
+
       $$('#liveChs .live-ch').forEach((el) => el.classList.toggle('on', el.dataset.u === url));
-      const last = { url, name };
-      store.set('lastCh', last);
+      store.set('lastCh', { url, name });
     }
 
-    function handleStreamFailure(failedUrl, chName, alreadyRetried) {
-      if (alreadyRetried) return;
-      const backup = findBackupCh(chName, failedUrl);
-      if (backup && backup.url !== failedUrl) {
-        console.warn('[live] 原线路连接受限或已失效，自动切至同频道备用有效线路:', chName, backup.url);
-        playCh(backup.url, chName, true);
-      }
+    function playCh(url, name) {
+      curPlayingLines = getCandidateLines(name, url);
+      curLineIndex = 0;
+      playCurrentLine(false);
     }
 
     renderGroups(); renderChs();
