@@ -29,8 +29,8 @@ const FALLBACK_SOURCES = [
 ];
 
 const DEFAULT_LIVE_SOURCES = [
+  'https://live.zbds.top/tv/iptv4.m3u',
   'https://iptv-org.github.io/iptv/countries/cn.m3u',
-  'https://live.fanmingming.com/tv/m3u/ipv6.m3u',
 ];
 
 const DEFAULT_SETTINGS = {
@@ -1371,7 +1371,15 @@ async function statRecord(env, entry) {
   } catch (e) { /* ignore */ }
 }
 
-/* --------------------------- 直播 m3u 解析 ------------------------------- */
+/* --------------------------- 直播 m3u 解析与代理 ------------------------------- */
+const OFFICIAL_LIVE_CHANNELS = [
+  { name: 'CCTV-13 新闻 (1080p)', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV13.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel21/1080p.m3u8', tag: 'official' },
+  { name: '浙江卫视 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel01/1080p.m3u8', tag: 'official' },
+  { name: '浙江教科 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/浙江教科.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel03/1080p.m3u8', tag: 'official' },
+  { name: '浙江民生 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/浙江民生.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel05/1080p.m3u8', tag: 'official' },
+  { name: 'ABN 国际新闻 (HTTPS)', group: '国际频道', logo: 'https://tb.zbds.top/logo/CCTV4.png', url: 'https://mediaserver.abnvideos.com/live/ABN_China/index.m3u8', tag: 'official' },
+];
+
 function parseM3U(text, tag) {
   const lines = text.split(/\r?\n/);
   const out = [];
@@ -1384,18 +1392,78 @@ function parseM3U(text, tag) {
       const attrs = t.slice(0, commaIdx);
       const title = (commaIdx >= 0 ? t.slice(commaIdx + 1) : '').trim();
       const group = (attrs.match(/group-title="([^"]*)"/) || [])[1] || '其他';
-      const logo = (attrs.match(/tvg-logo="([^"]*)"/) || [])[1] || '';
+      let logo = (attrs.match(/tvg-logo="([^"]*)"/) || [])[1] || '';
+      if (logo && logo.includes('fanmingming.com')) {
+        logo = logo.replace(/^https?:\/\/live\.fanmingming\.com\/tv\/svg\/?/i, 'https://tb.zbds.top/logo/').replace(/\.svg$/i, '.png');
+      }
       cur = { name: title || '未命名频道', group: group.trim() || '其他', logo, url: '', tag };
     } else if (!t.startsWith('#')) {
-      if (cur && !cur.url) { cur.url = t; out.push(cur); cur = null; }
+      if (cur && !cur.url) {
+        cur.url = t;
+        // 保留所有合法网络流(包含 IPv6、单播与普通 HTTP)，仅排除 127.0.0.1、localhost 等本地内部回环
+        if (!/^https?:\/\/(?:127\.|localhost)/i.test(t)) {
+          out.push(cur);
+        }
+        cur = null;
+      }
     }
   }
   return out;
 }
+
+function rewriteLiveM3u8(content, baseUrl, proxyPrefix) {
+  const lines = content.split(/\r?\n/);
+  const out = [];
+  for (let line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      out.push(line);
+      continue;
+    }
+    if (trimmed.startsWith('#')) {
+      if (trimmed.startsWith('#EXT-X-KEY') || trimmed.startsWith('#EXT-X-MAP')) {
+        line = line.replace(/URI="([^"]+)"/g, (_, uri) => {
+          try {
+            const abs = new URL(uri, baseUrl).href;
+            return `URI="${proxyPrefix}${encodeURIComponent(abs)}"`;
+          } catch (e) {
+            return `URI="${uri}"`;
+          }
+        });
+      }
+      out.push(line);
+    } else {
+      try {
+        const abs = new URL(trimmed, baseUrl).href;
+        out.push(`${proxyPrefix}${encodeURIComponent(abs)}`);
+      } catch (e) {
+        out.push(line);
+      }
+    }
+  }
+  return out.join('\n');
+}
+
+function isAllowedLiveProxyUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    if (host === 'localhost' || host.endsWith('.localhost')) return false;
+    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.|169\.254\.)/.test(host)) return false;
+    if (/^\[?::1\]?$/.test(host) || /^\[?[fF][cCdD]/.test(host) || /^\[?[fF][eE][89a-bA-B]/.test(host)) return false;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function loadLive(env, ctx) {
   const settings = await getSettings(env);
-  const list = (settings.liveSources && settings.liveSources.length ? settings.liveSources : DEFAULT_LIVE_SOURCES);
-  const cacheKey = new Request('https://cache.internal/XIAOLIN-TV/live/v1');
+  let list = (settings.liveSources && settings.liveSources.length ? settings.liveSources : DEFAULT_LIVE_SOURCES);
+  if (!list || !list.length) list = [...DEFAULT_LIVE_SOURCES];
+
+  const cacheKey = new Request('https://cache.internal/XIAOLIN-TV/live/v2');
   try {
     const hit = await caches.default.match(cacheKey);
     if (hit) return await hit.json();
@@ -1403,11 +1471,25 @@ async function loadLive(env, ctx) {
 
   const seen = new Set();
   const channels = [];
-  for (const url of list.slice(0, 4)) {
+
+  // 先置入官方高可用 1080p HTTPS 直播源
+  for (const och of OFFICIAL_LIVE_CHANNELS) {
+    if (!seen.has(och.url)) {
+      seen.add(och.url);
+      channels.push({ ...och });
+    }
+  }
+
+  for (const rawUrl of list.slice(0, 6)) {
     try {
-      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000) });
+      // 针对域名因网络阻断的源(如 live.fanmingming.com)，智能映射至可靠加速节点，确保源与频道完整保留
+      let fetchUrl = rawUrl;
+      if (typeof fetchUrl === 'string' && fetchUrl.includes('live.fanmingming.com/tv/m3u/ipv6.m3u')) {
+        fetchUrl = 'https://cdn.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/ipv6.m3u';
+      }
+      const res = await fetch(fetchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000) });
       if (!res.ok) continue;
-      const parsed = parseM3U(await res.text(), url);
+      const parsed = parseM3U(await res.text(), rawUrl);
       for (const ch of parsed) {
         if (!/^https?:\/\//i.test(ch.url) || seen.has(ch.url)) continue;
         seen.add(ch.url);
@@ -1668,6 +1750,86 @@ export default {
         return g2.newCookie
           ? json(live, 200, { 'Set-Cookie': guestSetCookie(g2.newCookie) })
           : json(live);
+      }
+
+      /* ---- 电视直播流安全反向代理网关(解决 Mixed Content 浏览器阻止 HTTP 播放及 CORS 限制) ---- */
+      if (path === '/api/live/stream' && (request.method === 'GET' || request.method === 'HEAD')) {
+        const targetUrl = url.searchParams.get('url');
+        if (!targetUrl || !isAllowedLiveProxyUrl(targetUrl)) {
+          return new Response('Invalid or disallowed live stream URL', {
+            status: 400,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+          });
+        }
+        try {
+          const reqHeaders = new Headers();
+          reqHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+          reqHeaders.set('Accept', '*/*');
+          const range = request.headers.get('Range');
+          if (range) reqHeaders.set('Range', range);
+
+          const upstream = await fetch(targetUrl, {
+            method: request.method === 'HEAD' ? 'HEAD' : 'GET',
+            headers: reqHeaders,
+            signal: AbortSignal.timeout(12000),
+            redirect: 'follow',
+          });
+
+          if (!upstream.ok && upstream.status !== 206) {
+            return new Response(`Upstream error: ${upstream.status}`, {
+              status: upstream.status,
+              headers: { 'Access-Control-Allow-Origin': '*' },
+            });
+          }
+
+          const ctype = (upstream.headers.get('content-type') || '').toLowerCase();
+          const isM3U8 = ctype.includes('mpegurl') || ctype.includes('application/vnd.apple.mpegurl') ||
+                         ctype.includes('application/x-mpegurl') || /\.m3u8($|\?)/i.test(targetUrl);
+
+          if (isM3U8 && request.method !== 'HEAD') {
+            const text = await upstream.text();
+            const proxyPrefix = `${url.origin}/api/live/stream?url=`;
+            const rewritten = rewriteLiveM3u8(text, targetUrl, proxyPrefix);
+            return new Response(rewritten, {
+              status: upstream.status,
+              headers: {
+                'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET,HEAD,OPTIONS',
+                'Access-Control-Allow-Headers': '*',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+              },
+            });
+          }
+
+          // 音视频媒体分片 (.ts, .aac, .m4s 等) 流式转发
+          const outHeaders = new Headers();
+          outHeaders.set('Access-Control-Allow-Origin', '*');
+          outHeaders.set('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
+          outHeaders.set('Access-Control-Allow-Headers', '*');
+          outHeaders.set('Cache-Control', 'public, max-age=120');
+          if (upstream.headers.get('content-type')) {
+            outHeaders.set('Content-Type', upstream.headers.get('content-type'));
+          } else if (/\.ts($|\?)/i.test(targetUrl)) {
+            outHeaders.set('Content-Type', 'video/mp2t');
+          }
+          if (upstream.headers.get('content-length')) {
+            outHeaders.set('Content-Length', upstream.headers.get('content-length'));
+          }
+          if (upstream.headers.get('content-range')) {
+            outHeaders.set('Content-Range', upstream.headers.get('content-range'));
+          }
+
+          return new Response(upstream.body, {
+            status: upstream.status,
+            headers: outHeaders,
+          });
+        } catch (err) {
+          return new Response(`Live stream gateway error: ${err.message}`, {
+            status: 502,
+            headers: { 'Access-Control-Allow-Origin': '*' },
+          });
+        }
       }
 
       /* ---- 游客试看状态(公开): 前端据此决定是否弹注册框 ---- */

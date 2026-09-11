@@ -4314,7 +4314,7 @@
       if (!g.channels.length) { $('#liveChs').innerHTML = '<div class="empty" style="grid-column:1/-1;padding:36px;font-size:13px">暂无收藏，点击频道右侧 ☆ 添加</div>'; return; }
       $('#liveChs').innerHTML = g.channels.map((ch, i) => `
         <div class="live-ch" data-u="${esc(ch.url)}" data-n="${esc(ch.name)}" data-l="${esc(ch.logo || '')}">
-          ${ch.logo ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(ch.logo)}" onerror="this.style.display='none'">` : '<span style="width:30px;text-align:center">📺</span>'}
+          ${ch.logo ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(ch.logo)}" onerror="this.onerror=null;this.style.display='none';this.insertAdjacentHTML('afterend','<span style=\\'width:30px;text-align:center\\'>📺</span>');">` : '<span style="width:30px;text-align:center">📺</span>'}
           <span>${esc(ch.name)}</span>
           <button class="live-fav ${favs.some((f) => f.url === ch.url) ? 'on' : ''}" data-fav="${esc(ch.url)}">☆</button>
         </div>`).join('');
@@ -4340,23 +4340,86 @@
       }));
     }
 
-    function playCh(url, name) {
+    function findBackupCh(name, excludeUrl) {
+      if (!name || !data || !data.groups) return null;
+      const m = name.match(/CCTV-?\d+\+?/i) || name.match(/[\u4e00-\u9fa5]{2,4}卫视/);
+      const coreName = m ? m[0].toUpperCase().replace('-', '') : name.trim();
+
+      for (const g of data.groups) {
+        for (const ch of g.channels) {
+          if (ch.url === excludeUrl) continue;
+          const chCore = (ch.name.match(/CCTV-?\d+\+?/i) || ch.name.match(/[\u4e00-\u9fa5]{2,4}卫视/) || [])[0];
+          if (chCore && chCore.toUpperCase().replace('-', '') === coreName) {
+            return ch;
+          }
+        }
+      }
+      return null;
+    }
+
+    function playCh(url, name, isBackupRetry) {
       if (checkMobileWebLimit($('#videoEl'))) return;
       if (inApp()) maybeAppUpdate();
-      $('#nowName').textContent = '📺 正在播放：' + name;
-      Player.play($('#videoEl'), url, $('#videoTip'), { optimize: !!(State.settings && State.settings.playerOptimize) });
+
+      const isHttpsPage = location.protocol === 'https:';
+      const isHttpStream = /^http:\/\//i.test(url);
+      const isAlreadyProxied = url.includes('/api/live/stream?url=');
+
+      // 当处于 HTTPS 网页环境且直播流为 HTTP 时，自动接入站点 Worker 的安全网关转接，彻底解决 Mixed Content 拦截
+      let targetPlayUrl = url;
+      let isProxied = false;
+      if (isHttpsPage && isHttpStream && !isAlreadyProxied) {
+        targetPlayUrl = '/api/live/stream?url=' + encodeURIComponent(url);
+        isProxied = true;
+      }
+
+      $('#nowName').textContent = '📺 正在播放：' + name + (isBackupRetry ? ' (已切至备用可用线路)' : (isProxied ? ' (🛡️ HTTPS安全流代理)' : ''));
+      Player.play($('#videoEl'), targetPlayUrl, $('#videoTip'), {
+        optimize: !!(State.settings && State.settings.playerOptimize),
+        onError: (err) => {
+          // 步骤 1: 若直接播放失败（如跨域受限），优先转入服务端代理通道重试
+          if (!isProxied && !isAlreadyProxied && /^https?:\/\//i.test(url)) {
+            console.warn('[live] 播放直接连接失败，自动转入服务端安全流代理:', url, err);
+            const fallbackUrl = '/api/live/stream?url=' + encodeURIComponent(url);
+            $('#nowName').textContent = '📺 正在播放：' + name + ' (🛡️ 安全流代理转接中)';
+            Player.play($('#videoEl'), fallbackUrl, $('#videoTip'), {
+              optimize: !!(State.settings && State.settings.playerOptimize),
+              onError: () => {
+                // 代理后仍失败（如源地址本身 403 或专网单播失效），自动切至同名备用可用线路
+                handleStreamFailure(url, name, isBackupRetry);
+              },
+            });
+            return;
+          }
+          // 步骤 2: 原流无法播放时，自动寻找备用可用线路秒切起播
+          handleStreamFailure(url, name, isBackupRetry);
+        },
+      });
       $$('#liveChs .live-ch').forEach((el) => el.classList.toggle('on', el.dataset.u === url));
       const last = { url, name };
       store.set('lastCh', last);
+    }
+
+    function handleStreamFailure(failedUrl, chName, alreadyRetried) {
+      if (alreadyRetried) return;
+      const backup = findBackupCh(chName, failedUrl);
+      if (backup && backup.url !== failedUrl) {
+        console.warn('[live] 原线路连接受限或已失效，自动切至同频道备用有效线路:', chName, backup.url);
+        playCh(backup.url, chName, true);
+      }
     }
 
     renderGroups(); renderChs();
     const last = store.get('lastCh', null);
     if (last && !query.noResume) playCh(last.url, last.name);
     else {
-      // 默认播 CCTV 类第一个可点频道
+      // 默认优先播 CCTV-13 (1080p) 或 CCTV-1 等高清央视频道
       const cctv = data.groups.find((g) => /央视|CCTV/i.test(g.name));
-      const ch = cctv && cctv.channels.find((c) => /CCTV-?1\b|CCTV1 综合/.test(c.name));
+      const ch = (cctv && (
+        cctv.channels.find((c) => /CCTV-?13\b|新闻/i.test(c.name)) ||
+        cctv.channels.find((c) => /CCTV-?1\b|综合/i.test(c.name)) ||
+        cctv.channels[0]
+      )) || (data.groups[1] && data.groups[1].channels[0]) || (data.groups[0] && data.groups[0].channels[0]);
       if (ch) playCh(ch.url, ch.name);
     }
   }
@@ -5069,10 +5132,13 @@
             <div class="pager" id="srcPager" style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px"></div>
           </div>
           <div class="admin-card">
-            <h3>📺 电视直播源</h3>
-            <p class="hint">每行一个 m3u 直播源地址，保存后全站生效（缓存约 30 分钟）。推荐：<br>
-              <code>https://iptv-org.github.io/iptv/countries/cn.m3u</code><br>
-              <code>https://live.fanmingming.com/tv/m3u/ipv6.m3u</code></p>
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <h3 style="margin:0">📺 电视直播源</h3>
+              <button class="btn ghost small" id="resetLiveBtn" type="button" title="填入推荐的高可用直播源">恢复推荐高质量直播源</button>
+            </div>
+            <p class="hint" style="margin-top:6px">每行一个 m3u 直播源地址，保存后全站生效。支持普通 HTTP 直播流（系统已内置 HTTPS 代理网关自动转接，无惧 Mixed Content 拦截）。推荐源：<br>
+              <code>https://live.zbds.top/tv/iptv4.m3u</code>（全量央视/卫视/地方，含 HTTPS 高清台标）<br>
+              <code>https://iptv-org.github.io/iptv/countries/cn.m3u</code>（iptv-org 国际公开源）</p>
             <textarea class="field-area" id="liveInput" style="min-height:110px;font-family:monospace;font-size:12px">${esc((s.liveSources || []).join('\n'))}</textarea>
             <button class="btn primary" id="saveLiveBtn" style="margin-top:14px">保存直播源</button>
           </div>`;
@@ -5181,13 +5247,20 @@
         });
         renderEditor();
         updateCountInfo();
+        $('#resetLiveBtn')?.addEventListener('click', () => {
+          $('#liveInput').value = [
+            'https://live.zbds.top/tv/iptv4.m3u',
+            'https://iptv-org.github.io/iptv/countries/cn.m3u',
+          ].join('\n');
+          toast('已填入推荐高质量直播源，请点击「保存直播源」生效', 'ok');
+        });
         $('#saveLiveBtn').addEventListener('click', async () => {
           try {
             const urls = $('#liveInput').value.split('\n').map((x) => x.trim()).filter(Boolean);
             const res = await API.adminSaveSettings({ liveSources: urls, liveSourcesAllowEmpty: true });
             if (lastSettings) lastSettings.liveSources = (res.settings && res.settings.liveSources) || urls;
             State.liveCache = null;
-            toast('直播源已保存，缓存将在约30分钟后刷新（重新部署可立即生效）', 'ok');
+            toast('直播源已保存，直播缓存已重置立即生效', 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
       }
