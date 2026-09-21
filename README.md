@@ -78,6 +78,21 @@ npm install && npm run dev     # 本地预览 http://127.0.0.1:8787
 - **直播卡顿**：公开 IPTV 源可用性波动大，可在后台换成自建/更稳定的 m3u 地址。
 - **想加自己的采集源**：直接进后台「影视源管理」→「＋ 添加影视源」，填名称和接口地址保存即可；也可编辑 `_worker.js` 顶部 `DEFAULT_CONFIG_URL` 或补充 `FALLBACK_SOURCES`。
 
+## 📱 原生 App 构建 (GitHub Actions)
+
+本仓库内置三种原生壳构建，均通过 GitHub Actions 手动触发并自动发布到 Releases：
+
+| 产物 | 工作流 | 说明 |
+|---|---|---|
+| Android APK | `.github/workflows/android.yml` | 原生 WebView 壳 (`android/`)，全屏时经 JS 桥 `AndroidBridge.setOrientation('landscape')` 强制横屏 + 沉浸式，**系统锁屏也能横屏铺满** |
+| iOS 免签 IPA | `.github/workflows/ios.yml` | 原生 WKWebView 壳 (`ios/`)，macos runner 免签构建；TrollStore / AltStore / Sideloadly 安装 |
+| iPad 免签 IPA | 同上 | 同一工作流产出 iPad 专用包 |
+
+- App 名称：晓林影视；图标统一由 CI 从 `public/icons/icon-512.png` 自动生成
+- 站点地址：仓库 Settings → Variables → `START_URL`（构建时注入）
+- 触发方式：Actions 页面选择对应工作流 → Run workflow → 输入 `yes` 确认
+- PakePlus 方案可弃用：其 WebView 壳无法在全屏时强制横屏，原生壳从根本上解决
+
 ## ⚖️ 免责声明
 
 本项目仅为个人学习用的影视信息聚合导航，不存储、不上传、不生产任何视频内容，全部数据来自互联网公开采集接口与公开 IPTV 列表。请遵守所在地区法律法规，勿用于商业用途。

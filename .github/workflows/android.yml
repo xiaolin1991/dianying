@@ -56,6 +56,17 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Generate launcher icons from public/icons/icon-512.png
+        run: |
+          SRC="public/icons/icon-512.png"
+          for spec in "mdpi 48" "hdpi 72" "xhdpi 96" "xxhdpi 144" "xxxhdpi 192"; do
+            set -- $spec
+            convert "$SRC" -resize "${2}x${2}" "android/app/src/main/res/mipmap-$1/ic_launcher.png"
+          done
+          # 电视横幅 320x180(居中裁剪)
+          convert "$SRC" -resize "320x180^" -gravity center -extent 320x180 "android/app/src/main/res/drawable/banner.png"
+          echo "icons regenerated from $SRC"
+
       - name: Build Debug APK
         env:
           START_URL: ${{ vars.START_URL }}

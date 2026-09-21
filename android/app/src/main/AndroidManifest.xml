@@ -9,7 +9,7 @@
 
     <!-- 允许 http 明文: 大量苹果CMS接口与视频CDN仍是http, 禁止会导致TV盒子全程无网络 -->
     <application
-        android:label="晓林影院"
+        android:label="晓林影视"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/banner"
         android:usesCleartextTraffic="true"
