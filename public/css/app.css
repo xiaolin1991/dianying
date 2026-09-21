@@ -772,12 +772,34 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   transform: translate(-50%, -50%) rotate(90deg) !important;
   transform-origin: center center !important;
 }
-html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% !important; }
+html.player-fs, html.player-fs body {
+  overflow: hidden !important;
+  height: 100% !important;
+  width: 100% !important;
+  background: #000 !important;
+}
 html.player-fs #app { overflow: visible !important; }
 html.player-fs .topbar,
+html.player-fs .play-head,
+html.player-fs .play-actions,
+html.player-fs .play-side,
+html.player-fs .footer,
 html.player-fs #bottomTabBar,
 html.player-fs #backTop {
   display: none !important;
+}
+html.player-fs .play-top-row,
+html.player-fs .play-col,
+html.player-fs .play-stage {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  background: #000 !important;
+  display: block !important;
+  flex: none !important;
 }
 /* 中央播放钮: 仅暂停时显示 */
 .pp-btn {
@@ -799,15 +821,15 @@ html.player-fs #backTop {
   0%, 100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(229,9,20,0.5); }
   50% { transform: translate(-50%, -50%) scale(1.06); box-shadow: 0 0 0 12px rgba(229,9,20,0); }
 }
-/* 全屏顶部栏: 退出全屏返回按钮 + 影片名称 */
+/* 全屏顶部栏: 优酷同款沉浸式顶部栏，纯箭头返回键 + 影片名称 */
 .fs-top-bar {
   display: none;
   position: absolute; left: 0; right: 0; top: 0;
-  z-index: 35;
+  z-index: 45;
   padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 14px;
-  background: linear-gradient(180deg, rgba(0,0,0,.85) 0%, rgba(0,0,0,.35) 65%, transparent 100%);
+  background: linear-gradient(180deg, rgba(0,0,0,.85) 0%, rgba(0,0,0,.35) 60%, transparent 100%);
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   opacity: 0;
   pointer-events: none;
   transition: opacity .2s ease;
@@ -821,30 +843,36 @@ html.player-fs #backTop {
   opacity: 1;
   pointer-events: auto;
 }
+/* 优酷同款无边框纯箭头返回键 (无“返回”文字) */
 .fs-back-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  background: rgba(255,255,255,.18);
-  color: #fff;
-  border: 1px solid rgba(255,255,255,.35);
-  padding: 6px 14px 6px 10px;
-  border-radius: 20px;
-  font-size: 13.5px;
-  font-weight: 600;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: transparent !important;
+  color: #fff !important;
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
   cursor: pointer;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   flex-shrink: 0;
+  border-radius: 50%;
+  transition: opacity .15s, transform .15s;
 }
 .fs-back-btn:active {
-  background: rgba(255,255,255,.35);
-  transform: scale(0.96);
+  opacity: .6;
+  transform: scale(0.92);
+}
+.fs-back-btn svg {
+  width: 26px;
+  height: 26px;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,.85));
 }
 .fs-vod-title {
   color: #fff;
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -852,10 +880,32 @@ html.player-fs #backTop {
   text-shadow: 0 1px 4px rgba(0,0,0,.9);
 }
 .fs-vod-title small {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 400;
   opacity: .85;
-  margin-left: 6px;
+  margin-left: 8px;
+}
+.play-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.play-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--card);
+  color: var(--txt);
+  border: 1px solid var(--card-br);
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .15s, transform .15s;
+}
+.play-back-btn:active {
+  transform: scale(0.92);
 }
 /* 手机底部控制条: 点按出现 */
 .m-ctrl {

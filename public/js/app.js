@@ -1597,6 +1597,9 @@
     const isFav = store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id));
     v.innerHTML = `
       <div class="container page-wrap play-head">
+        <button type="button" class="play-back-btn" id="playBackBtn" title="返回" aria-label="返回">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
         <div class="pb-title">${esc(vod.vod_name)}<span id="curEpName">${esc(groups[gi].eps[ei].name)}</span></div>
       </div>
       <div class="container page-wrap">
@@ -1606,8 +1609,7 @@
               <div class="video-wrap" id="videoWrap"><video id="videoEl" playsinline webkit-playsinline autoplay></video>
                 <div class="fs-top-bar" id="fsTopBar">
                   <button type="button" class="fs-back-btn" id="fsBackBtn" title="退出全屏" aria-label="退出全屏">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19l-7-7 7-7"/></svg>
-                    <span>返回</span>
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19l-7-7 7-7"/></svg>
                   </button>
                   <div class="fs-vod-title" id="fsVodTitle">${esc(vod.vod_name)} <small id="fsEpName">${esc(groups[gi].eps[ei].name)}</small></div>
                 </div>
@@ -1761,6 +1763,17 @@
         e.preventDefault();
         e.stopPropagation();
         togglePlayerFs();
+      });
+    }
+    const playBackBtn = $('#playBackBtn');
+    if (playBackBtn) {
+      playBackBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (window.history.length > 1) {
+          window.history.back();
+        } else {
+          location.hash = '#/search';
+        }
       });
     }
     const togglePlay = () => {
@@ -2007,7 +2020,7 @@
             clearTimeout(autoFailoverTimer);
             sessionStorage.setItem('ntv_swap_count', String(swapCount + 1));
             toast(`已自动切换到可用源：${targetHit.s.name}`, 'ok');
-            window.location.hash = `#/play/${esc(targetHit.s.key)}/${encodeURIComponent(targetHit.id)}?ep=${ei}&group=0`;
+            location.replace(`#/play/${esc(targetHit.s.key)}/${encodeURIComponent(targetHit.id)}?ep=${ei}&group=0`);
           };
           const b1 = $('#doSwapNowBtn');
           if (b1) b1.onclick = doSwap;
@@ -2239,6 +2252,7 @@
       wrap.addEventListener('dblclick', () => { clearTimeout(deskClickT); }, true);
     }
 
+    let userExitedFs = false;
     const syncRotatedFs = () => {
       if (!alive() || !video.isConnected) {
         window.removeEventListener('resize', syncRotatedFs);
@@ -2246,6 +2260,13 @@
       }
       const wrapEl = $('#videoWrap');
       if (!wrapEl || !wrapEl.classList.contains('fake-fs')) return;
+      const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
+      if (inApk) {
+        wrapEl.classList.remove('fs-rotated');
+        wrapEl.style.width = '';
+        wrapEl.style.height = '';
+        return;
+      }
       const isPortrait = window.innerWidth < window.innerHeight;
       if (isPortrait) {
         wrapEl.classList.add('fs-rotated');
@@ -2267,28 +2288,26 @@
       document.body.style.overflow = 'hidden';
       document.documentElement.classList.add('player-fs');
 
-      // 尝试调用系统 orientation.lock
-      try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); } catch (e) {}
-      // 若处于安卓 APK 壳中，通知原生 Activity 强制横屏(突破华为/安卓系统旋转锁)
-      try {
-        if (window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function') {
-          window.AndroidBridge.setOrientation('landscape');
-        }
-      } catch (e) {}
-      syncRotatedFs();
+      const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
+      if (inApk) {
+        try { window.AndroidBridge.setOrientation('landscape'); } catch (e) {}
+      } else {
+        try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); } catch (e) {}
+        syncRotatedFs();
+      }
 
-      // 压入一层历史: 系统/浏览器返回键先退出全屏, 不离开播放页
-      if (!fakeFsHistPushed) {
+      // 仅在纯移动端浏览器中压入一层历史(APK由原生 onBackPressed 拦截, 不压入以防历史污染导致返回死循环)
+      if (!inApk && isMobilePlayer && !fakeFsHistPushed) {
         try { history.pushState({ ntvFakeFs: 1 }, ''); fakeFsHistPushed = true; } catch (e) {}
       }
       bumpMCtrl(4000);
       syncPpBtn();
-      // 全屏后重刷水印(避免被视频合成层盖住 / 正中模式再闪一次)
       requestAnimationFrame(() => refreshPlayerWm());
     }
     function exitFakeFs(fromPopstate) {
       const wrapEl = $('#videoWrap');
       if (!wrapEl) return;
+      userExitedFs = true;
       const wasFs = wrapEl.classList.contains('fake-fs');
       wrapEl.classList.remove('fake-fs', 'fs-rotated');
       wrapEl.style.width = '';
@@ -2296,18 +2315,16 @@
       document.body.style.overflow = '';
       document.documentElement.classList.remove('player-fs');
 
-      try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
-      try {
-        if (window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function') {
-          window.AndroidBridge.setOrientation('portrait');
-        }
-      } catch (e) {}
+      const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
+      if (inApk) {
+        try { window.AndroidBridge.setOrientation('portrait'); } catch (e) {}
+      } else {
+        try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
+      }
 
-      // 退出全屏后自动恢复正常亮度(100%无滤镜)
       resetBrightness();
 
-      // 点按钮退出时回退刚才压入的历史, 避免多点一次返回
-      if (wasFs && fakeFsHistPushed && !fromPopstate) {
+      if (!inApk && wasFs && fakeFsHistPushed && !fromPopstate) {
         fakeFsHistPushed = false;
         try { history.back(); } catch (e) {}
       } else {
@@ -2354,8 +2371,6 @@
     document.addEventListener('keydown', onFsEsc);
     const onFsChange = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      // 电脑原生全屏钮: 保持 video 全屏, 不拦截、不转假全屏
-      // 双击 / 下方「全屏」走的是容器真全屏(wrap), 此处仅同步状态
       if (fsEl === video) {
         syncPpBtn();
         refreshPlayerWm();
@@ -2375,7 +2390,6 @@
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
     video.addEventListener('webkitbeginfullscreen', () => {
-      // iOS 原生 video 全屏: 立刻退出并改假全屏, 保留水印
       try { if (video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
       setTimeout(() => {
         if (!alive() || !video.isConnected) return;
@@ -2386,23 +2400,29 @@
     });
     video.addEventListener('webkitendfullscreen', () => { refreshPlayerWm(); });
 
-    // 仅手机横屏自动全屏; 电脑绝不触发
+    // 仅纯手机浏览器横屏自动全屏; APK 内部或电脑端绝不触发自动转屏
     const orientMq = window.matchMedia('(orientation: landscape)');
     const onOrientFs = () => {
       if (!alive() || !video.isConnected || !isMobilePlayer) return;
+      if (window.AndroidBridge) return; // APK 壳内全屏完全由用户点击控制，避免传感器冲突
       if (orientMq.matches) {
-        if (!isPlayerFs()) { autoFsByOrient = true; enterFakeFs(); }
-      } else if (autoFsByOrient && wrap.classList.contains('fake-fs')) {
-        autoFsByOrient = false;
-        exitFakeFs();
+        if (!isPlayerFs() && !userExitedFs) {
+          autoFsByOrient = true;
+          enterFakeFs();
+        }
+      } else {
+        userExitedFs = false;
+        if (autoFsByOrient && wrap.classList.contains('fake-fs')) {
+          autoFsByOrient = false;
+          exitFakeFs();
+        }
       }
       syncPpBtn();
     };
-    if (isMobilePlayer) {
+    if (isMobilePlayer && !window.AndroidBridge) {
       if (orientMq.addEventListener) orientMq.addEventListener('change', onOrientFs);
       else if (orientMq.addListener) orientMq.addListener(onOrientFs);
-      window.addEventListener('orientationchange', () => setTimeout(onOrientFs, 120));
-      setTimeout(onOrientFs, 200);
+      window.addEventListener('orientationchange', () => setTimeout(onOrientFs, 150));
     }
 
     // 收藏(与详情页同一份本地收藏夹)
@@ -2732,9 +2752,16 @@
             <div class="swap-modal-list">${hits.map(row).join('') || '<p class="hint">没有找到可用播放源</p>'}</div>
             ${misses.length ? `<div style="margin-top:14px"><p class="hint" style="margin-bottom:8px">以下 ${misses.length} 个源无此片或已失效</p><div class="swap-modal-list">${misses.map(missRow).join('')}</div></div>` : ''}
           </div>`;
-        // 点击任意可选源: 导航的同时自动关闭弹窗
+        // 点击任意可选源: 导航的同时自动关闭弹窗, 必须用 location.replace 避免历史堆叠导致无法返回
         box.addEventListener('click', (ev) => {
-          if (ev.target === box || ev.target.closest('a.src-item')) box.remove();
+          const a = ev.target.closest('a.src-item');
+          if (a) {
+            ev.preventDefault();
+            box.remove();
+            location.replace(a.getAttribute('href'));
+            return;
+          }
+          if (ev.target === box) box.remove();
         });
         const closeBtn = document.createElement('button');
         closeBtn.className = 'modal-close';
@@ -2746,6 +2773,15 @@
         document.body.appendChild(box);
       }
       if (openBtn) openBtn.addEventListener('click', () => { if (!openBtn.disabled) openSwapModal(); });
+      if (swapOk) {
+        swapOk.addEventListener('click', (e) => {
+          const a = e.target.closest('a.src-item');
+          if (a) {
+            e.preventDefault();
+            location.replace(a.getAttribute('href'));
+          }
+        });
+      }
 
       others.forEach((s) => {
         (async () => {

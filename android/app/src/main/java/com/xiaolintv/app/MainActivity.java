@@ -66,10 +66,32 @@ public class MainActivity extends Activity {
                     try {
                         if ("landscape".equalsIgnoreCase(mode)) {
                             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                            try {
+                                getWindow().getDecorView().setSystemUiVisibility(
+                                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                );
+                            } catch (Exception ignored) {}
                         } else if ("portrait".equalsIgnoreCase(mode)) {
                             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                            try {
+                                getWindow().getDecorView().setSystemUiVisibility(
+                                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                    | View.SYSTEM_UI_FLAG_VISIBLE
+                                );
+                            } catch (Exception ignored) {}
                         } else {
                             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                            try {
+                                getWindow().getDecorView().setSystemUiVisibility(
+                                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                    | View.SYSTEM_UI_FLAG_VISIBLE
+                                );
+                            } catch (Exception ignored) {}
                         }
                     } catch (Exception ignored) {}
                 });
@@ -159,7 +181,13 @@ public class MainActivity extends Activity {
                     value -> {
                         if ("1".equals(value) || "\"1\"".equals(value)) {
                             runOnUiThread(() -> {
-                                try { setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED); } catch (Exception ignored) {}
+                                try {
+                                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                                    getWindow().getDecorView().setSystemUiVisibility(
+                                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                        | View.SYSTEM_UI_FLAG_VISIBLE
+                                    );
+                                } catch (Exception ignored) {}
                             });
                             return;
                         }
