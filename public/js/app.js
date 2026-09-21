@@ -664,6 +664,7 @@
     }
     route._prev = { parts, query, key: routeKey };
     if (State.config) trackVisit('#/' + parts.join('/')); // 页面访问统计
+    maybeAppUpdate(); // 每次路由切换时检查是否有新版本或强制更新
     try {
       if (parts[0] === 'browse') await viewBrowse(dec(parts[1]) || '电影', query, alive);
       else if (parts[0] === 'search') await viewSearch(query.q ? dec(query.q) : '', alive);
@@ -5160,14 +5161,44 @@
     document.body.appendChild(box);
   }
 
+  /** 版本号比对: a < b 返回 -1, a == b 返回 0, a > b 返回 1 */
+  function compareVersion(v1, v2) {
+    const s1 = String(v1 || '').trim().replace(/^v/i, '');
+    const s2 = String(v2 || '').trim().replace(/^v/i, '');
+    if (!s1 && !s2) return 0;
+    if (!s1) return -1;
+    if (!s2) return 1;
+    const p1 = s1.split('.').map((x) => parseInt(x, 10) || 0);
+    const p2 = s2.split('.').map((x) => parseInt(x, 10) || 0);
+    const len = Math.max(p1.length, p2.length);
+    for (let i = 0; i < len; i++) {
+      const n1 = p1[i] || 0;
+      const n2 = p2[i] || 0;
+      if (n1 < n2) return -1;
+      if (n1 > n2) return 1;
+    }
+    return 0;
+  }
+
   function maybeAppUpdate() {
     try {
       if (!inApp()) return;
       const client = parseAppClient();
-      if (!client || !client.code) return;
+      if (!client) return;
       const st = State.settings || {};
       const latestCode = Math.max(0, Math.round(Number(st.appPublishedCode || st.appVersionCode || 0)) || 0);
-      if (!latestCode || client.code >= latestCode) return;
+      const latestName = String(st.appPublishedName || st.appVersionName || '').trim();
+
+      // 双重版本检测：满足 versionCode 更大，或 versionName (如 0.24 > 0.23) 更大，即判定有新版
+      let hasUpdate = false;
+      if (latestCode > 0 && client.code > 0) {
+        if (latestCode > client.code) hasUpdate = true;
+      }
+      if (!hasUpdate && latestName && client.name) {
+        if (compareVersion(client.name, latestName) < 0) hasUpdate = true;
+      }
+      // 如果都没指定有效号，不触发
+      if (!hasUpdate) return;
 
       const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent || '');
       const isTv = isTvDevice() || (client && client.name && /tv/i.test(client.name));
@@ -5192,11 +5223,12 @@
         if (v) { try { v.pause(); } catch (e) {} }
       } else {
         const skip = store.get('appUpdateState', {}) || {};
-        // 非强制模式：同一 versionCode 点「稍后」后 12 小时内不重复
-        if (skip.skipCode === latestCode && skip.skipAt && Date.now() - skip.skipAt < 12 * 3600 * 1000) return;
+        // 非强制模式：同一版本点「稍后」后 12 小时内不重复
+        const verId = latestCode || latestName;
+        if (skip.skipCode === verId && skip.skipAt && Date.now() - skip.skipAt < 12 * 3600 * 1000) return;
       }
       setTimeout(() => openAppUpdateModal({
-        latestName: st.appPublishedName || st.appVersionName || String(latestCode),
+        latestName: latestName || String(latestCode),
         latestCode,
         force,
         changelog: st.appPublishedChangelog || st.appChangelog || '',
@@ -5205,6 +5237,7 @@
       }), force ? 100 : 1200);
     } catch (e) { /* ignore */ }
   }
+
 
   async function viewLive(query) {    const v = $('#view');
     v.innerHTML = `<div class="container page-wrap">
@@ -6766,6 +6799,26 @@
               <strong>绝不自动向客户端弹窗</strong>！只有当您确认无误并点击<strong>【🚀 确认正式发布更新给客户端】</strong>后，客户端才会弹出更新弹窗。
             </p>
 
+            <!-- 诊断：当前访问环境与当前已安装 App 版本 -->
+            ${(() => {
+              const client = parseAppClient();
+              if (client && (client.name || client.code)) {
+                return `
+                  <div style="margin:10px 0;padding:10px 14px;border-radius:10px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);color:#93c5fd;font-size:13px;display:flex;align-items:center;gap:8px">
+                    <span style="font-size:18px">📱</span>
+                    <div>
+                      <b>当前设备正在运行官方客户端：</b>
+                      版本名 <code>v${esc(client.name || '未知')}</code>，内部编号 versionCode: <code>${client.code}</code>
+                      <div style="font-size:11.5px;color:var(--dim);margin-top:2px">（系统已识别当前 App 版本，您在下方发布的版本号大于该数字即可触发更新）</div>
+                    </div>
+                  </div>`;
+              }
+              return `
+                <div style="margin:10px 0;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid var(--card-br);color:var(--dim);font-size:12px">
+                  ℹ️ 当前使用的是浏览器访问后台。若使用您手机上打包的 APP 打开此页面，此处会自动显示该 APP 的真实版本号与编号。
+                </div>`;
+            })()}
+
             <!-- 区块 1：当前线上客户端生效状态 -->
             <div style="margin:14px 0;padding:14px 16px;border-radius:12px;background:var(--card-bg,rgba(255,255,255,.03));border:1px solid var(--card-br,rgba(255,255,255,.1))">
               <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
@@ -6800,7 +6853,8 @@
                 <h4 style="margin:0;font-size:14px;color:var(--acc)">📝 待发布新版本（手动设置与更新内容编写）</h4>
               </div>
               <p class="hint" style="margin-bottom:12px">
-                💡 <b>手动更新推送机制</b>：请在本地自行编译打包并将安装包覆盖上传至 <code>/APP</code> 目录（或填写上方自定义下载地址），然后在下方填写最新版本号与更新说明。点击<b>【🚀 确认正式发布更新给客户端】</b>即刻向客户端触发全网弹窗更新！勾选<b>【强制更新】</b>则客户端必须更新才能继续使用。
+                💡 <b>手动更新推送机制</b>：请在本地自行编译打包并将安装包覆盖上传至 <code>/APP</code> 目录（或填写上方自定义下载地址），然后在下方填写最新版本号与更新说明。点击<b>【🚀 确认正式发布更新给客户端】</b>即刻向客户端触发全网弹窗更新！勾选<b>【强制更新】</b>则客户端必须更新才能继续使用。<br>
+                📌 <b>关于 versionCode</b>：这是打包时嵌入在 APK 内部的正整数（如 1、2、80），<strong>只有当此数值大于用户手机里已安装的数值时，App 才会触发更新</strong>！若需立即验证弹窗效果，可在此处填写一个较大的数字（例如 <code>99</code>）并勾选强制更新发布测试。
               </p>
 
               <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:12px">
