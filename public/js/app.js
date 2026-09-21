@@ -1685,6 +1685,16 @@
       try { if (video && video.webkitDisplayingFullscreen) return true; } catch (e) {}
       return false;
     };
+    let curBrightness = 1.0;
+    const setBrightness = (b) => {
+      curBrightness = Math.min(1.8, Math.max(0.2, Number(b) || 1.0));
+      if (video) {
+        video.style.filter = Math.abs(curBrightness - 1.0) < 0.02 ? '' : `brightness(${curBrightness.toFixed(2)})`;
+      }
+    };
+    const resetBrightness = () => {
+      setBrightness(1.0);
+    };
     const applyPlayerPrefs = () => {
       const vol = getSavedVol();
       try { video.volume = vol; if (vol > 0) video.muted = false; } catch (e) {}
@@ -2114,6 +2124,7 @@
     // ⛶ 全屏: 电脑 = 浏览器真全屏(容器); 手机 = 假全屏(兼容 iOS)
     const exitNativeFs = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      resetBrightness();
       if (!fsEl) return;
       try {
         const exit = document.exitFullscreen || document.webkitExitFullscreen;
@@ -2154,10 +2165,18 @@
       bumpMCtrl();
     };
     const toggleFakeFs = () => { togglePlayerFs(); };
-    $('#fsBtn').addEventListener('click', (e) => { e.preventDefault(); togglePlayerFs(); });
+    $('#fsBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      if (e.currentTarget && e.currentTarget.blur) e.currentTarget.blur();
+      togglePlayerFs();
+    });
     // 控制栏全屏按钮 (移动端与电脑端通用)
     if (mFsToggle) {
-      mFsToggle.addEventListener('click', (e) => { e.stopPropagation(); togglePlayerFs(); });
+      mFsToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.currentTarget && e.currentTarget.blur) e.currentTarget.blur();
+        togglePlayerFs();
+      });
     }
     // 桌面单击画面暂停/播放(避开原生控件条); 双击另走真全屏
     if (wrap && !isMobilePlayer) {
@@ -2177,6 +2196,18 @@
       wrap.addEventListener('dblclick', () => { clearTimeout(deskClickT); }, true);
     }
 
+    const syncRotatedFs = () => {
+      const wrapEl = $('#videoWrap');
+      if (!wrapEl || !wrapEl.classList.contains('fake-fs')) return;
+      if (isMobilePlayer && window.innerWidth < window.innerHeight) {
+        wrapEl.classList.add('fs-rotated');
+      } else {
+        wrapEl.classList.remove('fs-rotated');
+      }
+    };
+    window.addEventListener('resize', syncRotatedFs);
+    window.addEventListener('orientationchange', () => setTimeout(syncRotatedFs, 150));
+
     function enterFakeFs() {
       const wrapEl = $('#videoWrap');
       if (!wrapEl || wrapEl.classList.contains('fake-fs')) return;
@@ -2184,7 +2215,17 @@
       wrapEl.classList.add('fake-fs');
       document.body.style.overflow = 'hidden';
       document.documentElement.classList.add('player-fs');
+
+      // 尝试调用系统 orientation.lock
       try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); } catch (e) {}
+      // 若处于安卓 APK 壳中，通知原生 Activity 强制横屏(突破华为/安卓系统旋转锁)
+      try {
+        if (window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function') {
+          window.AndroidBridge.setOrientation('landscape');
+        }
+      } catch (e) {}
+      syncRotatedFs();
+
       // 压入一层历史: 系统/浏览器返回键先退出全屏, 不离开播放页
       if (isMobilePlayer && !fakeFsHistPushed) {
         try { history.pushState({ ntvFakeFs: 1 }, ''); fakeFsHistPushed = true; } catch (e) {}
@@ -2198,11 +2239,21 @@
       const wrapEl = $('#videoWrap');
       if (!wrapEl) return;
       const wasFs = wrapEl.classList.contains('fake-fs');
-      wrapEl.classList.remove('fake-fs');
+      wrapEl.classList.remove('fake-fs', 'fs-rotated');
       document.body.style.overflow = '';
       document.documentElement.classList.remove('player-fs');
       if (stageHome && wrapEl.parentElement !== stageHome) stageHome.insertBefore(wrapEl, stageHome.firstChild);
+
       try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
+      try {
+        if (window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function') {
+          window.AndroidBridge.setOrientation('portrait');
+        }
+      } catch (e) {}
+
+      // 退出全屏后自动恢复正常亮度(100%无滤镜)
+      resetBrightness();
+
       // 点按钮退出时回退刚才压入的历史, 避免多点一次返回
       if (wasFs && fakeFsHistPushed && !fromPopstate) {
         fakeFsHistPushed = false;
@@ -2230,8 +2281,11 @@
     };
     // Esc: 假全屏时退出(真全屏由浏览器自己处理 Esc)
     const onFsEsc = (e) => {
+      if (!alive() || !video.isConnected) {
+        document.removeEventListener('keydown', onFsEsc);
+        return;
+      }
       if (e.key !== 'Escape') return;
-      if (!alive() || !video.isConnected) return;
       if (wrap && wrap.classList.contains('fake-fs')) {
         autoFsByOrient = false;
         exitFakeFs();
@@ -2249,6 +2303,7 @@
         return;
       }
       if (!fsEl) {
+        resetBrightness();
         const wrapEl = $('#videoWrap');
         if (wrapEl && !wrapEl.classList.contains('fake-fs')) {
           document.body.style.overflow = '';
@@ -2340,11 +2395,11 @@
         hudTimer = setTimeout(() => { if (hud) hud.classList.remove('show'); }, delay);
       };
 
-      // ---- 触屏手势 (全屏幕任意位置左右滑动均可触发快进/快退, 无死角) ----
+      // ---- 触屏手势引擎: 屏幕左右滑动快进/快退, 左半区上下滑调节亮度, 右半区上下滑调节音量, 全屏无死角支持 ----
       if (wrap) {
         let touchStartX = 0, touchStartY = 0;
-        let touchStartTime = 0, touchStartVol = 1;
-        let touchMode = ''; // '' | 'seek' | 'vol'
+        let touchStartTime = 0, touchStartVol = 1, touchStartBright = 1;
+        let touchMode = ''; // '' | 'seek' | 'vol' | 'bright'
         let seekTarget = -1;
         let lastTapAt = 0, singleTapTimer = null;
 
@@ -2356,6 +2411,7 @@
           touchStartY = t.clientY;
           touchStartTime = video.currentTime || 0;
           touchStartVol = getSavedVol();
+          touchStartBright = curBrightness;
           touchMode = '';
           seekTarget = -1;
           bumpMCtrl();
@@ -2365,23 +2421,44 @@
           if (e.target.closest('.m-ctrl, .failover-box, a, button, input, select')) return;
           if (!e.touches || e.touches.length !== 1) return;
           const t = e.touches[0];
-          const dx = t.clientX - touchStartX;
-          const dyUp = touchStartY - t.clientY;
+          const isRotated = wrap.classList.contains('fs-rotated');
+
+          // 计算相对于用户可视方向的位移
+          let dx = 0, dyUp = 0;
+          if (isRotated) {
+            // 手机竖屏锁屏强制旋转 90 度时：
+            // 横向位移(快进/快退)对应手机屏幕纵向移动 (从上往下为快进 +)
+            dx = t.clientY - touchStartY;
+            // 纵向位移(音量/亮度增加)对应手机屏幕横向从左往右移动 (+)
+            dyUp = t.clientX - touchStartX;
+          } else {
+            dx = t.clientX - touchStartX;
+            dyUp = touchStartY - t.clientY;
+          }
 
           if (!touchMode) {
             if (Math.hypot(dx, dyUp) < 8) return; // 初始位移防抖
-            // 任意位置横向位移为主 -> 立即进入快进/快退
+            // 横向滑动为主 -> 进入快进/快退
             if (Math.abs(dx) >= Math.abs(dyUp)) {
               touchMode = 'seek';
             } else {
-              touchMode = 'vol';
+              // 纵向滑动为主 -> 判断左半屏(亮度)还是右半屏(音量)
+              let isLeft = false;
+              if (isRotated) {
+                // 旋转模式下，手机上半屏幕对应画面左半区
+                isLeft = touchStartY < (window.innerHeight / 2);
+              } else {
+                const rect = wrap.getBoundingClientRect();
+                isLeft = (touchStartX - rect.left) < (rect.width / 2);
+              }
+              touchMode = isLeft ? 'bright' : 'vol';
             }
           }
 
           if (touchMode === 'seek') {
             e.preventDefault();
             bumpMCtrl();
-            const w = Math.max(160, wrap.clientWidth || 320);
+            const w = isRotated ? (window.innerHeight || 320) : (wrap.clientWidth || 320);
             const span = video.duration ? Math.min(300, Math.max(90, video.duration * 0.12)) : 90;
             const delta = Math.round((dx / w) * span);
             seekTarget = Math.min((video.duration || 0) > 0 ? video.duration - 0.5 : 0, Math.max(0, touchStartTime + delta));
@@ -2399,11 +2476,19 @@
           } else if (touchMode === 'vol') {
             e.preventDefault();
             bumpMCtrl();
-            const h = Math.max(140, (wrap.clientHeight || 240) * 0.7);
+            const h = isRotated ? (window.innerWidth || 240) : Math.max(140, (wrap.clientHeight || 240) * 0.7);
             const nv = Math.min(1, Math.max(0, touchStartVol + dyUp / h));
             try { video.volume = nv; video.muted = nv <= 0; } catch (err) {}
             store.set('vidVol', Number(nv.toFixed(2)));
             showBarHud(nv <= 0 ? '🔇' : '🔊', '音量', nv * 100);
+          } else if (touchMode === 'bright') {
+            e.preventDefault();
+            bumpMCtrl();
+            const h = isRotated ? (window.innerWidth || 240) : Math.max(140, (wrap.clientHeight || 240) * 0.7);
+            const nb = Math.min(1.8, Math.max(0.2, touchStartBright + (dyUp / h) * 1.2));
+            setBrightness(nb);
+            const pct = Math.round(((nb - 0.2) / 1.6) * 100);
+            showBarHud('☀️', '亮度', Math.max(5, Math.min(100, pct)));
           }
         }, { passive: false });
 
@@ -2419,7 +2504,7 @@
             bumpMCtrl();
             return;
           }
-          if (touchMode === 'vol') {
+          if (touchMode === 'vol' || touchMode === 'bright') {
             hideBarHudSoon();
             touchMode = '';
             bumpMCtrl();
@@ -2446,21 +2531,36 @@
         });
 
         wrap.addEventListener('touchcancel', () => {
-          if (touchMode === 'vol') hideBarHudSoon();
+          if (touchMode === 'vol' || touchMode === 'bright') hideBarHudSoon();
           touchMode = '';
           seekTarget = -1;
           bumpMCtrl();
         });
       }
 
-      // ---- 电脑端优化: 键盘左右方向键快进/快退 + 空格播放 + 滚轮音量 + 双击全屏 ----
+      // ---- 电脑端优化: 键盘左右方向键快进/快退 + 空格播放/暂停 + 双击全屏 (使用捕获阶段防浏览器原生事件抢占/反转) ----
       const onPlayerKeyDown = (e) => {
-        if (!alive() || !video.isConnected) return;
+        if (!alive() || !video.isConnected) {
+          window.removeEventListener('keydown', onPlayerKeyDown, true);
+          return;
+        }
         const target = e.target;
         if (target && target.tagName && /^(INPUT|TEXTAREA|SELECT)$/i.test(target.tagName)) return;
+
+        if (e.key === ' ' || e.code === 'Space') {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          togglePlay();
+          showTextHud(video.paused ? '⏸ 已暂停' : '▶ 播放中', 700);
+          return;
+        }
+
         if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
           if (!video.duration) return;
           e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
           const step = e.key === 'ArrowRight' ? 10 : -10;
           const targetTime = Math.min(video.duration - 0.5, Math.max(0, (video.currentTime || 0) + step));
           try { video.currentTime = targetTime; } catch (err) {}
@@ -2468,39 +2568,39 @@
           showTextHud(`${ico} (${fmtClock(video.currentTime)} / ${fmtClock(video.duration)})`, 800);
           syncMSeek();
           bumpMCtrl();
-        } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          return;
+        }
+
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
           e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
           const step = e.key === 'ArrowUp' ? 0.08 : -0.08;
-          const nv = Math.min(1, Math.max(0, (video.volume || 1) + step));
+          let nv = Math.min(1, Math.max(0, getSavedVol() + step));
+          nv = Number(nv.toFixed(2));
           try { video.volume = nv; video.muted = nv <= 0; } catch (err) {}
-          store.set('vidVol', Number(nv.toFixed(2)));
+          store.set('vidVol', nv);
           showBarHud(nv <= 0 ? '🔇' : '🔊', '音量', nv * 100);
           hideBarHudSoon(900);
-        } else if (e.key === ' ' || e.code === 'Space') {
+          return;
+        }
+
+        if (e.key === 'f' || e.key === 'F') {
           e.preventDefault();
-          togglePlay();
-          showTextHud(video.paused ? '⏸ 已暂停' : '▶ 播放中', 700);
-        } else if (e.key === 'f' || e.key === 'F') {
-          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
           togglePlayerFs();
+          return;
         }
       };
-      document.addEventListener('keydown', onPlayerKeyDown);
-
-      // 桌面端鼠标滚轮纯调节音量
-      if (wrap) {
-        wrap.addEventListener('wheel', (e) => {
-          if (!video.isConnected) return;
+      window.addEventListener('keydown', onPlayerKeyDown, true);
+      video.addEventListener('keydown', (e) => {
+        if (e.key === ' ' || e.code === 'Space' || (e.key && e.key.startsWith('Arrow'))) {
           e.preventDefault();
-          const step = e.deltaY < 0 ? 0.05 : -0.05;
-          let vol = getSavedVol();
-          vol = Math.min(1, Math.max(0, vol + step));
-          store.set('vidVol', Number(vol.toFixed(2)));
-          try { video.volume = vol; video.muted = vol <= 0; } catch (err) {}
-          showBarHud(vol <= 0 ? '🔇' : '🔊', '音量', vol * 100);
-          hideBarHudSoon(900);
-        }, { passive: false });
-      }
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        }
+      }, true);
 
       // 桌面双击全屏
       if (wrap && !isMobilePlayer) {

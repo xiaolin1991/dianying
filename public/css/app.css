@@ -760,6 +760,18 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   touch-action: none;
   transform: none !important;
 }
+/* 手机竖屏锁屏(关闭自动旋转)时强制旋转90度全屏横放(优酷/西瓜/腾讯视频同款) */
+.video-wrap.fake-fs.fs-rotated {
+  left: 50% !important; top: 50% !important;
+  right: auto !important; bottom: auto !important;
+  inset: auto !important;
+  width: 100vh !important;
+  height: 100vw !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: translate(-50%, -50%) rotate(90deg) !important;
+  transform-origin: center center !important;
+}
 html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% !important; }
 /* 中央播放钮: 仅暂停时显示 */
 .pp-btn {

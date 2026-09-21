@@ -3,11 +3,13 @@ package com.xiaolintv.app;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -56,6 +58,24 @@ public class MainActivity extends Activity {
                         + "/"
                         + BuildConfig.VERSION_CODE);
 
+        // 注册 JS 桥梁: 供网页播放器在全屏时通知 App 强制横屏/恢复竖屏(突破华为/安卓系统锁屏限制)
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void setOrientation(String mode) {
+                runOnUiThread(() -> {
+                    try {
+                        if ("landscape".equalsIgnoreCase(mode)) {
+                            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                        } else if ("portrait".equalsIgnoreCase(mode)) {
+                            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                        } else {
+                            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                        }
+                    } catch (Exception ignored) {}
+                });
+            }
+        }, "AndroidBridge");
+
         web.setWebViewClient(new WebViewClient() {
             private boolean openExternal(String url) {
                 if (url == null) return false;
@@ -93,6 +113,9 @@ public class MainActivity extends Activity {
                 if (customView != null) { callback.onCustomViewHidden(); return; }
                 customView = view;
                 customCb = callback;
+                try {
+                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                } catch (Exception ignored) {}
                 web.setVisibility(View.GONE);
                 ViewGroup decor = (ViewGroup) getWindow().getDecorView();
                 decor.addView(customView, new ViewGroup.LayoutParams(
@@ -110,6 +133,9 @@ public class MainActivity extends Activity {
 
     private void hideCustomView() {
         if (customView == null) return;
+        try {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+        } catch (Exception ignored) {}
         ViewGroup decor = (ViewGroup) getWindow().getDecorView();
         decor.removeView(customView);
         customView = null;
@@ -131,7 +157,12 @@ public class MainActivity extends Activity {
             web.evaluateJavascript(
                     "(function(){try{if(window.__ntvExitFs&&window.__ntvExitFs())return 1;return 0;}catch(e){return 0;}})()",
                     value -> {
-                        if ("1".equals(value) || "\"1\"".equals(value)) return;
+                        if ("1".equals(value) || "\"1\"".equals(value)) {
+                            runOnUiThread(() -> {
+                                try { setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED); } catch (Exception ignored) {}
+                            });
+                            return;
+                        }
                         runOnUiThread(() -> {
                             if (web.canGoBack()) web.goBack();
                             else MainActivity.super.onBackPressed();
