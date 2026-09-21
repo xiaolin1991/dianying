@@ -526,14 +526,15 @@
   }
 
   /* ------------------------------ 导航 ------------------------------ */
+  try { store.remove('appDownloaded'); } catch (e) {}
   const NAVS = [
     ['#/home', '首页'], ['#/browse/电影', '电影'], ['#/browse/剧集', '剧集'],
     ['#/browse/综艺', '综艺'], ['#/browse/动漫', '动漫'], ['#/sources', '影视源'], ['#/live', '电视直播'],
     ['#/download', '下载APP'],
   ];
   function buildNav() {
-    // 已在官方 App 内或已下载客户端 → 自动隐藏「下载APP」入口
-    const items = isClientOrDownloaded() ? NAVS.filter(([href]) => href !== '#/download') : NAVS;
+    // 只要是在浏览器中浏览，一律显示「下载APP」导航；只有真正运行在已安装的官方 App 客户端内 (inApp)，才隐藏「下载APP」
+    const items = inApp() ? NAVS.filter(([href]) => href !== '#/download') : NAVS;
     $('#mainNav').innerHTML = items.map(([href, label]) =>
       `<a href="${href}" data-href="${href}">${label}</a>`).join('');
   }
@@ -667,7 +668,10 @@
       else if (parts[0] === 'adult') await viewAdult(alive);
       else if (parts[0] === 'messages') await viewMessages(alive);
       else if (parts[0] === 'live') await viewLive(query);
-      else if (parts[0] === 'download') await viewDownload(alive);
+      else if (parts[0] === 'download' || parts[0] === 'dl-android-guide' || parts[0] === 'dl-ios-guide') {
+        const scrollTarget = parts[0] !== 'download' ? parts[0] : null;
+        await viewDownload(alive, scrollTarget);
+      }
       else if (parts[0] === 'xiaolin1991') await viewAdmin(query, parts[0]);
       else if (parts[0] === 'admin') {
         let ok = false;
@@ -4233,21 +4237,98 @@
   /* ============================================================
      视图：下载 APP(安卓 APK / 电视 / iOS PWA 教程)
      ============================================================ */
-  async function viewDownload(alive) {
+  /* ============================================================
+     视图：下载 APP(设备智能检测 / 安卓 APK / 电视 / iOS 免签描述文件)
+     ============================================================ */
+  function detectClientDevice() {
+    const ua = navigator.userAgent || '';
+    const isIos = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isAndroid = /Android/i.test(ua);
+    const isTv = isTvDevice() || /Android.*(LargeScreen|TV|Box|SmartTV|GoogleTV)/i.test(ua);
+    const isMac = /Macintosh|Mac OS X/i.test(ua) && !isIos;
+    const isWindows = /Windows/i.test(ua);
+
+    let brand = '安卓手机 / 平板';
+    if (isAndroid) {
+      if (/Huawei|Honor/i.test(ua)) brand = '华为 / 荣耀手机';
+      else if (/Xiaomi|Redmi|MIUI|HyperOS/i.test(ua)) brand = '小米 / 红米手机';
+      else if (/OPPO|Realme|OnePlus/i.test(ua)) brand = 'OPPO / 一加手机';
+      else if (/vivo|iQOO/i.test(ua)) brand = 'vivo / iQOO 手机';
+      else if (/SAMSUNG|SM-/i.test(ua)) brand = '三星手机 / 平板';
+    }
+
+    if (isTv) {
+      return { type: 'tv', name: '智能电视 / 电视盒子', icon: '📺', isMobile: true };
+    }
+    if (isIos) {
+      const isTablet = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      return { type: 'ios', name: isTablet ? '苹果 iPad 平板' : '苹果 iPhone 手机', icon: '🍎', isMobile: true };
+    }
+    if (isAndroid) {
+      return { type: 'android', name: brand, icon: '🤖', isMobile: true };
+    }
+    if (isWindows) {
+      return { type: 'pc', name: 'Windows 电脑', icon: '💻', isMobile: false };
+    }
+    if (isMac) {
+      return { type: 'pc', name: 'Mac 电脑', icon: '💻', isMobile: false };
+    }
+    return { type: 'pc', name: '桌面电脑浏览器', icon: '🌐', isMobile: false };
+  }
+
+  async function viewDownload(alive, initialTarget) {
     const v = $('#view');
     const dlUrl = resolveDownloadUrl((State.settings && State.settings.downloadUrl) || '');
     const dlUrlTv = resolveDownloadUrl((State.settings && State.settings.downloadUrlTv) || '');
     const dlUrlIos = resolveDownloadUrl((State.settings && State.settings.downloadUrlIos) || '');
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const dev = detectClientDevice();
+    const siteName = esc((State.settings && State.settings.siteName) || '晓林影院');
 
-    const alreadyNotice = isClientOrDownloaded() ? `
-      <div class="dl-notice-banner">
-        <span>✅ <b>已识别客户端</b>：检测到您正在使用或已下载过客户端。若需重新下载、更换设备或查看安卓/苹果安装指引，请直接在下方操作。</span>
-      </div>` : '';
+    // 智能推荐版本信息计算
+    let recIcon = '✨';
+    let recTitle = '';
+    let recDesc = '';
+    let recPrimaryBtn = '';
+    let recGuideBtn = '';
+
+    if (dev.type === 'android') {
+      recIcon = '🤖';
+      recTitle = `推荐安装：安卓客户端官方版 (APK)`;
+      recDesc = `针对您的「${dev.name}」深度适配 · 原画超清秒播 · 支持全屏手势调节音量与亮度 · 告别浏览器卡顿`;
+      recPrimaryBtn = dlUrl
+        ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 立即下载安卓版 (推荐此版本)</a>`
+        : `<span class="dl-soon">安卓安装包整备中</span>`;
+      recGuideBtn = `<button type="button" class="btn ghost js-scroll-to" data-target="dl-android-guide">⚠️ 报毒/拦截放行指引 ↓</button>`;
+    } else if (dev.type === 'ios') {
+      recIcon = '🍎';
+      recTitle = `推荐安装：苹果 iPhone / iPad 客户端 (免签版)`;
+      recDesc = `专为苹果 iOS 打造 · 免签证书描述文件封装 · 永久有效不掉签 · 独立全屏运行 · 丝滑秒播`;
+      recPrimaryBtn = dlUrlIos
+        ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 立即安装 iPhone 版 (推荐此版本)</a>`
+        : '';
+      recGuideBtn = `<button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">📖 4步安装教程 ↓</button>`;
+    } else if (dev.type === 'tv') {
+      recIcon = '📺';
+      recTitle = `推荐安装：智能电视 / 电视盒子 TV 专版 (APK)`;
+      recDesc = `专为大屏遥控器交互设计 · 原画 4K 超清秒播 · 自带智能换台与多源切换`;
+      recPrimaryBtn = dlUrlTv
+        ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrlTv)}" target="_blank" rel="noopener">📺 立即下载 TV 专版 (推荐此版本)</a>`
+        : `<span class="dl-soon">TV 包可联系管理员获取</span>`;
+      recGuideBtn = '';
+    } else {
+      recIcon = '💻';
+      recTitle = `检测到您当前使用电脑端浏览器 (${dev.name})`;
+      recDesc = `电脑网页端已具备完整的 4K 原画超清体验！若需在手机或智能电视上安装观影，请选择下方对应版本下载：`;
+      recPrimaryBtn = dlUrl
+        ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrl)}" target="_blank" rel="noopener">🤖 下载安卓版 APK</a>`
+        : '';
+      recGuideBtn = dlUrlIos
+        ? `<a class="btn ghost" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 iPhone 描述文件</a>`
+        : `<button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">🍎 苹果安装指引</button>`;
+    }
 
     const apkBtn = dlUrl
-      ? `<a class="btn primary" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 ${isAndroid ? '立即安装到本机' : '下载安卓 APK'}</a>`
+      ? `<a class="btn primary" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 下载安卓 APK</a>`
       : `<span class="dl-soon">安装包整备中 · 可先看下方教程</span>`;
     const tvBtn = dlUrlTv
       ? `<a class="btn primary" href="${esc(dlUrlTv)}" target="_blank" rel="noopener">📥 下载 TV / 盒子版</a>`
@@ -4255,12 +4336,44 @@
     const iosBtn = dlUrlIos
       ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener" style="margin-bottom:10px">🍎 安装 iPhone 客户端</a>`
       : '';
-    const siteName = esc((State.settings && State.settings.siteName) || '晓林影院');
+
+    const inAppNotice = inApp() ? `
+      <div class="dl-notice-banner">
+        <span>✅ <b>当前已在客户端内</b>：您当前正在使用官方 App 客户端访问。若需更新或为其他设备下载安装包，请在下方操作。</span>
+      </div>` : '';
 
     v.innerHTML = `
       <div class="container page-wrap dl-wrap">
 
-        ${alreadyNotice}
+        ${inAppNotice}
+
+        <!-- 🌟 智能设备检测与推荐下载卡片 -->
+        <section class="dl-rec-card">
+          <div class="dl-rec-header">
+            <div class="dl-rec-radar-wrap">
+              <span class="dl-rec-radar"></span> 智能设备检测匹配
+            </div>
+            <div class="dl-rec-device-tag">
+              当前设备：<b>${esc(dev.icon)} ${esc(dev.name)}</b>
+            </div>
+          </div>
+          <div class="dl-rec-body">
+            <div class="dl-rec-main-info">
+              <div class="dl-rec-icon">${esc(recIcon)}</div>
+              <div class="dl-rec-texts">
+                <div class="dl-rec-title">
+                  <span>${esc(recTitle)}</span>
+                  <span class="dl-rec-hot-tag">⭐ 本机最推荐</span>
+                </div>
+                <div class="dl-rec-desc">${esc(recDesc)}</div>
+              </div>
+            </div>
+            <div class="dl-rec-actions">
+              ${recPrimaryBtn}
+              ${recGuideBtn}
+            </div>
+          </div>
+        </section>
 
         <!-- Hero -->
         <section class="dl-hero">
@@ -4270,7 +4383,8 @@
           <p class="dl-slogan">装进口袋的私人影院 —— 全屏沉浸 · 收藏云同步 · 大屏同享</p>
           <div class="dl-hero-cta">
             ${apkBtn}
-            ${isIOS ? (dlUrlIos ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 安装 iPhone 版</a>` : '<a class="btn ghost" href="#dl-ios-guide">🍎 iPhone 教程</a>') : ''}
+            ${dlUrlIos ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 安装 iPhone 版</a>` : ''}
+            <button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">🍎 iPhone 教程</button>
           </div>
         </section>
 
@@ -4281,24 +4395,25 @@
 
         <!-- 三端卡片 -->
         <section class="dl-grid">
-          <div class="dl-card ${isAndroid ? 'hot' : ''}">
-            ${isAndroid ? '<i class="dl-ribbon">当前设备</i>' : ''}
+          <div class="dl-card ${dev.type === 'android' ? 'hot matched' : ''}">
+            ${dev.type === 'android' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
             <div class="dl-badge" style="--bd1:#3ddc84;--bd2:#0f9d58">🤖</div>
             <h4>安卓手机 / 平板</h4>
             <p>独立客户端 · 原画超清秒播<br>覆盖安装不丢收藏与播放进度</p>
             ${apkBtn}
             <div style="margin-top:10px">
-              <a href="#dl-android-guide" class="btn ghost small" style="font-size:11.5px;padding:4px 10px">⚠️ 报毒/拦截放行指引 ↓</a>
+              <button type="button" class="btn ghost small js-scroll-to" data-target="dl-android-guide" style="font-size:11.5px;padding:4px 10px;cursor:pointer">⚠️ 报毒/拦截放行指引 ↓</button>
             </div>
           </div>
-          <div class="dl-card">
+          <div class="dl-card ${dev.type === 'tv' ? 'hot matched' : ''}">
+            ${dev.type === 'tv' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
             <div class="dl-badge" style="--bd1:#8ab4ff;--bd2:#5b7fff">📺</div>
             <h4>电视 / 机顶盒</h4>
             <p>内置 TV 启动器 · 遥控器直用<br>大屏观影最佳选择</p>
             ${tvBtn || '<span class="dl-soon">TV 包可联系管理员获取</span>'}
           </div>
-          <div class="dl-card ${isIOS ? 'hot' : ''}" id="dl-ios">
-            ${isIOS ? '<i class="dl-ribbon">当前设备</i>' : ''}
+          <div class="dl-card ${dev.type === 'ios' ? 'hot matched' : ''}" id="dl-ios">
+            ${dev.type === 'ios' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
             <div class="dl-badge iosb">🍎</div>
             <h4>iPhone / iPad</h4>
             <div style="margin-bottom:8px">
@@ -4308,7 +4423,7 @@
             </div>
             ${iosBtn}
             <div style="margin-top:8px">
-              <a href="#dl-ios-guide" class="btn ghost small" style="font-size:11.5px;padding:4px 10px">📖 描述文件 4步安装教程 ↓</a>
+              <button type="button" class="btn ghost small js-scroll-to" data-target="dl-ios-guide" style="font-size:11.5px;padding:4px 10px;cursor:pointer">📖 描述文件 4步安装教程 ↓</button>
             </div>
           </div>
         </section>
@@ -4439,12 +4554,28 @@
         </section>
       </div>`;
 
-    $$('a[href*="/APP/"], a[href*=".apk"], a[href*=".mobileconfig"]', v).forEach((a) => {
-      a.addEventListener('click', () => {
-        store.set('appDownloaded', true);
-        buildNav();
+    function scrollToGuide(targetId) {
+      const el = document.getElementById(targetId);
+      if (!el) return;
+      const topbar = document.getElementById('topbar');
+      const topbarHeight = (topbar && topbar.offsetHeight) || 60;
+      const rect = el.getBoundingClientRect();
+      const targetY = window.pageYOffset + rect.top - topbarHeight - 14;
+      window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
+    }
+
+    $$('.js-scroll-to', v).forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const tid = btn.dataset.target;
+        if (tid) scrollToGuide(tid);
       });
     });
+
+    if (initialTarget) {
+      setTimeout(() => scrollToGuide(initialTarget), 120);
+    }
   }
 
   /* ---- APP 下载引导弹窗与客户端识别 ---- */
@@ -4454,7 +4585,7 @@
     return /XIAOLIN-TV-APP/i.test(navigator.userAgent || '') || isStandalone();
   }
   function isClientOrDownloaded() {
-    return inApp() || Boolean(store.get('appDownloaded', false));
+    return inApp();
   }
   function parseAppClient() {
     const m = (navigator.userAgent || '').match(/XIAOLIN-TV-APP\/([^/\s]+)(?:\/(\d+))?/i);
@@ -4567,17 +4698,8 @@
       if (ev.target.closest('a.promo-go')) setTimeout(() => box.remove(), 0);
     });
     $('.promo-x', box).addEventListener('click', () => box.remove()); // × 关闭 = 10 天后再弹
-    const dlGo = $('#promoDlBtn', box);
-    if (dlGo) {
-      dlGo.addEventListener('click', () => {
-        store.set('appDownloaded', true);
-        buildNav();
-      });
-    }
     $('#promoForever', box).addEventListener('click', () => {
       store.set('appPromoState', { ...store.get('appPromoState', {}), forever: true });
-      store.set('appDownloaded', true);
-      buildNav();
       box.remove();
       toast('好的，不再打扰');
     });

@@ -454,6 +454,90 @@ html, body { overflow-x: hidden; }
 .dl-faq { margin-top: 16px; }
 .dl-faq h4 { margin-bottom: 8px; }
 
+/* ---- 导航「下载APP」常驻高亮 ---- */
+.nav a[href="#/download"] {
+  color: var(--acc);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.nav a[href="#/download"]::before {
+  content: '📲';
+  font-size: 13px;
+}
+.nav a[href="#/download"].active {
+  color: #fff;
+}
+
+/* ---- 智能设备检测与推荐卡片 ---- */
+.dl-rec-card {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(91, 140, 255, .15), rgba(168, 85, 247, .12));
+  border: 1.5px solid rgba(91, 140, 255, .4);
+  border-radius: 18px;
+  padding: 18px 20px;
+  margin: 14px 0 20px;
+  box-shadow: 0 8px 30px rgba(91, 140, 255, .15);
+}
+.dl-rec-header {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  margin-bottom: 12px;
+}
+.dl-rec-radar-wrap {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 700; color: #4ade80;
+  background: rgba(34, 197, 94, .12); border: 1px solid rgba(34, 197, 94, .3);
+  padding: 3px 10px; border-radius: 99px;
+}
+.dl-rec-radar {
+  width: 8px; height: 8px; border-radius: 50%; background: #22c55e;
+  box-shadow: 0 0 8px #22c55e; animation: recPulse 1.8s infinite;
+}
+@keyframes recPulse {
+  0% { transform: scale(.9); opacity: .7; }
+  50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 12px #22c55e; }
+  100% { transform: scale(.9); opacity: .7; }
+}
+.dl-rec-device-tag {
+  font-size: 12.5px; color: var(--txt);
+}
+.dl-rec-device-tag b { color: #60a5fa; }
+.dl-rec-body {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;
+}
+.dl-rec-main-info {
+  display: flex; align-items: center; gap: 14px; flex: 1; min-width: 260px;
+}
+.dl-rec-icon {
+  font-size: 38px; line-height: 1; flex-shrink: 0;
+  filter: drop-shadow(0 4px 10px rgba(0,0,0,.3));
+}
+.dl-rec-title {
+  font-size: 17px; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.dl-rec-hot-tag {
+  font-size: 11px; padding: 2px 8px; border-radius: 6px;
+  background: linear-gradient(135deg, #e11d48, #be123c); color: #fff; font-weight: 700;
+}
+.dl-rec-desc {
+  font-size: 13px; color: rgba(255, 255, 255, .82); margin-top: 4px; line-height: 1.5;
+}
+.dl-rec-actions {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.dl-rec-btn {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  font-weight: 700 !important; font-size: 14px !important; padding: 10px 20px !important;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, .4) !important;
+}
+.dl-card.matched {
+  border-color: #60a5fa !important;
+  box-shadow: 0 0 0 2px #3b82f6, 0 12px 32px rgba(59, 130, 246, .25) !important;
+  position: relative;
+}
+
 /* ---- 下载页安装指引卡片增强 ---- */
 .dl-notice-banner {
   display: flex; align-items: center; gap: 10px;
