@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     try {
                         if ("landscape".equalsIgnoreCase(mode)) {
-                            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
                             try {
                                 getWindow().getDecorView().setSystemUiVisibility(
                                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -136,7 +136,7 @@ public class MainActivity extends Activity {
                 customView = view;
                 customCb = callback;
                 try {
-                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
                 } catch (Exception ignored) {}
                 web.setVisibility(View.GONE);
                 ViewGroup decor = (ViewGroup) getWindow().getDecorView();

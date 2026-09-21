@@ -751,7 +751,9 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important;
   inset: 0 !important;
   z-index: 2147483000;
+  /* 使用 dvh/dvw（动态视口单位）确保地址栏收起后也能铺满; 降级到 vh/vw */
   width: 100vw !important; height: 100vh !important;
+  width: 100dvw !important; height: 100dvh !important;
   max-width: none !important; max-height: none !important;
   margin: 0 !important; padding: 0 !important;
   aspect-ratio: auto !important;
@@ -759,6 +761,8 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   background: #000;
   touch-action: none;
   transform: none !important;
+  overflow: hidden !important;
+  -webkit-overflow-scrolling: auto !important;
 }
 /* 手机竖屏锁屏(关闭自动旋转)时强制旋转90度全屏横放(优酷/西瓜/腾讯视频同款) */
 .video-wrap.fake-fs.fs-rotated {
@@ -783,6 +787,9 @@ html.player-fs .topbar,
 html.player-fs .play-head,
 html.player-fs .play-actions,
 html.player-fs .play-side,
+html.player-fs .play-below,
+html.player-fs .rel-rail,
+html.player-fs #relSec,
 html.player-fs .footer,
 html.player-fs #bottomTabBar,
 html.player-fs #backTop {
@@ -801,6 +808,7 @@ html.player-fs .play-stage {
   display: block !important;
   flex: none !important;
 }
+
 /* 中央播放钮: 仅暂停时显示 */
 .pp-btn {
   display: none;

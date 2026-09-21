@@ -2292,8 +2292,25 @@
       if (inApk) {
         try { window.AndroidBridge.setOrientation('landscape'); } catch (e) {}
       } else {
+        // 手机浏览器: 先尝试系统级全屏 API (自动隐藏地址栏/状态栏)
+        const tryNativeFs = () => {
+          try {
+            if (video && video.requestFullscreen) {
+              return video.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+            } else if (video && video.webkitRequestFullscreen) {
+              video.webkitRequestFullscreen();
+            } else if (wrapEl.requestFullscreen) {
+              return wrapEl.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+            } else if (wrapEl.webkitRequestFullscreen) {
+              wrapEl.webkitRequestFullscreen();
+            }
+          } catch (e) {}
+          return Promise.resolve();
+        };
+        // 同时保留 CSS rotate 方案作为 fallback（系统全屏 API 不可用时保证体验）
         try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); } catch (e) {}
         syncRotatedFs();
+        tryNativeFs();
       }
 
       // 仅在纯移动端浏览器中压入一层历史(APK由原生 onBackPressed 拦截, 不压入以防历史污染导致返回死循环)
@@ -2304,6 +2321,7 @@
       syncPpBtn();
       requestAnimationFrame(() => refreshPlayerWm());
     }
+
     function exitFakeFs(fromPopstate) {
       const wrapEl = $('#videoWrap');
       if (!wrapEl) return;
@@ -2320,7 +2338,13 @@
         try { window.AndroidBridge.setOrientation('portrait'); } catch (e) {}
       } else {
         try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
+        // 若进入时触发了浏览器真全屏, 退出时同步退出
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        if (fsEl) {
+          try { if (document.exitFullscreen) document.exitFullscreen().catch(() => {}); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); } catch (e) {}
+        }
       }
+
 
       resetBrightness();
 
