@@ -766,15 +766,24 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
 }
 /* 手机竖屏锁屏(关闭自动旋转)时强制旋转90度全屏横放(优酷/西瓜/腾讯视频同款) */
 .video-wrap.fake-fs.fs-rotated {
+  position: fixed !important;
   left: 50% !important; top: 50% !important;
   right: auto !important; bottom: auto !important;
   inset: auto !important;
-  width: 100vh !important;
-  height: 100vw !important;
+  width: 100dvh;
+  height: 100dvw;
+  width: 100vh;
+  height: 100vw;
   max-width: none !important;
   max-height: none !important;
   transform: translate(-50%, -50%) rotate(90deg) !important;
   transform-origin: center center !important;
+  z-index: 2147483647 !important;
+}
+.video-wrap.fake-fs.fs-rotated video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
 }
 html.player-fs, html.player-fs body {
   overflow: hidden !important;

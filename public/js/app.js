@@ -2264,19 +2264,21 @@
       const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
       if (inApk) {
         wrapEl.classList.remove('fs-rotated');
-        wrapEl.style.width = '';
-        wrapEl.style.height = '';
+        wrapEl.style.removeProperty('width');
+        wrapEl.style.removeProperty('height');
         return;
       }
       const isPortrait = window.innerWidth < window.innerHeight;
       if (isPortrait) {
         wrapEl.classList.add('fs-rotated');
-        wrapEl.style.width = window.innerHeight + 'px';
-        wrapEl.style.height = window.innerWidth + 'px';
+        const vW = window.innerWidth;
+        const vH = window.innerHeight;
+        wrapEl.style.setProperty('width', vH + 'px', 'important');
+        wrapEl.style.setProperty('height', vW + 'px', 'important');
       } else {
         wrapEl.classList.remove('fs-rotated');
-        wrapEl.style.width = '';
-        wrapEl.style.height = '';
+        wrapEl.style.removeProperty('width');
+        wrapEl.style.removeProperty('height');
       }
     };
     window.addEventListener('resize', syncRotatedFs);
@@ -2293,7 +2295,7 @@
       if (inApk) {
         try { window.AndroidBridge.setOrientation('landscape'); } catch (e) {}
       } else {
-        // 手机浏览器: 先尝试系统级全屏 API (自动隐藏地址栏/状态栏)
+        // 手机浏览器/Webview: 仅在物理横屏下尝试系统级全屏 API
         const tryNativeFs = () => {
           try {
             if (video && video.requestFullscreen) {
@@ -2308,10 +2310,31 @@
           } catch (e) {}
           return Promise.resolve();
         };
-        // 同时保留 CSS rotate 方案作为 fallback（系统全屏 API 不可用时保证体验）
-        try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); } catch (e) {}
-        syncRotatedFs();
-        tryNativeFs();
+
+        const isPortrait = window.innerWidth < window.innerHeight;
+        if (isPortrait) {
+          // 手机竖屏（开启了系统竖屏锁定，如华为锁屏或 PakePlus 壳环境）：
+          // 尝试调用 Screen Orientation API
+          if (screen.orientation && typeof screen.orientation.lock === 'function') {
+            screen.orientation.lock('landscape').then(() => {
+              // 成功物理横屏，屏幕视口真正翻转
+              syncRotatedFs();
+              tryNativeFs();
+            }).catch(() => {
+              // 系统锁定竖屏或 WebView/PakePlus 内部拒绝 lock：
+              // 必须采用纯 CSS 90度旋转 fake-fs，严禁调用 tryNativeFs()，防止弹出原生竖屏全屏！
+              syncRotatedFs();
+            });
+          } else {
+            // iOS Safari / WKWebView 或不支持 orientation.lock 的环境：
+            // 直接采用纯 CSS 90度旋转，不调原生竖屏全屏
+            syncRotatedFs();
+          }
+        } else {
+          // 物理本已是横屏，直接全屏并隐藏工具栏
+          syncRotatedFs();
+          tryNativeFs();
+        }
       }
 
       // 仅在纯移动端浏览器中压入一层历史(APK由原生 onBackPressed 拦截, 不压入以防历史污染导致返回死循环)
@@ -2329,8 +2352,8 @@
       userExitedFs = true;
       const wasFs = wrapEl.classList.contains('fake-fs');
       wrapEl.classList.remove('fake-fs', 'fs-rotated');
-      wrapEl.style.width = '';
-      wrapEl.style.height = '';
+      wrapEl.style.removeProperty('width');
+      wrapEl.style.removeProperty('height');
       document.body.style.overflow = '';
       document.documentElement.classList.remove('player-fs');
 
