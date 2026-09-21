@@ -2664,52 +2664,69 @@ export default {
           }
         }
 
-        /* ---- 后台手动确认触发 GitHub Actions 构建 APK + Docker ---- */
-        if (path === '/api/admin/dispatch-build-apk' && request.method === 'POST') {
-          try {
-            const s = await getSettings(env);
-            const ghCfg = getGithubConfig(env, s);
-            const token = ghCfg.token;
-            const repo = ghCfg.repo || 'xiaolin1991/dianying';
-            if (!token) {
-              return json({
-                ok: false,
-                needToken: true,
-                repo,
-                error: '未检测到 GITHUB_TOKEN。您可直接在后台「数据与 GitHub 同步」或当前卡片中填写 Personal Access Token (PAT)，无需前往 Cloudflare 控制台添加环境变量。'
-              }, 400);
-            }
-            let body = {};
-            try { body = await request.json(); } catch (e) { /* ignore */ }
-            const changelog = String(body.changelog || '').trim();
-            const branch = ghCfg.branch || 'main';
-            const url = `https://api.github.com/repos/${repo}/actions/workflows/android.yml/dispatches`;
-            const r = await fetch(url, {
-              method: 'POST',
-              headers: {
-                Accept: 'application/vnd.github+json',
-                Authorization: `Bearer ${token}`,
-                'User-Agent': 'xiaolin-tv-worker',
-                'X-GitHub-Api-Version': '2022-11-28',
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                ref: branch,
-                inputs: {
-                  confirm: 'yes',
-                  changelog: changelog,
-                },
-              }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (r.status === 204 || r.ok) {
-              return json({ ok: true, msg: `🎉 已成功向 GitHub (${repo} @ ${branch}) 触发 Actions 构建任务（同时打包 APK 与推送 Docker 镜像）！请稍后前往 GitHub Actions 查看构建进度。` });
-            }
-            const errText = await r.text();
-            return json({ ok: false, error: `GitHub API 返回错误(${r.status}): ${errText}` }, 500);
-          } catch (e) {
-            return json({ ok: false, error: e.message || String(e) }, 500);
+        /* ---- 后台站内信全网广播群发 ---- */
+        if (path === '/api/admin/messages/broadcast' && request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) { /* ignore */ }
+          const title = String(body.title || '').trim();
+          const content = String(body.content || '').trim();
+          const actionText = String(body.actionText || '').trim();
+          const actionUrl = String(body.actionUrl || '').trim();
+          if (!title) return json({ error: '广播标题不能为空' }, 400);
+          if (!content) return json({ error: '广播内容不能为空' }, 400);
+
+          let users = [];
+          try { users = JSON.parse((await storageGet(env, 'users:index')) || '[]'); } catch (e) {}
+          if (!Array.isArray(users)) users = [];
+
+          const msgId = 'bc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+          const now = Date.now();
+          const broadcastMsg = {
+            id: msgId,
+            title: title.slice(0, 100),
+            content: content.slice(0, 2000),
+            createdAt: now,
+            read: false,
+            type: 'broadcast',
+            actionText: actionText.slice(0, 50),
+            actionUrl: actionUrl.slice(0, 200),
+          };
+
+          let sentCount = 0;
+          for (const u of users) {
+            try {
+              const umsgs = await loadMessages(env, u);
+              umsgs.unshift({ ...broadcastMsg });
+              await saveMessages(env, u, umsgs);
+              sentCount++;
+            } catch (err) { /* ignore single user */ }
           }
+
+          // 记录全局广播历史
+          try {
+            let hist = [];
+            try { hist = JSON.parse((await storageGet(env, 'sys:broadcast_history')) || '[]'); } catch (e) {}
+            if (!Array.isArray(hist)) hist = [];
+            hist.unshift({
+              id: msgId,
+              title: broadcastMsg.title,
+              content: broadcastMsg.content,
+              actionText: broadcastMsg.actionText,
+              actionUrl: broadcastMsg.actionUrl,
+              sentCount,
+              createdAt: now,
+            });
+            await storagePut(env, 'sys:broadcast_history', JSON.stringify(hist.slice(0, 50)));
+          } catch (e) {}
+
+          return json({ ok: true, sentCount, totalUsers: users.length });
+        }
+
+        /* ---- 后台站内信广播历史 ---- */
+        if (path === '/api/admin/messages/broadcast-history' && request.method === 'GET') {
+          let hist = [];
+          try { hist = JSON.parse((await storageGet(env, 'sys:broadcast_history')) || '[]'); } catch (e) {}
+          return json({ ok: true, history: Array.isArray(hist) ? hist : [] });
         }
         /* ---- 后台修改管理密码 ---- */
         if (path === '/api/admin/password' && request.method === 'POST') {

@@ -464,12 +464,13 @@
     if (p === 'browse') return 'browse|' + dec(parts[1] || '电影') + '|' + (query.year || '全部');
     if (p === 'home') return 'home';
     if (p === 'user') return 'user';
+    if (p === 'adult') return 'adult';
     return '';
   }
 
   function isListRoute(parts) {
     const p = (parts && parts[0]) || 'home';
-    return p === 'search' || p === 'sources' || p === 'source' || p === 'browse' || p === 'home' || p === 'user';
+    return p === 'search' || p === 'sources' || p === 'source' || p === 'browse' || p === 'home' || p === 'user' || p === 'adult';
   }
 
   function saveListPageCache(key, optScrollY) {
@@ -550,10 +551,10 @@
     const isHome = p0 === 'home';
     const isFilm = ['browse', 'sources', 'source', 'search', 'detail', 'play'].includes(p0);
     const hasAdult = Boolean(State.me && State.config && State.config.adultUnlocked);
-    const isAdult = p0 === 'user' && (query.tab === 'adult' || (!query.tab && store.get('uTab') === 'adult'));
+    const isAdult = p0 === 'adult';
     const isLive = p0 === 'live';
     const isMsg = p0 === 'messages';
-    const isUser = p0 === 'user' && !isAdult;
+    const isUser = p0 === 'user';
     const unread = Math.max(0, Number(State.unreadMsgCount || 0));
 
     bar.innerHTML = `
@@ -566,7 +567,7 @@
         <span>影视</span>
       </a>
       ${hasAdult ? `
-      <a class="tab-item ${isAdult ? 'active' : ''}" href="#/user?tab=adult" data-tab="adult" title="私密福利">
+      <a class="tab-item ${isAdult ? 'active' : ''}" href="#/adult" data-tab="adult" title="私密福利">
         <svg viewBox="0 0 24 24" style="fill:var(--acc)"><path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .55-.45 1-1 1H6c-.55 0-1-.45-1-1v-1h14v1z"/></svg>
         <span style="color:var(--acc);font-weight:700">私密福利</span>
       </a>` : `
@@ -663,6 +664,7 @@
       else if (parts[0] === 'source') await viewSources(dec(parts[1]), query, alive); // 兼容旧链接
       else if (parts[0] === 'login') await viewLogin(alive, false);
       else if (parts[0] === 'user') await viewUser(alive);
+      else if (parts[0] === 'adult') await viewAdult(alive);
       else if (parts[0] === 'messages') await viewMessages(alive);
       else if (parts[0] === 'live') await viewLive(query);
       else if (parts[0] === 'download') await viewDownload(alive);
@@ -2996,12 +2998,12 @@
             </div>
           </div>
           ${hasAdult ? `
-            <div class="user-kpi-card vip-card ${isAdultUnlocked ? 'unlocked' : 'locked'}" style="cursor:pointer" data-jump="adult">
+            <div class="user-kpi-card vip-card ${isAdultUnlocked ? 'unlocked' : 'locked'}" style="cursor:pointer" id="uKpiAdultCard">
               <div class="user-kpi-ico">${isAdultUnlocked ? '👑' : '🔞'}</div>
               <div class="user-kpi-content">
                 <div class="user-kpi-label">私密福利专区</div>
                 <div class="user-kpi-val" style="color:${isAdultUnlocked ? 'var(--ok)' : 'var(--danger)'}">
-                  ${isAdultUnlocked ? (State.adultExpireAt ? `至 ${fmtDateTime(State.adultExpireAt).slice(0, 10)} 有效` : '已解锁 · 畅享播放') : '未解锁 · 仅图片预览'}
+                  ${isAdultUnlocked ? (State.adultExpireAt ? `至 ${fmtDateTime(State.adultExpireAt).slice(0, 10)} 有效` : '已解锁 · 点击直达') : '未解锁 · 点击解锁'}
                 </div>
               </div>
             </div>` : `
@@ -3019,7 +3021,7 @@
           <button class="user-tab-btn ${tab === 'watch' ? 'on' : ''}" data-t="watch">🎬 观看记录 (${watchItems.length})</button>
           <button class="user-tab-btn ${tab === 'fav' ? 'on' : ''}" data-t="fav">⭐ 我的收藏 (${favs.length})</button>
           <button class="user-tab-btn ${tab === 'search' ? 'on' : ''}" data-t="search">🔍 搜索记录 (${searchItems.length})</button>
-          ${hasAdult ? `<button class="user-tab-btn tab-adult ${tab === 'adult' ? 'on' : ''}" data-t="adult">🔞 私密福利影片 ${isAdultUnlocked ? '👑' : '🔒'}</button>` : ''}
+          ${hasAdult ? `<a class="user-tab-btn tab-adult" href="#/adult" style="text-decoration:none">🔞 私密福利专区 ${isAdultUnlocked ? '👑' : '🔒'}</a>` : ''}
           <a class="user-tab-btn" href="#/messages" style="text-decoration:none">📬 站内消息${State.unreadMsgCount > 0 ? ` (${State.unreadMsgCount})` : ''}</a>
         </div>
 
@@ -3027,15 +3029,9 @@
       </div>`;
 
     const body = $('#uBody');
-    let adultCurSrcKey = '';
-    let adultPg = 1;
-    let adultQuery = '';
-    let adultCat = '';
-    let scrollCleanup = null;
-    let adultRebind = null;
+    if (tab === 'adult') tab = 'watch';
 
     function renderBody() {
-      if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
       $$('#uTabs .user-tab-btn').forEach((c) => c.classList.toggle('on', c.dataset.t === tab));
       store.set('uTab', tab);
 
@@ -3098,31 +3094,164 @@
           renderBody();
           toast('已清空搜索记录');
         });
-      } else if (tab === 'adult') {
-        renderAdultTab();
       }
     }
 
-    async function renderAdultTab() {
-      const adultSources = (State.config && State.config.adultSources) || [];
-      if (!adultSources.length) {
-        body.innerHTML = '<div class="empty"><div class="big">🔞</div>私密福利功能已开启，但暂无可用福利源，请联系管理员在后台开启采集源。</div>';
-        return;
-      }
-      if (!adultCurSrcKey || !adultSources.some((s) => s.key === adultCurSrcKey)) {
-        adultCurSrcKey = store.get('adultCurKey', adultSources[0].key);
-        if (!adultSources.some((s) => s.key === adultCurSrcKey)) adultCurSrcKey = adultSources[0].key;
-      }
-      let curSrc = adultSources.find((s) => s.key === adultCurSrcKey) || adultSources[0];
-      const isUnlocked = Boolean(State.config && State.config.adultUnlocked);
+    function bindHistDel() {
+      $$('#uBody .hist-del[data-id]').forEach((b) => b.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        await API.userDeleteHistory([b.dataset.id]);
+        const all = watchItems.concat(searchItems);
+        const idx = all.findIndex((x) => x.id === b.dataset.id);
+        if (idx >= 0) all[idx].delUser = true;
+        const wI = watchItems.findIndex((x) => x.id === b.dataset.id);
+        if (wI >= 0) watchItems.splice(wI, 1);
+        else { const sI = searchItems.findIndex((x) => x.id === b.dataset.id); if (sI >= 0) searchItems.splice(sI, 1); }
+        renderBody();
+        toast('已删除');
+      }));
+    }
 
-      let loadingMore = false;
-      let hasMore = true;
-      let totalCount = 0;
-      let loadedVods = [];
+    function bindUserHeaderEvents() {
+      $$('#uTabs .user-tab-btn[data-t]').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.t; renderBody(); }));
+      $$('.user-kpi-card[data-jump]').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.jump; renderBody(); }));
+      $('#uKpiAdultCard') && $('#uKpiAdultCard').addEventListener('click', () => { location.hash = '#/adult'; });
+      $('#uHeroUnlockBtn') && $('#uHeroUnlockBtn').addEventListener('click', () => {
+        openUnlockModal(() => { viewUser(life.ok); });
+      });
+      $('#uRefreshBtn') && $('#uRefreshBtn').addEventListener('click', () => { doGlobalUserRefresh($('#uRefreshBtn')); });
+      $('#uLogout') && $('#uLogout').addEventListener('click', async () => {
+        try { await API.userLogout(); } catch (e) {}
+        State.me = null;
+        State.adultAllowed = false;
+        State.adultExpireAt = 0;
+        State.unreadMsgCount = 0;
+        try { State.config = await API.getConfig(); } catch (e) {}
+        updateUserBox();
+        renderBottomNav();
+        toast('已退出登录');
+        location.hash = '#/home';
+      });
+    }
 
-      // 完全对齐影视源：顶部高阶特权说明横幅 + 左侧常驻测速源列表 + 移动端切换弹窗 + 右侧分类与搜索 + 标准瀑布流海报网格
-      body.innerHTML = `
+    activeListPage = {
+      key: 'user',
+      getState: () => ({ tab }),
+      rebind: (alive2, state) => {
+        life.ok = alive2;
+        if (!life.ok()) return;
+        if (state && state.tab) tab = state.tab;
+        bindUserHeaderEvents();
+        bindHistDel();
+      },
+    };
+
+    bindUserHeaderEvents();
+    renderBody();
+  }
+
+  /* ============================================================
+     视图：私密福利专区 (独立顶级页面 #/adult)
+     ============================================================ */
+  async function viewAdult(alive) {
+    const life = { ok: alive };
+    const v = $('#view');
+
+    const hasAdult = Boolean(State.config && State.config.adultEnabled);
+    if (!hasAdult) {
+      v.innerHTML = `
+        <div class="container page-wrap">
+          <div class="side-card" style="text-align:center;padding:50px 20px">
+            <div style="font-size:52px">🔞</div>
+            <h3 style="margin:16px 0 8px">私密福利专区未启用</h3>
+            <p class="hint" style="max-width:440px;margin:0 auto 20px;line-height:1.6">
+              当前系统暂未开启私密福利功能，或未配置相关采集源。<br>如有疑问请联系站长或管理员在后台开启。
+            </p>
+            <a class="btn primary" href="#/home">返回主站首页</a>
+          </div>
+        </div>`;
+      return;
+    }
+
+    if (!State.me) {
+      v.innerHTML = `
+        <div class="container page-wrap">
+          <div class="adult-feature-banner" style="margin-top:10px">
+            <div class="adult-banner-head">
+              <div class="adult-banner-title">
+                <span class="adult-crown-ico">🔞</span>
+                <div>
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <span style="font-size:18px;font-weight:700">私密福利 VIP 尊享特权专区</span>
+                    <span class="user-vip-tag locked" style="font-size:11.5px">🔒 需登录会员账号</span>
+                  </div>
+                  <div class="adult-banner-sub">全网精选福利聚合 · 4K超清极速秒播 · 每日同步海量更新 · 严格隐私零痕迹</div>
+                </div>
+              </div>
+            </div>
+            <div class="adult-status-banner locked" style="margin-top:14px">
+              <div>
+                <b>🔒 专属私密空间 · 仅限会员访问</b>
+                <div style="font-size:12.5px;opacity:.9;margin-top:2px">
+                  本专区与主站影片完全隔离屏蔽，守护极致私密空间。新用户注册即可自动获赠福利特权体验！
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap">
+                <a class="btn primary small" href="#/login" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700">
+                  🔑 立即登录 / 注册
+                </a>
+                <a class="btn ghost small" href="#/home">返回主站</a>
+              </div>
+            </div>
+            <div class="adult-perk-grid" style="margin-top:16px">
+              <div class="adult-perk-item">
+                <div class="adult-perk-title">⚡ 4K超清极速秒播</div>
+                <div class="adult-perk-desc">专享独立高速直连流媒体节点，低延时秒起播，告别卡顿与缓冲等待。</div>
+              </div>
+              <div class="adult-perk-item">
+                <div class="adult-perk-title">🔞 每日同步海量更新</div>
+                <div class="adult-perk-desc">聚合数十家精品成人影视采集源，热门番号、欧美大片、日韩精品实时收录。</div>
+              </div>
+              <div class="adult-perk-item">
+                <div class="adult-perk-title">🛡️ 端到端隐私零痕迹</div>
+                <div class="adult-perk-desc">主站搜索与推荐完全隔离屏蔽，游客零痕迹，守护纯粹私密的专属观影空间。</div>
+              </div>
+              <div class="adult-perk-item">
+                <div class="adult-perk-title">🎁 注册即赠福利特权</div>
+                <div class="adult-perk-desc">新用户注册自动赠送福利特权，随时畅享专区全部影视资源。</div>
+              </div>
+            </div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const adultSources = (State.config && State.config.adultSources) || [];
+    if (!adultSources.length) {
+      v.innerHTML = `
+        <div class="container page-wrap">
+          <div class="empty"><div class="big">🔞</div>私密福利功能已开启，但暂无可用福利源，请联系管理员在后台开启采集源。</div>
+        </div>`;
+      return;
+    }
+
+    let adultCurSrcKey = store.get('adultCurKey', adultSources[0].key);
+    if (!adultSources.some((s) => s.key === adultCurSrcKey)) adultCurSrcKey = adultSources[0].key;
+    let curSrc = adultSources.find((s) => s.key === adultCurSrcKey) || adultSources[0];
+
+    const isUnlocked = Boolean(State.config && State.config.adultUnlocked);
+    let adultPg = 1;
+    let adultQuery = '';
+    let adultCat = '';
+    let scrollCleanup = null;
+    let loadingMore = false;
+    let hasMore = true;
+    let totalCount = 0;
+    let loadedVods = [];
+
+    v.innerHTML = `
+      <div class="container page-wrap">
         <!-- 👑 私密福利 VIP 尊享特权大横幅与专属说明 -->
         <div class="adult-feature-banner" id="adultFeatureBanner">
           <div class="adult-banner-head">
@@ -3130,23 +3259,29 @@
               <span class="adult-crown-ico">👑</span>
               <div>
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                  <span>私密福利 VIP 尊享特权影院</span>
+                  <span style="font-size:18px;font-weight:700">私密福利 VIP 尊享特权影院</span>
                   <span class="user-vip-tag ${isUnlocked ? 'unlocked' : 'locked'}" style="font-size:11.5px">
-                    ${isUnlocked ? '👑 VIP已解锁 · 全区畅播' : '🔒 注册会员 · 仅图片预览'}
+                    ${isUnlocked ? ('👑 VIP已解锁 · 全区畅播' + (State.adultExpireAt ? ` (至 ${fmtDateTime(State.adultExpireAt).slice(0, 10)})` : '')) : '🔒 注册会员 · 仅图片预览'}
                   </span>
                 </div>
                 <div class="adult-banner-sub">全网精选福利聚合 · 4K超清极速线路 · 每日同步海量更新 · 严格隐私零痕迹</div>
               </div>
             </div>
-            <button class="adult-banner-toggle" id="adultBannerToggle" type="button">
-              <span id="adultToggleTxt">${store.get('adultDescFold', false) ? '展开说明 ▾' : '收起说明 ▴'}</span>
-            </button>
+            <div style="display:flex;gap:8px;align-items:center">
+              ${!isUnlocked ? `
+                <button class="btn primary small" id="adultHeroUnlockBtn" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700">
+                  🔑 卡密解锁
+                </button>` : ''}
+              <button class="adult-banner-toggle" id="adultBannerToggle" type="button">
+                <span id="adultToggleTxt">${store.get('adultDescFold', false) ? '展开说明 ▾' : '收起说明 ▴'}</span>
+              </button>
+            </div>
           </div>
 
           <div id="adultBannerBody" class="${store.get('adultDescFold', false) ? 'hidden' : ''}">
             <div class="adult-status-banner ${isUnlocked ? 'unlocked' : 'locked'}">
               <div>
-                <b>${isUnlocked ? '👑 VIP 特权状态：已激活永久解锁' : '🔒 会员特权状态：未付费解锁（仅图片预览）'}</b>
+                <b>${isUnlocked ? '👑 VIP 特权状态：已激活解锁' : '🔒 会员特权状态：未付费解锁（仅图片预览）'}</b>
                 <div style="font-size:12.5px;opacity:.9;margin-top:2px">
                   ${isUnlocked
                     ? '您已享有专区全部影片无限制在线播放特权、多条超清CDN线路、智能瀑布流无限畅享！'
@@ -3228,16 +3363,32 @@
               <!-- 状态与数量指示 -->
               <div class="src-status" id="adultStatus"></div>
 
-              <!-- 影片瀑布流海报网格 (使用站点统一的 .grid 与 .card 规范) -->
+              <!-- 影片瀑布流海报网格 -->
               <div class="grid" id="adultGrid"></div>
 
               <!-- 瀑布流触底监听与加载指示器 -->
               <div class="infinite-loader" id="adultSentinel"></div>
             </div>
           </div>
-        </div>`;
+        </div>
+      </div>`;
 
-      // 说明折叠切换
+    // 测速
+    for (const s of adultSources) {
+      if (!speedGet(s.key)) {
+        (async () => {
+          const t0 = performance.now();
+          let rec;
+          try { await API.list(s, 1); rec = { ms: Math.round(performance.now() - t0), fail: false, ts: Date.now() }; }
+          catch (e) { rec = { ms: 0, fail: true, ts: Date.now() }; }
+          speedCache.set(s.key, rec);
+          refreshSpeedBadges();
+          persistSpeed();
+        })();
+      }
+    }
+
+    function bindBannerAndUnlock() {
       const bannerToggle = $('#adultBannerToggle');
       const bannerBody = $('#adultBannerBody');
       const toggleTxt = $('#adultToggleTxt');
@@ -3248,25 +3399,13 @@
           if (toggleTxt) toggleTxt.textContent = isFold ? '展开说明 ▾' : '收起说明 ▴';
         });
       }
-      $('#uBannerUnlockBtn') && $('#uBannerUnlockBtn').addEventListener('click', () => {
-        openUnlockModal(() => renderAdultTab());
-      });
+      const doUnlock = () => openUnlockModal(() => viewAdult(life.ok));
+      $('#adultHeroUnlockBtn') && $('#adultHeroUnlockBtn').addEventListener('click', doUnlock);
+      $('#uBannerUnlockBtn') && $('#uBannerUnlockBtn').addEventListener('click', doUnlock);
+      $('#uBtnUnlock') && $('#uBtnUnlock').addEventListener('click', doUnlock);
+    }
 
-      // 绑定福利源测速
-      for (const s of adultSources) {
-        if (!speedGet(s.key)) {
-          (async () => {
-            const t0 = performance.now();
-            let rec;
-            try { await API.list(s, 1); rec = { ms: Math.round(performance.now() - t0), fail: false, ts: Date.now() }; }
-            catch (e) { rec = { ms: 0, fail: true, ts: Date.now() }; }
-            speedCache.set(s.key, rec);
-            refreshSpeedBadges();
-            persistSpeed();
-          })();
-        }
-      }
-
+    function bindSources() {
       // 移动端弹窗切源
       $('#adultSrcPickBtn') && $('#adultSrcPickBtn').addEventListener('click', () => {
         const box = document.createElement('div');
@@ -3286,11 +3425,8 @@
           if (row) {
             adultCurSrcKey = row.dataset.k;
             store.set('adultCurKey', adultCurSrcKey);
-            adultPg = 1;
-            adultCat = '';
-            adultQuery = '';
             box.remove();
-            renderAdultTab();
+            viewAdult(life.ok);
           } else if (ev.target === box) {
             box.remove();
           }
@@ -3309,21 +3445,12 @@
           if (adultCurSrcKey === btn.dataset.k) return;
           adultCurSrcKey = btn.dataset.k;
           store.set('adultCurKey', adultCurSrcKey);
-          adultPg = 1;
-          adultCat = '';
-          adultQuery = '';
-          renderAdultTab();
+          viewAdult(life.ok);
         });
       });
+    }
 
-      // 解锁弹窗
-      $('#uBtnUnlock') && $('#uBtnUnlock').addEventListener('click', () => {
-        openUnlockModal(() => {
-          renderAdultTab();
-        });
-      });
-
-      // 搜索表单
+    function bindSearch() {
       $('#adultSearchBtn') && $('#adultSearchBtn').addEventListener('click', () => {
         adultQuery = ($('#adultSearchInput').value || '').trim();
         fetchAdultList(true);
@@ -3340,263 +3467,19 @@
         if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
         fetchAdultList(true);
       });
+    }
 
-      // 动态加载上游分类
-      const catsEl = $('#adultCats');
-      (async () => {
-        const cats = await loadSourceCats(curSrc, life.ok);
-        if (!life.ok() || !catsEl) return;
-        if (cats && cats.length) {
-          catsEl.classList.remove('hidden');
-          catsEl.innerHTML = `
-            <button class="chip ${!adultCat ? 'on' : ''}" data-cat="">全部</button>
-            ${cats.map((c) => `<button class="chip ${adultCat === c.id ? 'on' : ''}" data-cat="${esc(c.id)}">${esc(c.name)}</button>`).join('')}
-          `;
-          $$('#adultCats .chip').forEach((c) => {
-            c.addEventListener('click', () => {
-              adultCat = c.dataset.cat || '';
-              adultQuery = '';
-              if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
-              $$('#adultCats .chip').forEach((x) => x.classList.toggle('on', x === c));
-              fetchAdultList(true);
-            });
-          });
-        } else {
-          catsEl.classList.add('hidden');
-        }
-      })();
-
-      function bindAdultCardClicks(container) {
-        const cards = container.querySelectorAll('.adult-vod-card:not([data-bound])');
-        cards.forEach((el) => {
-          el.setAttribute('data-bound', '1');
-          el.addEventListener('click', (ev) => {
-            const vidId = el.dataset.id;
-            const vod = loadedVods.find((x) => String(x.vod_id) === String(vidId));
-            if (!vod) return;
-
-            if (!isUnlocked) {
-              ev.preventDefault();
-              openPicPreviewModal(vod, curSrc);
-              return;
-            }
-
-            const playHref = `#/play/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(vidId)}?ep=0&group=0`;
-            if (!isMobileDevice()) {
-              // 电脑端：新建独立标签页打开播放
-              ev.preventDefault();
-              window.open(playHref, '_blank');
-            } else {
-              // 手机端：本标签直接全屏播放
-              ev.preventDefault();
-              location.hash = playHref;
-            }
-          });
-        });
-      }
-
-      function initInfiniteScroll() {
-        if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
-        const sentinel = $('#adultSentinel');
-        if (!sentinel) return;
-
-        const triggerNext = () => {
-          if (!life.ok() || loadingMore || !hasMore) return;
-          adultPg++;
-          fetchAdultList(false);
-        };
-
-        let obs = null;
-        if (window.IntersectionObserver) {
-          obs = new IntersectionObserver((entries) => {
-            if (entries[0] && entries[0].isIntersecting) {
-              triggerNext();
-            }
-          }, { rootMargin: '600px 0px' });
-          obs.observe(sentinel);
-        }
-
-        const onScroll = () => {
-          if (!life.ok() || loadingMore || !hasMore) return;
-          const rect = sentinel.getBoundingClientRect();
-          if (rect.top <= window.innerHeight + 650) {
-            triggerNext();
-          }
-        };
-        window.addEventListener('scroll', onScroll, { passive: true });
-
-        // 若当前已经靠近底部，立即加载下一页，避免返回后卡死
-        const r = sentinel.getBoundingClientRect();
-        if (r.top <= window.innerHeight + 650 && hasMore && !loadingMore) {
-          triggerNext();
-        }
-
-        scrollCleanup = () => {
-          if (obs) { obs.disconnect(); obs = null; }
-          window.removeEventListener('scroll', onScroll);
-        };
-      }
-
-      async function fetchAdultList(isFirstPage = false) {
-        const grid = $('#adultGrid');
-        const statusEl = $('#adultStatus');
-        const sentinel = $('#adultSentinel');
-        if (!grid || !life.ok()) return;
-
-        if (isFirstPage) {
-          if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
-          adultPg = 1;
-          hasMore = true;
-          loadingMore = false;
-          loadedVods = [];
-          grid.innerHTML = skeletons(14);
-          if (statusEl) statusEl.textContent = '⏳ 正在加载福利影片…';
-          if (sentinel) {
-            sentinel.className = 'infinite-loader';
-            sentinel.innerHTML = '<span class="spin"></span> 正在加载影片…';
-          }
-        }
-
-        loadingMore = true;
-        if (sentinel && !isFirstPage) {
-          sentinel.className = 'infinite-loader';
-          sentinel.innerHTML = `<span class="spin"></span> 正在自动加载第 ${adultPg} 页影片…`;
-        }
-
-        let r;
-        try {
-          r = adultQuery
-            ? await API.search(curSrc, adultQuery, adultPg)
-            : await API.list(curSrc, adultPg, adultCat);
-        } catch (e) {
-          loadingMore = false;
-          if (!life.ok()) return;
-          if (isFirstPage) {
-            grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">⚠️</div>加载失败：${esc(e.message)}<div style="margin-top:12px"><button class="btn primary small" id="adultRetryBtn">🔄 重试</button></div></div>`;
-            $('#adultRetryBtn') && $('#adultRetryBtn').addEventListener('click', () => fetchAdultList(true));
-            if (statusEl) statusEl.textContent = '❌ 加载失败';
-            if (sentinel) sentinel.innerHTML = '';
-          } else {
-            if (sentinel) {
-              sentinel.innerHTML = `<span>⚠️ 第 ${adultPg} 页加载失败</span> <button class="btn ghost small infinite-retry-btn" id="adultMoreRetryBtn">🔄 点击重试</button>`;
-              $('#adultMoreRetryBtn') && $('#adultMoreRetryBtn').addEventListener('click', () => fetchAdultList(false));
-            }
-          }
-          return;
-        }
-
-        if (!life.ok()) {
-          loadingMore = false;
-          return;
-        }
-        loadingMore = false;
-
-        const list = (r && r.list) || [];
-        const pageCount = Number(r && r.pagecount) || 1;
-        totalCount = Number(r && r.total) || (isFirstPage ? list.length : totalCount + list.length);
-
-        if (isFirstPage) {
-          if (!list.length) {
-            hasMore = false;
-            grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">🙈</div>没有找到符合条件的私密福利影片</div>`;
-            if (statusEl) statusEl.textContent = '未检索到影片';
-            if (sentinel) sentinel.innerHTML = '';
-            return;
-          }
-          grid.innerHTML = '';
-        }
-
-        if (!list.length || (pageCount && adultPg >= pageCount)) {
-          hasMore = false;
-        }
-
-        // 保存加载记录
-        list.forEach((v) => {
-          if (v && v.vod_id && !loadedVods.some((x) => String(x.vod_id) === String(v.vod_id))) {
-            loadedVods.push(v);
-          }
-        });
-
-        const isMobile = isMobileDevice();
-        const htmlChunk = list.map((v) => {
-          const pic = v.vod_pic || '';
-          const title = v.vod_name || '';
-          const remarks = v.vod_remarks || '';
-          const year = v.vod_year || '';
-          const type = v.type_name || '';
-          const playHref = `#/play/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(v.vod_id)}?ep=0&group=0`;
-          const targetAttr = isUnlocked ? (isMobile ? '_self' : '_blank') : '_self';
-          return `
-            <a class="card adult-vod-card" href="${isUnlocked ? playHref : 'javascript:;'}" target="${targetAttr}" data-id="${esc(v.vod_id)}" title="${esc(title)}">
-              <div class="card-poster">
-                <img loading="lazy" referrerpolicy="no-referrer" src="${esc(pic)}" alt="${esc(title)}"
-                     onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>'">
-                <span class="card-badge">${esc(remarks || year || '18+')}</span>
-                <span class="card-lock-badge ${isUnlocked ? 'unlocked' : 'locked'}">
-                  ${isUnlocked ? '▶ 可播放' : '🔒 预览大图'}
-                </span>
-                <span class="card-play-ico"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>
-              </div>
-              <div class="card-name" title="${esc(title)}">${esc(title)}</div>
-              <div class="card-sub">${esc(year || '福利')}${type ? ' · ' + esc(type) : ''}</div>
-            </a>`;
-        }).join('');
-
-        grid.insertAdjacentHTML('beforeend', htmlChunk);
-
-        // 绑定卡片点击
-        bindAdultCardClicks(grid);
-
-        if (statusEl) {
-          statusEl.textContent = `⚡ 已瀑布流加载 ${loadedVods.length} 部 · 第 1~${adultPg} 页 (共 ${totalCount} 部)`;
-        }
-
-        if (sentinel) {
-          if (!hasMore) {
-            sentinel.className = 'infinite-loader no-more';
-            sentinel.innerHTML = `🎉 已加载全部内容（共 ${loadedVods.length} 部影片）`;
-          } else {
-            sentinel.className = 'infinite-loader';
-            sentinel.innerHTML = `<span class="spin"></span> 向下滑动自动加载更多精彩影片…`;
-          }
-        }
-
-        // 初始化/更新无限滚动
-        if (hasMore) {
-          initInfiniteScroll();
-        }
-      }
-
-      adultRebind = (alive2) => {
-        life.ok = alive2;
-        loadingMore = false;
-        const grid = $('#adultGrid');
-        if (grid) bindAdultCardClicks(grid);
-        initInfiniteScroll();
-        const bannerToggle = $('#adultBannerToggle');
-        const bannerBody = $('#adultBannerBody');
-        const toggleTxt = $('#adultToggleTxt');
-        if (bannerToggle && bannerBody) {
-          bannerToggle.addEventListener('click', () => {
-            const isFold = bannerBody.classList.toggle('hidden');
-            store.set('adultDescFold', isFold);
-            if (toggleTxt) toggleTxt.textContent = isFold ? '展开说明 ▾' : '收起说明 ▴';
-          });
-        }
-        $('#uBannerUnlockBtn') && $('#uBannerUnlockBtn').addEventListener('click', () => openUnlockModal(() => renderAdultTab()));
-        $('#uBtnUnlock') && $('#uBtnUnlock').addEventListener('click', () => openUnlockModal(() => renderAdultTab()));
-        $('#adultSearchBtn') && $('#adultSearchBtn').addEventListener('click', () => {
-          adultQuery = ($('#adultSearchInput').value || '').trim();
-          fetchAdultList(true);
-        });
-        $('#adultSearchInput') && $('#adultSearchInput').addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); adultQuery = ($('#adultSearchInput').value || '').trim(); fetchAdultList(true); }
-        });
-        $('#adultSearchClear') && $('#adultSearchClear').addEventListener('click', () => {
-          adultQuery = '';
-          if ($('#adultSearchInput')) $('#adultSearchInput').value = '';
-          fetchAdultList(true);
-        });
+    // 动态分类
+    const catsEl = $('#adultCats');
+    (async () => {
+      const cats = await loadSourceCats(curSrc, life.ok);
+      if (!life.ok() || !catsEl) return;
+      if (cats && cats.length) {
+        catsEl.classList.remove('hidden');
+        catsEl.innerHTML = `
+          <button class="chip ${!adultCat ? 'on' : ''}" data-cat="">全部</button>
+          ${cats.map((c) => `<button class="chip ${adultCat === c.id ? 'on' : ''}" data-cat="${esc(c.id)}">${esc(c.name)}</button>`).join('')}
+        `;
         $$('#adultCats .chip').forEach((c) => {
           c.addEventListener('click', () => {
             adultCat = c.dataset.cat || '';
@@ -3606,76 +3489,231 @@
             fetchAdultList(true);
           });
         });
-        $$('#adultSrcList .src-row').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            if (adultCurSrcKey === btn.dataset.k) return;
-            adultCurSrcKey = btn.dataset.k;
-            store.set('adultCurKey', adultCurSrcKey);
-            adultPg = 1; adultCat = ''; adultQuery = '';
-            renderAdultTab();
-          });
+      } else {
+        catsEl.classList.add('hidden');
+      }
+    })();
+
+    function bindAdultCardClicks(container) {
+      if (!container) return;
+      const cards = container.querySelectorAll('.adult-vod-card:not([data-bound])');
+      cards.forEach((el) => {
+        el.setAttribute('data-bound', '1');
+        el.addEventListener('click', (ev) => {
+          const vidId = el.dataset.id;
+          const vod = loadedVods.find((x) => String(x.vod_id) === String(vidId));
+          if (!vod) return;
+
+          if (!isUnlocked) {
+            ev.preventDefault();
+            openPicPreviewModal(vod, curSrc);
+            return;
+          }
+
+          const playHref = `#/play/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(vidId)}?ep=0&group=0`;
+          if (!isMobileDevice()) {
+            ev.preventDefault();
+            window.open(playHref, '_blank');
+          } else {
+            ev.preventDefault();
+            location.hash = playHref;
+          }
         });
+      });
+    }
+
+    function initInfiniteScroll() {
+      if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
+      const sentinel = $('#adultSentinel');
+      if (!sentinel) return;
+
+      const triggerNext = () => {
+        if (!life.ok() || loadingMore || !hasMore) return;
+        adultPg++;
+        fetchAdultList(false);
       };
 
-      fetchAdultList(true);
-    }
-    function bindHistDel() {
-      $$('#uBody .hist-del[data-id]').forEach((b) => b.addEventListener('click', async (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        await API.userDeleteHistory([b.dataset.id]);
-        const all = watchItems.concat(searchItems);
-        const idx = all.findIndex((x) => x.id === b.dataset.id);
-        if (idx >= 0) all[idx].delUser = true;
-        const wI = watchItems.findIndex((x) => x.id === b.dataset.id);
-        if (wI >= 0) watchItems.splice(wI, 1);
-        else { const sI = searchItems.findIndex((x) => x.id === b.dataset.id); if (sI >= 0) searchItems.splice(sI, 1); }
-        renderBody();
-        toast('已删除');
-      }));
+      let obs = null;
+      if (window.IntersectionObserver) {
+        obs = new IntersectionObserver((entries) => {
+          if (entries[0] && entries[0].isIntersecting) {
+            triggerNext();
+          }
+        }, { rootMargin: '600px 0px' });
+        obs.observe(sentinel);
+      }
+
+      const onScroll = () => {
+        if (!life.ok() || loadingMore || !hasMore) return;
+        const rect = sentinel.getBoundingClientRect();
+        if (rect.top <= window.innerHeight + 650) {
+          triggerNext();
+        }
+      };
+      window.addEventListener('scroll', onScroll, { passive: true });
+
+      const r = sentinel.getBoundingClientRect();
+      if (r.top <= window.innerHeight + 650 && hasMore && !loadingMore) {
+        triggerNext();
+      }
+
+      scrollCleanup = () => {
+        if (obs) { obs.disconnect(); obs = null; }
+        window.removeEventListener('scroll', onScroll);
+      };
     }
 
-    function bindUserHeaderEvents() {
-      $$('#uTabs .user-tab-btn').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.t; renderBody(); }));
-      $$('.user-kpi-card[data-jump]').forEach((c) => c.addEventListener('click', () => { tab = c.dataset.jump; renderBody(); }));
-      $('#uHeroUnlockBtn') && $('#uHeroUnlockBtn').addEventListener('click', () => {
-        openUnlockModal(() => { viewUser(life.ok); });
+    async function fetchAdultList(isFirstPage = false) {
+      const grid = $('#adultGrid');
+      const statusEl = $('#adultStatus');
+      const sentinel = $('#adultSentinel');
+      if (!grid || !life.ok()) return;
+
+      if (isFirstPage) {
+        if (scrollCleanup) { scrollCleanup(); scrollCleanup = null; }
+        adultPg = 1;
+        hasMore = true;
+        loadingMore = false;
+        loadedVods = [];
+        grid.innerHTML = skeletons(14);
+        if (statusEl) statusEl.textContent = '⏳ 正在加载福利影片…';
+        if (sentinel) {
+          sentinel.className = 'infinite-loader';
+          sentinel.innerHTML = '<span class="spin"></span> 正在加载影片…';
+        }
+      }
+
+      loadingMore = true;
+      if (sentinel && !isFirstPage) {
+        sentinel.className = 'infinite-loader';
+        sentinel.innerHTML = `<span class="spin"></span> 正在自动加载第 ${adultPg} 页影片…`;
+      }
+
+      let r;
+      try {
+        r = adultQuery
+          ? await API.search(curSrc, adultQuery, adultPg)
+          : await API.list(curSrc, adultPg, adultCat);
+      } catch (e) {
+        loadingMore = false;
+        if (!life.ok()) return;
+        if (isFirstPage) {
+          grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">⚠️</div>加载失败：${esc(e.message)}<div style="margin-top:12px"><button class="btn primary small" id="adultRetryBtn">🔄 重试</button></div></div>`;
+          $('#adultRetryBtn') && $('#adultRetryBtn').addEventListener('click', () => fetchAdultList(true));
+          if (statusEl) statusEl.textContent = '❌ 加载失败';
+          if (sentinel) sentinel.innerHTML = '';
+        } else {
+          if (sentinel) {
+            sentinel.innerHTML = `<span>⚠️ 第 ${adultPg} 页加载失败</span> <button class="btn ghost small infinite-retry-btn" id="adultMoreRetryBtn">🔄 点击重试</button>`;
+            $('#adultMoreRetryBtn') && $('#adultMoreRetryBtn').addEventListener('click', () => fetchAdultList(false));
+          }
+        }
+        return;
+      }
+
+      if (!life.ok()) {
+        loadingMore = false;
+        return;
+      }
+      loadingMore = false;
+
+      const list = (r && r.list) || [];
+      const pageCount = Number(r && r.pagecount) || 1;
+      totalCount = Number(r && r.total) || (isFirstPage ? list.length : totalCount + list.length);
+
+      if (isFirstPage) {
+        if (!list.length) {
+          hasMore = false;
+          grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">🙈</div>没有找到符合条件的私密福利影片</div>`;
+          if (statusEl) statusEl.textContent = '未检索到影片';
+          if (sentinel) sentinel.innerHTML = '';
+          return;
+        }
+        grid.innerHTML = '';
+      }
+
+      if (!list.length || (pageCount && adultPg >= pageCount)) {
+        hasMore = false;
+      }
+
+      list.forEach((vod) => {
+        if (vod && vod.vod_id && !loadedVods.some((x) => String(x.vod_id) === String(vod.vod_id))) {
+          loadedVods.push(vod);
+        }
       });
-      $('#uRefreshBtn') && $('#uRefreshBtn').addEventListener('click', () => { doGlobalUserRefresh($('#uRefreshBtn')); });
-      $('#uLogout') && $('#uLogout').addEventListener('click', async () => {
-        try { await API.userLogout(); } catch (e) {}
-        State.me = null;
-        State.adultAllowed = false;
-        State.adultExpireAt = 0;
-        State.unreadMsgCount = 0;
-        try { State.config = await API.getConfig(); } catch (e) {}
-        updateUserBox();
-        renderBottomNav();
-        toast('已退出登录');
-        location.hash = '#/home';
-      });
+
+      const isMobile = isMobileDevice();
+      const htmlChunk = list.map((v) => {
+        const pic = v.vod_pic || '';
+        const title = v.vod_name || '';
+        const remarks = v.vod_remarks || '';
+        const year = v.vod_year || '';
+        const type = v.type_name || '';
+        const playHref = `#/play/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(v.vod_id)}?ep=0&group=0`;
+        const targetAttr = isUnlocked ? (isMobile ? '_self' : '_blank') : '_self';
+        return `
+          <a class="card adult-vod-card" href="${isUnlocked ? playHref : 'javascript:;'}" target="${targetAttr}" data-id="${esc(v.vod_id)}" title="${esc(title)}">
+            <div class="card-poster">
+              <img loading="lazy" referrerpolicy="no-referrer" src="${esc(pic)}" alt="${esc(title)}"
+                   onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>'">
+              <span class="card-badge">${esc(remarks || year || '18+')}</span>
+              <span class="card-lock-badge ${isUnlocked ? 'unlocked' : 'locked'}">
+                ${isUnlocked ? '▶ 可播放' : '🔒 预览大图'}
+              </span>
+              <span class="card-play-ico"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>
+            </div>
+            <div class="card-name" title="${esc(title)}">${esc(title)}</div>
+            <div class="card-sub">${esc(year || '福利')}${type ? ' · ' + esc(type) : ''}</div>
+          </a>`;
+      }).join('');
+
+      grid.insertAdjacentHTML('beforeend', htmlChunk);
+      bindAdultCardClicks(grid);
+
+      if (statusEl) {
+        statusEl.textContent = `⚡ 已瀑布流加载 ${loadedVods.length} 部 · 第 1~${adultPg} 页 (共 ${totalCount} 部)`;
+      }
+
+      if (sentinel) {
+        if (!hasMore) {
+          sentinel.className = 'infinite-loader no-more';
+          sentinel.innerHTML = `🎉 已加载全部内容（共 ${loadedVods.length} 部影片）`;
+        } else {
+          sentinel.className = 'infinite-loader';
+          sentinel.innerHTML = `<span class="spin"></span> 向下滑动自动加载更多精彩影片…`;
+        }
+      }
+
+      if (hasMore) {
+        initInfiniteScroll();
+      }
     }
+
+    bindBannerAndUnlock();
+    bindSources();
+    bindSearch();
 
     activeListPage = {
-      key: 'user',
-      getState: () => ({ tab }),
+      key: 'adult',
+      getState: () => ({ adultCurSrcKey, adultPg, adultCat, adultQuery }),
       rebind: (alive2, state) => {
         life.ok = alive2;
         if (!life.ok()) return;
-        if (state && state.tab) tab = state.tab;
-        bindUserHeaderEvents();
-        if (tab === 'adult') {
-          if (typeof adultRebind === 'function') {
-            adultRebind(alive2);
-          }
-        } else if (tab === 'watch' || tab === 'fav' || tab === 'search') {
-          bindHistDel();
+        if (state) {
+          if (state.adultCurSrcKey) adultCurSrcKey = state.adultCurSrcKey;
+          if (state.adultPg) adultPg = state.adultPg;
+          if (state.adultCat) adultCat = state.adultCat;
+          if (state.adultQuery) adultQuery = state.adultQuery;
         }
+        bindBannerAndUnlock();
+        bindSources();
+        bindSearch();
+        bindAdultCardClicks($('#adultGrid') || v);
+        initInfiniteScroll();
       },
     };
 
-    bindUserHeaderEvents();
-    renderBody();
+    fetchAdultList(true);
   }
 
   /* ============================================================
@@ -4202,22 +4240,12 @@
     const dlUrlIos = resolveDownloadUrl((State.settings && State.settings.downloadUrlIos) || '');
     const isAndroid = /Android/i.test(navigator.userAgent);
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (isClientOrDownloaded()) {
-      // 已安装用户(安卓壳/PWA)或已下载用户: 自动识别, 显示确认信息而非推广
-      v.innerHTML = `
-        <div class="container page-wrap" style="max-width:680px">
-          <div class="side-card" style="text-align:center;padding:40px 20px">
-            <div style="font-size:52px">✅</div>
-            <h3 style="margin:12px 0 8px">你已下载或正在使用官方客户端</h3>
-            <p class="hint">系统自动识别：已下载安装或正在通过 晓林影院 App 访问。<br>下载入口与引导弹窗已为你自动隐藏。</p>
-            <div style="display:flex;gap:12px;justify-content:center;margin-top:16px;flex-wrap:wrap">
-              <a class="btn primary" href="#/home">回到首页观影</a>
-              ${dlUrl ? `<a class="btn ghost" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 重新下载安装包</a>` : ''}
-            </div>
-          </div>
-        </div>`;
-      return;
-    }
+
+    const alreadyNotice = isClientOrDownloaded() ? `
+      <div class="dl-notice-banner">
+        <span>✅ <b>已识别客户端</b>：检测到您正在使用或已下载过客户端。若需重新下载、更换设备或查看安卓/苹果安装指引，请直接在下方操作。</span>
+      </div>` : '';
+
     const apkBtn = dlUrl
       ? `<a class="btn primary" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 ${isAndroid ? '立即安装到本机' : '下载安卓 APK'}</a>`
       : `<span class="dl-soon">安装包整备中 · 可先看下方教程</span>`;
@@ -4225,11 +4253,14 @@
       ? `<a class="btn primary" href="${esc(dlUrlTv)}" target="_blank" rel="noopener">📥 下载 TV / 盒子版</a>`
       : '';
     const iosBtn = dlUrlIos
-      ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener" style="margin-bottom:12px">📥 安装 iPhone 客户端</a>`
+      ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener" style="margin-bottom:10px">🍎 安装 iPhone 客户端</a>`
       : '';
     const siteName = esc((State.settings && State.settings.siteName) || '晓林影院');
+
     v.innerHTML = `
       <div class="container page-wrap dl-wrap">
+
+        ${alreadyNotice}
 
         <!-- Hero -->
         <section class="dl-hero">
@@ -4237,7 +4268,10 @@
           <img class="dl-icon" src="./icons/icon-192.png" alt="app">
           <h2 class="dl-name">${siteName} <em>App</em></h2>
           <p class="dl-slogan">装进口袋的私人影院 —— 全屏沉浸 · 收藏云同步 · 大屏同享</p>
-          <div class="dl-hero-cta">${apkBtn}${isIOS ? (dlUrlIos ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 安装 iPhone 版</a>` : '<a class="btn ghost" href="#dl-ios">🍎 我用 iPhone</a>') : ''}</div>
+          <div class="dl-hero-cta">
+            ${apkBtn}
+            ${isIOS ? (dlUrlIos ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 安装 iPhone 版</a>` : '<a class="btn ghost" href="#dl-ios-guide">🍎 iPhone 教程</a>') : ''}
+          </div>
         </section>
 
         <!-- 特性条 -->
@@ -4251,27 +4285,145 @@
             ${isAndroid ? '<i class="dl-ribbon">当前设备</i>' : ''}
             <div class="dl-badge" style="--bd1:#3ddc84;--bd2:#0f9d58">🤖</div>
             <h4>安卓手机 / 平板</h4>
-            <p>独立客户端 · 站点更新免重装<br>覆盖安装不丢收藏与进度</p>
+            <p>独立客户端 · 原画超清秒播<br>覆盖安装不丢收藏与播放进度</p>
             ${apkBtn}
+            <div style="margin-top:10px">
+              <a href="#dl-android-guide" class="btn ghost small" style="font-size:11.5px;padding:4px 10px">⚠️ 报毒/拦截放行指引 ↓</a>
+            </div>
           </div>
           <div class="dl-card">
             <div class="dl-badge" style="--bd1:#8ab4ff;--bd2:#5b7fff">📺</div>
             <h4>电视 / 机顶盒</h4>
             <p>内置 TV 启动器 · 遥控器直用<br>大屏观影最佳选择</p>
-            ${tvBtn || '<span class="dl-soon">TV 包见 Release 列表</span>'}
+            ${tvBtn || '<span class="dl-soon">TV 包可联系管理员获取</span>'}
           </div>
           <div class="dl-card ${isIOS ? 'hot' : ''}" id="dl-ios">
             ${isIOS ? '<i class="dl-ribbon">当前设备</i>' : ''}
             <div class="dl-badge iosb">🍎</div>
             <h4>iPhone / iPad</h4>
+            <div style="margin-bottom:8px">
+              <span class="chip on" style="font-size:11px;background:rgba(91,140,255,.15);color:var(--acc);border-color:rgba(91,140,255,.3)">
+                免签描述文件 · 永不掉签
+              </span>
+            </div>
             ${iosBtn}
-            <p style="font-size:12px;color:var(--dim);margin:6px 0 10px">${dlUrlIos ? '或使用 Safari 免下载添加至主屏幕：' : '轻量网页应用 · 免安装免签名：'}</p>
-            <ol class="dl-timeline">
-              <li><b>Safari</b> 打开本站<span>微信内请点 ⋯ 选「在浏览器打开」</span></li>
-              <li>点底部<b>分享</b>按钮 ⎋<span>方框加向上箭头</span></li>
-              <li>选择<b>添加到主屏幕</b></li>
-              <li>点右上角<b>添加</b> ✅<span>获得独立图标 · 全屏运行</span></li>
-            </ol>
+            <div style="margin-top:8px">
+              <a href="#dl-ios-guide" class="btn ghost small" style="font-size:11.5px;padding:4px 10px">📖 描述文件 4步安装教程 ↓</a>
+            </div>
+          </div>
+        </section>
+
+        <!-- 安卓手机报毒/风险放行指引 -->
+        <section class="dl-guide-card" id="dl-android-guide">
+          <div class="dl-guide-head">
+            <div class="dl-guide-title">
+              <span>⚠️ 安卓手机安装「报毒 / 高风险 / 不安全」放行指引</span>
+            </div>
+            <span style="font-size:12px;color:var(--dim)">纯净官方无毒 · 厂商外部应用保护策略</span>
+          </div>
+          <p class="hint" style="line-height:1.6;margin-bottom:12px">
+            由于本软件为开源与官方独立分发包，未向各大手机厂商缴纳高额上架审核费，部分手机（华为、小米、OPPO、vivo 等）自带的安全管家会弹出【未经安全审核】、【高风险应用】或【恶意软件/报毒】警告。这是手机厂商防止用户安装外部软件的<b>常见保护性拦截</b>，本软件<b>承诺绝无病毒</b>，请按对应机型指引放心继续安装：
+          </p>
+
+          <div class="dl-brand-grid">
+            <div class="dl-brand-box warn">
+              <div class="dl-brand-name">
+                <span>🔴 华为手机 / 鸿蒙系统 (HarmonyOS)</span>
+                <span class="dl-brand-pill">纯净模式拦截</span>
+              </div>
+              <ol class="dl-brand-steps">
+                <li>安装时若弹出「华为纯净模式」阻断安装；</li>
+                <li>点击弹窗中的 <b>【了解风险】</b>（或右上角 ⚙️ 设置）；</li>
+                <li>勾选并点击 <b>【继续安装】</b>（或临时退出纯净模式）；</li>
+                <li>验证您的 <b>锁屏密码 / 指纹</b> 即可顺利安装完成。</li>
+              </ol>
+            </div>
+
+            <div class="dl-brand-box warn">
+              <div class="dl-brand-name">
+                <span>🟠 小米手机 / 红米 (MIUI / HyperOS)</span>
+                <span class="dl-brand-pill">风险应用检测</span>
+              </div>
+              <ol class="dl-brand-steps">
+                <li>安装时若提示「检测到风险 / 未经安全检测」；</li>
+                <li>不要点击取消，点击下方的灰色小字 <b>【了解风险并继续安装】</b>；</li>
+                <li>在二次提示框中勾选 <b>「我已了解可能存在的风险」</b>；</li>
+                <li>点击 <b>【确认 / 继续安装】</b> 即可完成安装。</li>
+              </ol>
+            </div>
+
+            <div class="dl-brand-box warn">
+              <div class="dl-brand-name">
+                <span>🔵 OPPO / vivo / iQOO / 一加</span>
+                <span class="dl-brand-pill">未知来源保护</span>
+              </div>
+              <ol class="dl-brand-steps">
+                <li>若提示「未在应用商店收录」或「发现病毒风险」；</li>
+                <li>点击底部的 <b>【继续安装】</b> 或 <b>【忽略风险并安装】</b>；</li>
+                <li>输入您的 <b>手机锁屏密码</b> 或账号密码授权即可。</li>
+              </ol>
+            </div>
+
+            <div class="dl-brand-box">
+              <div class="dl-brand-name">
+                <span>🌐 各大手机浏览器 (Chrome / UC / 夸克 / QQ)</span>
+                <span class="dl-brand-pill" style="background:rgba(34,197,94,.15);color:#4ade80">文件类型提示</span>
+              </div>
+              <ol class="dl-brand-steps">
+                <li>下载 APK 时提示「此类型文件可能会损害您的设备」；</li>
+                <li>点击 <b>【仍要下载】</b> 或 <b>【确定】</b>；</li>
+                <li>下载完成后在浏览器「下载管理」中点击安装包进行安装。</li>
+              </ol>
+            </div>
+          </div>
+        </section>
+
+        <!-- 苹果 iOS 免签描述文件安装指引 -->
+        <section class="dl-guide-card" id="dl-ios-guide">
+          <div class="dl-guide-head">
+            <div class="dl-guide-title">
+              <span>🍎 苹果 iPhone / iPad 免签证书（配置描述文件）安装教程</span>
+            </div>
+            <span class="chip on" style="font-size:11.5px;background:rgba(91,140,255,.15);color:var(--acc);border-color:rgba(91,140,255,.3)">免证书签名 · 永不掉签 · 独立全屏</span>
+          </div>
+
+          <div style="padding:10px 14px;border-radius:10px;background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.25);font-size:13px;line-height:1.6;margin-bottom:14px">
+            <b style="color:#facc15">⚠️ 苹果用户关键提示：</b>
+            必须使用 iPhone 自带的 <b>Safari 浏览器</b> 访问并安装（微信内请点右上角「⋯」选择「在 Safari 中打开」）。
+          </div>
+
+          <div class="dl-ios-steps-box">
+            <div class="dl-ios-step-row">
+              <div class="dl-ios-step-num">1</div>
+              <div class="dl-ios-step-text">
+                <b>下载描述文件：</b>使用 Safari 打开本页面，点击上方 <b>【🍎 安装 iPhone 客户端】</b> 按钮。
+              </div>
+            </div>
+            <div class="dl-ios-step-row">
+              <div class="dl-ios-step-num">2</div>
+              <div class="dl-ios-step-text">
+                <b>允许下载配置：</b>Safari 弹出提示<i>「此网站正尝试下载一个配置描述文件，您要允许吗？」</i>，点击 <b>【允许】</b>，下载完成后提示<i>「已下载描述文件」</i>，点击【关闭】。
+              </div>
+            </div>
+            <div class="dl-ios-step-row">
+              <div class="dl-ios-step-num">3</div>
+              <div class="dl-ios-step-text">
+                <b>打开手机设置：</b>返回手机主屏幕，打开 <b>【设置】⚙️</b>，在顶部个人账号正下方即可看到 <b>【已下载描述文件】</b>（若未显示，可前往「设置」➔「通用」➔「VPN 与设备管理」）。
+              </div>
+            </div>
+            <div class="dl-ios-step-row">
+              <div class="dl-ios-step-num">4</div>
+              <div class="dl-ios-step-text">
+                <b>点击安装并激活：</b>点击进入描述文件，点击右上角 <b>【安装】</b>，输入您的 <b>iPhone 锁屏密码</b>，随后再次点击底部 <b>【安装】</b>。安装完成后桌面上将自动生成官方 App 图标，点击即可畅享观影！
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--card-br)">
+            <h4 style="font-size:13px;color:var(--dim);margin-bottom:6px">💡 备用轻量免安装方案（Safari 添加到主屏幕 PWA）：</h4>
+            <p class="hint" style="margin:0;font-size:12px;line-height:1.7">
+              在 Safari 中点底部中间的 <b>分享按钮 ⎋</b> ➔ 下滑选择 <b>【添加到主屏幕】</b> ➔ 点右上角 <b>【添加】</b>，同样可以获得与 App 完全一致的独立全屏体验！
+            </p>
           </div>
         </section>
 
@@ -4280,13 +4432,14 @@
           <h4>🛠️ 安装小贴士</h4>
           <ul class="dl-steps">
             <li>安卓提示「未知来源」：设置中允许，或选「仅本次允许」</li>
-            <li>华为 / 鸿蒙拦截时选择「继续安装」即可</li>
+            <li>华为 / 鸿蒙拦截时选择「继续安装」即可，不会影响系统安全</li>
             <li>覆盖升级无需卸载：登录账号后收藏与观看进度云端同步</li>
-            <li>iOS 卸载主屏图标即等于卸载，随时可重新添加</li>
+            <li>iOS 免签描述文件直接在桌面长按即可卸载，随时可重新添加</li>
           </ul>
         </section>
       </div>`;
-    $$('a[href*="/APP/"], a[href*=".apk"]', v).forEach((a) => {
+
+    $$('a[href*="/APP/"], a[href*=".apk"], a[href*=".mobileconfig"]', v).forEach((a) => {
       a.addEventListener('click', () => {
         store.set('appDownloaded', true);
         buildNav();
@@ -5259,6 +5412,47 @@
             </div>
             <div id="usersTable" class="table-scroll" style="margin-top:10px"></div>
             <div id="userLogDetail" style="margin-top:14px"></div>
+          </div>
+
+          <!-- 📢 全网站内消息广播推送 (全员直达) -->
+          <div class="admin-card" style="margin-top:16px">
+            <h3>📢 全网站内消息广播推送 (全员推送)</h3>
+            <p class="hint">
+              向全站所有已注册的会员批量发送站内消息。用户登录后将在「消息」选项卡和底部导航收到红点与未读提醒。<br>
+              注：新用户注册时的「自动赠送福利欢迎信」依然<b>全自动触发必发</b>，不受此广播功能影响。
+            </p>
+            <div style="margin-top:12px;display:flex;flex-direction:column;gap:12px">
+              <div>
+                <label class="field-label">📢 广播消息标题 <span style="color:var(--danger)">*</span></label>
+                <input class="field-input" id="broadcastTitleInput" placeholder="例如：【系统公告】4K超清福利新源上线 / 周末观影特权升级" maxlength="60">
+              </div>
+              <div>
+                <label class="field-label">📝 广播正文内容 <span style="color:var(--danger)">*</span></label>
+                <textarea class="field-input" id="broadcastContentInput" rows="4" placeholder="在此输入要向全站所有会员广播的消息正文...&#10;支持换行排版与表情符号"></textarea>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px">
+                <div>
+                  <label class="field-label">🔗 动作按钮文字 (选填)</label>
+                  <input class="field-input" id="broadcastActionTextInput" placeholder="例如：立即前往体验 / 了解详情">
+                </div>
+                <div>
+                  <label class="field-label">🌐 动作跳转链接 (选填，站内 hash 或外部链接)</label>
+                  <input class="field-input" id="broadcastActionUrlInput" placeholder="例如：#/adult 或 #/download">
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:center;margin-top:4px;flex-wrap:wrap">
+                <button class="btn primary" id="sendBroadcastBtn" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700">
+                  🚀 立即向全网会员广播推送
+                </button>
+                <button class="btn ghost" id="refreshBroadcastHistoryBtn">🔄 刷新广播历史</button>
+              </div>
+            </div>
+
+            <!-- 历史广播记录 -->
+            <div style="margin-top:16px;border-top:1px dashed var(--card-br);padding-top:12px">
+              <h4 style="font-size:13.5px;color:var(--dim);margin-bottom:8px">📋 近期广播推送记录</h4>
+              <div id="broadcastHistoryList" style="font-size:12.5px;color:var(--dim)">加载中…</div>
+            </div>
           </div>`;
         $('#requireLoginSwitch').addEventListener('change', async (e) => {
           const on = e.target.checked;
@@ -5398,6 +5592,69 @@
         }
         $('#loadUsersBtn').addEventListener('click', loadUsers);
         loadUsers();
+
+        async function loadBroadcastHistory() {
+          const el = $('#broadcastHistoryList');
+          if (!el) return;
+          try {
+            const res = await API.adminBroadcastHistory();
+            const list = (res && res.history) || [];
+            if (!list.length) {
+              el.innerHTML = '<span class="hint">暂无全网广播推送记录</span>';
+              return;
+            }
+            el.innerHTML = list.map((b) => `
+              <div style="padding:10px 12px;margin-bottom:8px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid var(--card-br)">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+                  <b style="color:var(--txt)">${esc(b.title)}</b>
+                  <time style="font-size:11.5px;color:var(--dim)">${fmtDateTime(b.createdAt)} · 成功推送 ${b.recipientCount || 0} 人</time>
+                </div>
+                <div style="margin-top:4px;color:var(--dim);font-size:12px;white-space:pre-wrap;line-height:1.5">${esc(b.content)}</div>
+                ${b.actionText ? `<div style="margin-top:6px;font-size:11.5px"><span class="chip on">${esc(b.actionText)} ➔ ${esc(b.actionUrl || '')}</span></div>` : ''}
+              </div>
+            `).join('');
+          } catch (e) {
+            el.innerHTML = `<span class="hint" style="color:var(--danger)">加载历史失败：${esc(e.message)}</span>`;
+          }
+        }
+
+        $('#refreshBroadcastHistoryBtn') && $('#refreshBroadcastHistoryBtn').addEventListener('click', loadBroadcastHistory);
+
+        $('#sendBroadcastBtn') && $('#sendBroadcastBtn').addEventListener('click', async () => {
+          const title = ($('#broadcastTitleInput').value || '').trim();
+          const content = ($('#broadcastContentInput').value || '').trim();
+          const actionText = ($('#broadcastActionTextInput').value || '').trim();
+          const actionUrl = ($('#broadcastActionUrlInput').value || '').trim();
+
+          if (!title) return toast('请输入广播消息标题', 'err');
+          if (!content) return toast('请输入广播正文内容', 'err');
+
+          if (!confirm(`确认向全站所有已注册会员推送此广播？\n\n标题：${title}\n\n该操作不可撤回！`)) return;
+
+          const btn = $('#sendBroadcastBtn');
+          btn.disabled = true;
+          btn.textContent = '⏳ 正在群发推送中…';
+          try {
+            const res = await API.adminBroadcastMessage(title, content, actionText, actionUrl);
+            if (res.ok) {
+              toast(`🎉 全网广播推送成功！共推送至 ${res.sentCount || 0} 位会员`, 'ok');
+              $('#broadcastTitleInput').value = '';
+              $('#broadcastContentInput').value = '';
+              $('#broadcastActionTextInput').value = '';
+              $('#broadcastActionUrlInput').value = '';
+              loadBroadcastHistory();
+            } else {
+              toast('推送失败：' + (res.error || '未知错误'), 'err');
+            }
+          } catch (e) {
+            toast('推送请求失败：' + e.message, 'err');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = '🚀 立即向全网会员广播推送';
+          }
+        });
+
+        loadBroadcastHistory();
       }
 
       /* ---------------- 📡 采集源配置 ---------------- */
@@ -5968,16 +6225,13 @@
               </div>
             </div>
 
-            <!-- 区块 2：待发布版本草稿区（可自动提取 + 全字段自由编辑） -->
+            <!-- 区块 2：待发布版本手动编辑与推送区 -->
             <div style="border-top:1px dashed var(--card-br);padding-top:16px;margin-top:16px">
               <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
-                <h4 style="margin:0;font-size:14px;color:var(--acc)">📝 待发布新版本（草稿与自定义编写区）</h4>
-                <button type="button" class="btn ghost small" id="autoFetchReleaseBtn" style="border-color:var(--acc);color:var(--acc)">
-                  🤖 自动从 GitHub / 站内提取最新版本
-                </button>
+                <h4 style="margin:0;font-size:14px;color:var(--acc)">📝 待发布新版本（手动设置与更新内容编写）</h4>
               </div>
               <p class="hint" style="margin-bottom:12px">
-                提示：提取后所有字段<b>完全可自由编辑</b>。如果自动获取的说明不充分，请直接在下方文本框中手动增补详细内容。
+                💡 <b>手动更新推送机制</b>：请在本地自行编译打包并将安装包覆盖上传至 <code>/APP</code> 目录（或填写上方自定义下载地址），然后在下方填写最新版本号与更新说明。点击<b>【🚀 确认正式发布更新给客户端】</b>即刻向客户端触发全网弹窗更新！勾选<b>【强制更新】</b>则客户端必须更新才能继续使用。
               </p>
 
               <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:12px">
@@ -5996,7 +6250,7 @@
 
               <label style="display:flex;align-items:center;gap:10px;margin:14px 0;cursor:pointer">
                 <span class="switch"><input type="checkbox" id="appDraftForceSw" ${draftForce ? 'checked' : ''}><span class="track"></span></span>
-                <b>强制更新</b><span style="color:var(--dim);font-size:12px">（勾选后客户端必须更新才能继续观看影片）</span>
+                <b>强制更新</b><span style="color:var(--danger);font-size:12.5px;font-weight:700">（勾选后客户端必须更新才能继续观看影片，无法跳过）</span>
               </label>
 
               <div style="display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap">
@@ -6006,51 +6260,6 @@
                 <button class="btn ghost" id="saveDraftAppVerBtn" type="button">
                   💾 仅保存为草稿（不向客户端发布）
                 </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- 区块 3：一键构建 GitHub APK 与 Docker 镜像 -->
-          <div class="admin-card" style="margin-top:16px">
-            <h3>📦 一键构建 GitHub APK 与 Docker 镜像（双重任务发布）</h3>
-            <div style="margin:10px 0;padding:12px 16px;border-radius:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25);font-size:13px;line-height:1.6">
-              <b style="color:var(--ok)">🛡️ 安全确认构建机制：</b>
-              系统已优化构建流程，代码推送到 main 不再盲目自动打包。请先在网页端测试浏览正常后，再点击下方确认按钮触发构建！<br>
-              <b>构建将同时执行两大任务：</b><br>
-              ① <b>Android APK 编译</b>：自动打包手机端与电视版 APK，发布至 GitHub Releases 并写入 <code>/APP</code> 目录；<br>
-              ② <b>Docker 镜像构建</b>：自动编译多架构镜像并推送至 GitHub Packages (<code>ghcr.io</code>)。
-            </div>
-
-            <!-- GitHub Token 状态提示 / 快捷输入 -->
-            ${s.hasGithubToken ? `
-              <div style="margin:12px 0;padding:10px 14px;border-radius:10px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);font-size:13px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-                <span style="color:#4ade80">🟢 <b>GitHub Token 已就绪</b>：目标仓库 <code>${esc(s.githubRepoFull || 'xiaolin1991/dianying')}</code> (PAT: <code>${esc(s.githubTokenMasked || '已配置')}</code>)</span>
-                <button type="button" class="btn ghost small" id="jumpToGhSyncBtn" style="padding:2px 10px;font-size:12px">⚙️ 管理 GitHub 仓库与同步</button>
-              </div>
-            ` : `
-              <div style="margin:12px 0;padding:12px 14px;border-radius:10px;background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.3);font-size:13px">
-                <div style="font-weight:700;color:#facc15;margin-bottom:6px">⚠️ 尚未配置 GitHub Token（直接在此输入即可，无需前往 Cloudflare）</div>
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  <input class="field-input" id="quickGhTokenInput" type="password" placeholder="直接粘贴以 ghp_ 开头的 Personal Access Token" style="flex:1;min-width:240px">
-                  <button type="button" class="btn primary small" id="quickSaveGhTokenBtn" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);white-space:nowrap">💾 保存 Token</button>
-                </div>
-                <div style="font-size:12px;color:var(--dim);margin-top:6px">提示：可在 GitHub ➔ Settings ➔ Developer settings ➔ Personal access tokens 生成（需勾选 repo 与 workflow 权限）。保存后无需在 Cloudflare 配置环境变量！</div>
-              </div>
-            `}
-
-            <div style="margin-top:12px">
-              <label class="field-label">本次构建更新说明（选填，将作为 Release 说明写入）</label>
-              <input class="field-input" id="apkBuildChangelogInput" placeholder="例如：优化私密福利双栏体验、会员中心UI全面升级" />
-              <div style="display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap">
-                <button class="btn primary" id="dispatchBuildApkBtn" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);font-weight:700" type="button">
-                  🚀 确认网页正常，一键构建 APK + Docker 镜像
-                </button>
-                <a class="btn ghost" href="https://github.com/${esc(s.githubRepoFull || 'xiaolin1991/dianying')}/actions/workflows/android.yml" target="_blank" rel="noopener">
-                  📋 前往 GitHub Actions 查看构建进度
-                </a>
-                <a class="btn ghost" href="https://github.com/${esc(s.githubRepoFull || 'xiaolin1991/dianying')}/pkgs/container/dianying" target="_blank" rel="noopener">
-                  🐳 查看 GHCR Docker 镜像
-                </a>
               </div>
             </div>
           </div>`;
@@ -6124,28 +6333,6 @@
             toast('下载与访问控制已保存', 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
-
-        // 自动从 GitHub Releases / Manifest 提取最新版本信息填充草稿
-        const autoFetchBtn = $('#autoFetchReleaseBtn');
-        if (autoFetchBtn) {
-          autoFetchBtn.addEventListener('click', async () => {
-            autoFetchBtn.disabled = true;
-            autoFetchBtn.textContent = '⏳ 正在提取…';
-            try {
-              const rel = await API.adminFetchAppRelease();
-              if (!rel || !rel.ok) throw new Error((rel && rel.error) || '提取失败');
-              if ($('#appDraftCodeInput') && rel.versionCode) $('#appDraftCodeInput').value = rel.versionCode;
-              if ($('#appDraftNameInput') && rel.versionName) $('#appDraftNameInput').value = rel.versionName;
-              if ($('#appDraftChangelogInput') && rel.changelog) $('#appDraftChangelogInput').value = rel.changelog;
-              toast(`已提取最新版本 v${rel.versionName} (Code: ${rel.versionCode})，您可在此自由修改编写说明！`, 'ok');
-            } catch (err) {
-              toast('提取失败：' + err.message, 'err');
-            } finally {
-              autoFetchBtn.disabled = false;
-              autoFetchBtn.textContent = '🤖 自动从 GitHub / 站内提取最新版本';
-            }
-          });
-        }
 
         // 保存草稿（不向客户端下发更新）
         $('#saveDraftAppVerBtn') && $('#saveDraftAppVerBtn').addEventListener('click', async () => {
@@ -6225,57 +6412,6 @@
           } catch (err) { toast('操作失败：' + err.message, 'err'); }
         });
 
-        // 一键构建 APK + Docker 镜像
-        $('#jumpToGhSyncBtn') && $('#jumpToGhSyncBtn').addEventListener('click', () => {
-          admTab = 'backup';
-          $$('#admSide .adm-nav-item').forEach((x) => x.classList.toggle('on', x.dataset.tab === admTab));
-          renderAdmTab(lastSettings);
-        });
-
-        $('#quickSaveGhTokenBtn') && $('#quickSaveGhTokenBtn').addEventListener('click', async () => {
-          const tok = ($('#quickGhTokenInput') && $('#quickGhTokenInput').value.trim()) || '';
-          if (!tok) return toast('请先输入有效的 GitHub Token', 'err');
-          try {
-            await API.adminSaveSettings({ githubToken: tok });
-            const fresh = await API.adminGetSettings();
-            lastSettings = fresh;
-            State.settings = { ...State.settings, ...fresh };
-            toast('GitHub Token 已保存，可直接点击下方按钮一键打包！', 'ok');
-            renderAdmTab(fresh);
-          } catch (e) { toast('保存失败：' + e.message, 'err'); }
-        });
-
-        $('#dispatchBuildApkBtn') && $('#dispatchBuildApkBtn').addEventListener('click', async () => {
-          const btn = $('#dispatchBuildApkBtn');
-          const changelog = ($('#apkBuildChangelogInput') && $('#apkBuildChangelogInput').value.trim()) || '';
-          const quickTok = ($('#quickGhTokenInput') && $('#quickGhTokenInput').value.trim()) || '';
-          if (!s.hasGithubToken && quickTok) {
-            try {
-              await API.adminSaveSettings({ githubToken: quickTok });
-              const fresh = await API.adminGetSettings();
-              lastSettings = fresh;
-              s = fresh;
-            } catch (e) { /* ignore */ }
-          }
-          if (!confirm('已确认当前网页版功能与浏览一切正常，确认立即触发 GitHub Actions 打包构建 APK 与 Docker 镜像？')) return;
-          btn.disabled = true;
-          btn.textContent = '⏳ 正在向 GitHub 发送调度指令...';
-          try {
-            const res = await API.adminDispatchBuildApk(changelog);
-            if (res.ok) {
-              toast(res.msg || '🎉 APK 与 Docker 镜像构建任务已触发！', 'ok');
-            } else if (res.needToken) {
-              alert('【提示】' + res.error + '\n\n您可以直接前往 GitHub Actions 页面点击「Run workflow」手动触发：\nhttps://github.com/' + res.repo + '/actions/workflows/android.yml');
-            } else {
-              toast('触发失败：' + (res.error || '未知错误'), 'err');
-            }
-          } catch (e) {
-            toast('请求失败：' + e.message, 'err');
-          } finally {
-            btn.disabled = false;
-            btn.textContent = '🚀 确认网页正常，一键构建 APK + Docker 镜像';
-          }
-        });
       }
 
       /* ---------------- 🗄️ 数据与 GitHub 同步 ---------------- */

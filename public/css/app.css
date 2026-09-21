@@ -454,6 +454,70 @@ html, body { overflow-x: hidden; }
 .dl-faq { margin-top: 16px; }
 .dl-faq h4 { margin-bottom: 8px; }
 
+/* ---- 下载页安装指引卡片增强 ---- */
+.dl-notice-banner {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(34, 197, 94, .12); border: 1px solid rgba(34, 197, 94, .35);
+  border-radius: 12px; padding: 12px 16px; margin-bottom: 16px;
+  font-size: 13.5px; color: #4ade80; line-height: 1.5;
+}
+.dl-guide-card {
+  background: var(--card); border: 1px solid var(--card-br);
+  border-radius: 16px; padding: 20px; margin-top: 18px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.15);
+}
+.dl-guide-head {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed var(--card-br);
+}
+.dl-guide-title {
+  font-size: 16px; font-weight: 700; color: var(--txt);
+  display: flex; align-items: center; gap: 8px;
+}
+.dl-brand-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin-top: 12px;
+}
+.dl-brand-box {
+  background: rgba(255, 255, 255, .025); border: 1px solid var(--card-br);
+  border-radius: 12px; padding: 14px;
+}
+.dl-brand-box.warn {
+  border-color: rgba(234, 179, 8, .35); background: rgba(234, 179, 8, .04);
+}
+.dl-brand-name {
+  font-size: 14px; font-weight: 700; margin-bottom: 8px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.dl-brand-pill {
+  font-size: 11px; padding: 2px 8px; border-radius: 99px;
+  background: rgba(234, 179, 8, .15); color: #facc15; font-weight: 600;
+}
+.dl-brand-steps {
+  margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--dim); line-height: 1.75;
+}
+.dl-brand-steps b { color: var(--txt); }
+.dl-brand-steps mark {
+  background: rgba(225, 29, 72, .18); color: #f43f5e; padding: 1px 4px; border-radius: 4px; font-weight: 600;
+}
+.dl-ios-steps-box {
+  background: rgba(91, 140, 255, .04); border: 1px solid rgba(91, 140, 255, .25);
+  border-radius: 14px; padding: 16px; margin-top: 10px;
+}
+.dl-ios-step-row {
+  display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px;
+}
+.dl-ios-step-row:last-child { margin-bottom: 0; }
+.dl-ios-step-num {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--acc), var(--acc2));
+  color: #fff; font-size: 12px; font-weight: 700;
+  display: grid; place-items: center; flex-shrink: 0; margin-top: 2px;
+}
+.dl-ios-step-text {
+  font-size: 13px; line-height: 1.6; color: var(--dim);
+}
+.dl-ios-step-text b { color: var(--txt); }
+
 /* ---- APP下载引导弹窗(精致版) ---- */
 @keyframes promoIn { from { opacity: 0; transform: translateY(26px) scale(.96); } to { opacity: 1; transform: none; } }
 .promo-box {

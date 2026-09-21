@@ -88,12 +88,6 @@
       jfetch('/api/admin/sync-app', { method: 'POST' }, 120000),
     adminFetchAppRelease: () =>
       jfetch('/api/admin/fetch-app-release', { method: 'POST' }, 20000),
-    adminDispatchBuildApk: (changelog) =>
-      jfetch('/api/admin/dispatch-build-apk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ changelog: changelog || '' }),
-      }, 20000),
     adminGithubTest: (params) =>
       jfetch('/api/admin/github-test', {
         method: 'POST',
@@ -223,5 +217,12 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ u, ids, all: Boolean(all) }),
       }, 10000),
+    adminBroadcastMessage: (title, content, actionText, actionUrl) =>
+      jfetch('/api/admin/messages/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content, actionText, actionUrl }),
+      }, 30000),
+    adminBroadcastHistory: () => jfetch('/api/admin/messages/broadcast-history', {}, 10000),
   };
 })();
