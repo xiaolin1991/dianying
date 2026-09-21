@@ -58,6 +58,9 @@ const DEFAULT_SETTINGS = {
   downloadUrl: '',      // 自定义手机 APK 地址(仅 custom 模式生效)
   downloadUrlTvMode: 'off', // off=不提供 | fixed=站内最新 | custom=自定义
   downloadUrlTv: '',    // 自定义 TV APK 地址(仅 custom 模式生效)
+  downloadUrlIosMode: 'off', // off=不提供 | custom=自定义
+  downloadUrlIos: '',   // 自定义 iPhone / iOS 客户端安装或下载地址(蒲公英/TestFlight/链接)
+  regGiftAdultMonths: 1, // 新注册用户自动赠送私密福利时长(月数, 0=不赠送, 1=1个月, 2=2个月, 3=3个月)
   // App 版本发布控制 (必须管理员点击【确认正式发布】后才向客户端下发弹窗)
   appVersionActive: false, // 线上客户端是否激活推送
   appPublishedCode: 0,     // 正式向客户端下发的最新 versionCode
@@ -76,7 +79,7 @@ const DEFAULT_SETTINGS = {
   appForceUpdate: false, // 强制更新: App 内不可关闭弹窗
   appChangelog: '',      // 手动模式更新说明
   appVersionAuto: true,  // true=从 /APP/manifest.json 自动识别版本(推荐)
-  adminPath: '',        // 后台入口自定义路径段(#/<adminPath>), 空则默认 'admin'
+  adminPath: '',        // 后台入口自定义路径段(#/<adminPath>), 空则默认 'xiaolin1991'
   playerOptimize: false, // 播放加载优化: false=保持现状, true=更快起播的 HLS 参数
   wmEnabled: false,      // 播放器 PNG 水印开关
   wmMode: 'corner',      // corner=右下角常显(播放中) | center=正中短暂显示
@@ -328,6 +331,10 @@ function tvDlMode(s) {
   if (m === 'fixed' || m === 'custom') return m;
   return 'off';
 }
+function iosDlMode(s) {
+  const m = s && s.downloadUrlIosMode;
+  return m === 'custom' ? 'custom' : (s && s.downloadUrlIos ? 'custom' : 'off');
+}
 /** 对外生效的下载地址(固定模式忽略自定义字段) */
 function effectiveDownloadUrls(s) {
   const phone = phoneDlMode(s) === 'custom'
@@ -337,7 +344,8 @@ function effectiveDownloadUrls(s) {
   const tm = tvDlMode(s);
   if (tm === 'fixed') tv = FIXED_TV_APK;
   else if (tm === 'custom') tv = String(s.downloadUrlTv || '').trim();
-  return { downloadUrl: phone, downloadUrlTv: tv };
+  const ios = String((s && s.downloadUrlIos) || '').trim();
+  return { downloadUrl: phone, downloadUrlTv: tv, downloadUrlIos: ios };
 }
 
 const APP_MANIFEST_KEY = 'app_manifest';
@@ -781,6 +789,14 @@ async function saveSettings(env, patch) {
     next.downloadUrlTvMode = (m === 'fixed' || m === 'custom') ? m : 'off';
   }
   if (typeof patch.downloadUrlTv === 'string') next.downloadUrlTv = patch.downloadUrlTv.trim().slice(0, 300);
+  if (typeof patch.downloadUrlIosMode === 'string') {
+    next.downloadUrlIosMode = patch.downloadUrlIosMode === 'custom' ? 'custom' : 'off';
+  }
+  if (typeof patch.downloadUrlIos === 'string') next.downloadUrlIos = patch.downloadUrlIos.trim().slice(0, 300);
+  if (patch.regGiftAdultMonths !== undefined) {
+    const rm = Math.max(0, Math.min(12, Math.round(Number(patch.regGiftAdultMonths)) || 0));
+    next.regGiftAdultMonths = rm;
+  }
 
   // App 版本发布控制 (发布 vs 草稿)
   if (typeof patch.appVersionActive === 'boolean') next.appVersionActive = patch.appVersionActive;
@@ -1310,6 +1326,39 @@ async function saveFavs(env, username, list) {
   })).filter((f) => f.key && f.id);
   await storagePut(env, 'favs:' + username, JSON.stringify(clean));
 }
+
+/** 判断用户私密福利权限是否有效(支持永久与到期时间) */
+function isUserAdultAllowed(rec) {
+  if (!rec || !rec.adultAllowed) return false;
+  if (rec.adultExpireAt && Number(rec.adultExpireAt) > 0) {
+    return Date.now() < Number(rec.adultExpireAt);
+  }
+  return true;
+}
+
+/* ---- 站内消息服务端存储(D1/KV) ---- */
+async function loadMessages(env, username) {
+  if (!hasStorage(env)) return [];
+  try {
+    const raw = await storageGet(env, 'umsg:' + username);
+    const p = raw ? JSON.parse(raw) : [];
+    return Array.isArray(p) ? p : [];
+  } catch (e) { return []; }
+}
+async function saveMessages(env, username, list) {
+  if (!hasStorage(env)) return;
+  const clean = (Array.isArray(list) ? list : []).slice(0, 100).map((m) => ({
+    id: String(m.id || Date.now().toString(36)),
+    title: String(m.title || '').slice(0, 100),
+    content: String(m.content || '').slice(0, 2000),
+    createdAt: Number(m.createdAt || Date.now()),
+    read: Boolean(m.read),
+    type: String(m.type || 'system').slice(0, 30),
+    actionText: String(m.actionText || '').slice(0, 50),
+    actionUrl: String(m.actionUrl || '').slice(0, 200),
+  }));
+  await storagePut(env, 'umsg:' + username, JSON.stringify(clean));
+}
 let entrySeq = 0;
 function newEntryId() { return Date.now().toString(36) + '-' + (++entrySeq % 1296).toString(36); }
 /** 用户侧历史条目脱敏输出 */
@@ -1582,8 +1631,11 @@ export default {
           appPromoEnabled: s.appPromoEnabled !== false,
           downloadUrl: dl.downloadUrl,
           downloadUrlTv: dl.downloadUrlTv,
+          downloadUrlIos: dl.downloadUrlIos || '',
           downloadUrlMode: phoneDlMode(s),
           downloadUrlTvMode: tvDlMode(s),
+          downloadUrlIosMode: iosDlMode(s),
+          regGiftAdultMonths: Number(s.regGiftAdultMonths == null ? 1 : s.regGiftAdultMonths),
           appVersionActive: !!s.appVersionActive,
           appVersionAuto: ver.appVersionAuto,
           appVersionCode: outVerCode,
@@ -1605,7 +1657,7 @@ export default {
       if (path === '/api/admin-path' && request.method === 'GET') {
         const p = String(url.searchParams.get('p') || '').trim().toLowerCase();
         const s = await getSettings(env);
-        return json({ ok: p === (s.adminPath || 'admin') });
+        return json({ ok: p === (s.adminPath || 'xiaolin1991') });
       }
 
       /* ---- 源列表(网站常规页面仅保留正常源；成人源独立归入 adultSources 仅登录会员可见) ---- */
@@ -1627,8 +1679,8 @@ export default {
           } else if (uname) {
             adultForYou = true;
             const rec = await getUserRecord(env, uname);
-            // 需明确付费/激活码解锁或管理员开通(adultAllowed === true)
-            adultUnlocked = Boolean(rec && rec.adultAllowed === true);
+            // 需明确付费/激活码解锁或管理员开通或赠送期内(支持到期检查)
+            adultUnlocked = isUserAdultAllowed(rec);
           }
           // 仅已登录用户或管理员可获取私密福利源元数据(游客完全不可见)
           if (adultForYou) {
@@ -1715,7 +1767,7 @@ export default {
           if (isAdmin) adultUnlocked = true;
           else if (uname) {
             const rec = await getUserRecord(env, uname);
-            adultUnlocked = Boolean(rec && rec.adultAllowed === true);
+            adultUnlocked = isUserAdultAllowed(rec);
           }
         }
 
@@ -1923,16 +1975,40 @@ export default {
         if (password.length < 6) return json({ error: '密码至少 6 位' }, 400);
         if (await getUserRecord(env, username)) return json({ error: '该用户名已被注册' }, 409);
         const salt = randomSalt();
+        const giftMonths = Math.max(0, Math.min(12, Number(settings.regGiftAdultMonths == null ? 1 : settings.regGiftAdultMonths) || 0));
+        const now = Date.now();
+        let adultAllowed = false;
+        let adultExpireAt = 0;
+        if (giftMonths > 0) {
+          adultAllowed = true;
+          adultExpireAt = now + giftMonths * 30 * 86400 * 1000;
+        }
         await putUserRecord(env, {
           u: username,
           hash: await sha256Hex(salt + password),
           salt,
-          createdAt: Date.now(),
-          lastLoginAt: Date.now(),
+          createdAt: now,
+          lastLoginAt: now,
           lastLoginIp: clientIp(request),
           lastLoginIpGeo: geoOf(request),
-          adultAllowed: false, // 新注册用户默认未解锁私密福利, 需付费/卡密解锁或管理员开通
+          adultAllowed,
+          adultExpireAt,
         });
+        if (giftMonths > 0) {
+          const expDate = new Date(adultExpireAt);
+          const expStr = `${expDate.getFullYear()}-${String(expDate.getMonth()+1).padStart(2,'0')}-${String(expDate.getDate()).padStart(2,'0')}`;
+          const welcomeMsg = {
+            id: 'msg-' + now,
+            title: `🎁 新人特权：私密福利专区已自动获赠（${giftMonths} 个月）`,
+            content: `亲爱的 ${username}：\n感谢注册加入晓林影视！系统已自动为您激活「私密福利专区」VIP特权。\n• 赠送时长：${giftMonths} 个月\n• 有效期至：${expStr}\n\n【如何打开与观看】：\n1. 手机端：直接点击底部导航栏中的「私密福利」标签即可进入。\n2. 电脑端：点击顶栏分类中的「私密福利」或「影视源」专区即可浏览。\n3. 换源播放：播放页或影视源列表中带有 🔞 标识的私密源已全部为您解锁，无需卡密即可直接播放。\n祝您观影愉快！`,
+            createdAt: now,
+            read: false,
+            type: 'gift',
+            actionText: '立即前往私密福利',
+            actionUrl: '#/browse/' + encodeURIComponent('私密福利'),
+          };
+          await saveMessages(env, username, [welcomeMsg]);
+        }
         const token = await makeUserToken(env, username);
         return json({ ok: true, username }, 200, {
           'Set-Cookie': `${USER_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${USER_SESSION_TTL}`,
@@ -1985,6 +2061,7 @@ export default {
         if (!rec) return json({ error: '用户不存在' }, 404);
         rec.adultAllowed = true;
         rec.adultUnlockedAt = Date.now();
+        rec.adultExpireAt = null; // 卡密解锁设为长期/按管理员规则
         await putUserRecord(env, rec);
         return json({ ok: true, message: '🎉 私密福利VIP特权已成功激活解锁！可畅享专区全部影片在线播放。' });
       }
@@ -2005,17 +2082,59 @@ export default {
         await saveFavs(env, username, list);
         return json({ ok: true, count: Math.min(list.length, 200) });
       }
+      /* ---- 站内消息列表与未读数 ---- */
+      if (path === '/api/user/messages' && request.method === 'GET') {
+        const username = await currentUser(request, env, url);
+        if (!username) return json({ error: '请先登录' }, 401);
+        const list = await loadMessages(env, username);
+        const unreadCount = list.filter((m) => !m.read).length;
+        return json({ ok: true, messages: list, unreadCount });
+      }
+      /* ---- 标为已读 ---- */
+      if (path === '/api/user/messages/read' && request.method === 'POST') {
+        const username = await currentUser(request, env, url);
+        if (!username) return json({ error: '请先登录' }, 401);
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const list = await loadMessages(env, username);
+        const targetId = body.id ? String(body.id) : '';
+        for (const m of list) {
+          if (!targetId || m.id === targetId) m.read = true;
+        }
+        await saveMessages(env, username, list);
+        const unreadCount = list.filter((m) => !m.read).length;
+        return json({ ok: true, unreadCount });
+      }
+      /* ---- 删除消息 ---- */
+      if (path === '/api/user/messages/delete' && request.method === 'POST') {
+        const username = await currentUser(request, env, url);
+        if (!username) return json({ error: '请先登录' }, 401);
+        let body = {};
+        try { body = await request.json(); } catch (e) {}
+        const targetId = String(body.id || '');
+        let list = await loadMessages(env, username);
+        if (targetId) {
+          list = list.filter((m) => m.id !== targetId);
+          await saveMessages(env, username, list);
+        }
+        const unreadCount = list.filter((m) => !m.read).length;
+        return json({ ok: true, unreadCount });
+      }
       if (path === '/api/user/me' && request.method === 'GET') {
         const username = await currentUser(request, env, url);
         if (!username) return json({ me: null });
         const rec = await getUserRecord(env, username);
+        const msgs = await loadMessages(env, username);
+        const unreadMsgCount = msgs.filter((m) => !m.read).length;
         return json({
           me: {
             username,
             createdAt: rec ? rec.createdAt : null,
             lastLoginAt: rec ? rec.lastLoginAt : null,
             lastLoginIp: rec ? rec.lastLoginIp : '',
-            adultAllowed: Boolean(rec && rec.adultAllowed === true),
+            adultAllowed: isUserAdultAllowed(rec),
+            adultExpireAt: rec && rec.adultExpireAt ? rec.adultExpireAt : null,
+            unreadMsgCount,
           },
         });
       }
@@ -2217,6 +2336,10 @@ export default {
             downloadUrlTvMode: tvDlMode(s),
             downloadUrlTv: s.downloadUrlTv || '',
             downloadUrlTvEffective: dl.downloadUrlTv,
+            downloadUrlIosMode: iosDlMode(s),
+            downloadUrlIos: s.downloadUrlIos || '',
+            downloadUrlIosEffective: dl.downloadUrlIos,
+            regGiftAdultMonths: Number(s.regGiftAdultMonths == null ? 1 : s.regGiftAdultMonths),
             // App 版本发布控制 (线上发布状态 vs 待发布草稿)
             appVersionActive: !!s.appVersionActive,
             appPublishedCode: Math.max(0, Math.round(Number(s.appPublishedCode || 0))),
@@ -2681,7 +2804,8 @@ export default {
               lastLoginAt: rec ? rec.lastLoginAt : null,
               lastLoginIp: rec ? rec.lastLoginIp : '',
               lastLoginIpGeo: rec ? (rec.lastLoginIpGeo || '') : '',
-              adultAllowed: rec ? rec.adultAllowed === true : false,
+              adultAllowed: isUserAdultAllowed(rec),
+              adultExpireAt: rec && rec.adultExpireAt ? rec.adultExpireAt : null,
               watchSec: hist.watchSec || 0,
               totalItems: hist.items.length,
               activeItems: hist.items.filter((it) => !it.delUser).length,
@@ -2698,8 +2822,15 @@ export default {
           const rec = await getUserRecord(env, u);
           if (!rec) return json({ error: '用户不存在' }, 404);
           rec.adultAllowed = Boolean(body.allowed);
+          if (body.months && Number(body.months) > 0) {
+            rec.adultExpireAt = Date.now() + Number(body.months) * 30 * 86400 * 1000;
+          } else if (body.allowed === false) {
+            rec.adultExpireAt = null;
+          } else if (body.allowed === true && body.clearExpire) {
+            rec.adultExpireAt = null;
+          }
           await putUserRecord(env, rec);
-          return json({ ok: true, u, adultAllowed: rec.adultAllowed });
+          return json({ ok: true, u, adultAllowed: isUserAdultAllowed(rec), adultExpireAt: rec.adultExpireAt || null });
         }
         /* ---- 用户管理: 单用户完整记录(含用户已删) ---- */
         if (path === '/api/admin/user-log' && request.method === 'GET') {

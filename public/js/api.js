@@ -178,6 +178,19 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
       }, 10000),
+    userMessages: () => jfetch('/api/user/messages', {}, 10000),
+    userReadMessage: (id) =>
+      jfetch('/api/user/messages/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: id || '' }),
+      }, 8000),
+    userDeleteMessage: (id) =>
+      jfetch('/api/user/messages/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: id || '' }),
+      }, 8000),
 
     adminUsers: () => jfetch('/api/admin/users', {}, 15000),
     checkAdminPath: (p) => jfetch('/api/admin-path?p=' + encodeURIComponent(p || ''), {}, 8000),

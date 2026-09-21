@@ -221,6 +221,10 @@
     config: null,     // { adultEnabled, total, count, sources }
     liveCache: null,
     me: null,         // 当前登录用户名(null=未登录)
+    meCreated: 0,
+    adultAllowed: false,
+    adultExpireAt: 0,
+    unreadMsgCount: 0,
   };
 
   const FEATURED_ORDER = ['dbzy.tv', 'mtzy.me', 'iqiyizyapi.com', 'ruyizy.cn', 'tyyszy.com', 'bfzy.tv', 'wolongzyw.com'];
@@ -534,6 +538,52 @@
   }
   function markNav(hash) {
     $$('#mainNav a').forEach((a) => a.classList.toggle('active', hash.startsWith(a.dataset.href)));
+    renderBottomNav();
+  }
+
+  /* ---------------------- 手机端底部现代化导航栏 ---------------------- */
+  function renderBottomNav() {
+    const bar = $('#bottomTabBar');
+    if (!bar) return;
+    const { parts, query } = parseHash();
+    const p0 = parts[0] || 'home';
+    const isHome = p0 === 'home';
+    const isFilm = ['browse', 'sources', 'source', 'search', 'detail', 'play'].includes(p0);
+    const hasAdult = Boolean(State.me && State.config && State.config.adultUnlocked);
+    const isAdult = p0 === 'user' && (query.tab === 'adult' || (!query.tab && store.get('uTab') === 'adult'));
+    const isLive = p0 === 'live';
+    const isMsg = p0 === 'messages';
+    const isUser = p0 === 'user' && !isAdult;
+    const unread = Math.max(0, Number(State.unreadMsgCount || 0));
+
+    bar.innerHTML = `
+      <a class="tab-item ${isHome ? 'active' : ''}" href="#/home" data-tab="home" title="首页">
+        <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+        <span>首页</span>
+      </a>
+      <a class="tab-item ${isFilm ? 'active' : ''}" href="#/browse/电影" data-tab="film" title="影视">
+        <svg viewBox="0 0 24 24"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>
+        <span>影视</span>
+      </a>
+      ${hasAdult ? `
+      <a class="tab-item ${isAdult ? 'active' : ''}" href="#/user?tab=adult" data-tab="adult" title="私密福利">
+        <svg viewBox="0 0 24 24" style="fill:var(--acc)"><path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .55-.45 1-1 1H6c-.55 0-1-.45-1-1v-1h14v1z"/></svg>
+        <span style="color:var(--acc);font-weight:700">私密福利</span>
+      </a>` : `
+      <a class="tab-item ${isLive ? 'active' : ''}" href="#/live" data-tab="live" title="电视直播">
+        <svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>
+        <span>电视直播</span>
+      </a>`}
+      <a class="tab-item ${isMsg ? 'active' : ''}" href="#/messages" data-tab="messages" title="站内消息">
+        <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+        <span>消息</span>
+        ${unread > 0 ? `<span class="tab-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
+      </a>
+      <a class="tab-item ${isUser ? 'active' : ''}" href="#/user" data-tab="user" title="个人中心">
+        <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        <span>我的</span>
+      </a>
+    `;
   }
 
   /* ------------------------------ 路由 ------------------------------ */
@@ -563,7 +613,7 @@
     const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
 
     // 强制登录: 未登录只允许登录页与后台
-    if (loginRequired() && !['login', 'admin'].includes(parts[0])) {
+    if (loginRequired() && !['login', 'admin', 'xiaolin1991'].includes(parts[0])) {
       markNav('');
       if (location.hash && location.hash !== '#/login') store.set('afterLogin', location.hash);
       activeListPage = null;
@@ -613,9 +663,16 @@
       else if (parts[0] === 'source') await viewSources(dec(parts[1]), query, alive); // 兼容旧链接
       else if (parts[0] === 'login') await viewLogin(alive, false);
       else if (parts[0] === 'user') await viewUser(alive);
+      else if (parts[0] === 'messages') await viewMessages(alive);
       else if (parts[0] === 'live') await viewLive(query);
       else if (parts[0] === 'download') await viewDownload(alive);
-      else if (parts[0] === 'admin') await viewAdmin(query, parts[0]);
+      else if (parts[0] === 'xiaolin1991') await viewAdmin(query, parts[0]);
+      else if (parts[0] === 'admin') {
+        let ok = false;
+        try { ok = (await API.checkAdminPath('admin')).ok; } catch (e) { /* 默认非 admin */ }
+        if (ok) await viewAdmin(query, parts[0]);
+        else await viewHome(alive);
+      }
       else if (!parts[1] && /^[a-z0-9][a-z0-9-_]{1,39}$/.test(parts[0] || '')) {
         // 未知路径: 探测是否为自定义后台入口(是→进后台, 否→回首页)
         let ok = false;
@@ -2716,8 +2773,18 @@
           await API.userRegister(username, pwd);
         }
         State.me = username;
+        try {
+          const mm = await API.userMe();
+          if (mm && mm.me) {
+            State.meCreated = Number(mm.me.createdAt || 0);
+            State.adultAllowed = Boolean(mm.me.adultAllowed);
+            State.adultExpireAt = Number(mm.me.adultExpireAt || 0);
+            State.unreadMsgCount = Number(mm.me.unreadMsgCount || 0);
+          }
+        } catch (e) {}
+        try { State.config = await API.getConfig(); } catch (e) {}
         updateUserBox();
-        try { const mm = await API.userMe(); if (mm && mm.me) State.meCreated = Number(mm.me.createdAt || 0); } catch (e) {}
+        renderBottomNav();
         pullFavsMerge(); // 登录/注册成功: 拉取云端收藏并合并
         toast((mode === 'login' ? '欢迎回来，' : '注册成功，') + username, 'ok');
         // 关键: 若当前哈希已等于目标(如一直停在 #/home), 赋值不会触发路由, 必须手动调用
@@ -2741,40 +2808,44 @@
       const r = await API.guestStatus();
       State.guest = { required: r.required !== false, ok: !!r.ok, remain: r.remainSec, totalMin: r.trialMinutes || 0 };
       if (State.guest.required && !r.ok && !State.me) showTrialModal(true);
-    } catch (e) { /* 探测失败不阻塞浏览 */ }
+    } catch (e) { /* 网络/离线时默认放行 */ }
   }
-  function showTrialModal(expired, remainSec) {
+  function showTrialModal(force = false) {
     if (State.me || trialModalShown) return;
     trialModalShown = true;
-    const box = document.createElement('div');
-    box.className = 'modal-mask';
-    const mins = Math.max(1, Math.round((remainSec != null ? remainSec : (State.guest && State.guest.remain) || 0) / 60));
-    box.innerHTML = `
-      <div class="modal-box" style="width:min(92vw,400px);text-align:center">
-        <button class="trial-x" type="button" title="稍后再说">×</button>
-        <div style="font-size:40px;line-height:1">${expired ? '⏰' : '🎁'}</div>
-        <h3 style="margin:10px 0 6px">${expired ? '试看时间已到' : `游客可免费试看 ${mins} 分钟`}</h3>
-        <p class="hint">注册账号后继续观看，还可解锁：<br>☁️ 收藏云同步 · 📺 观看进度续播 · 📲 APP 下载引导</p>
-        <div class="chips" style="justify-content:center;margin:12px 0 4px">
-          <button class="chip on" data-m="reg" type="button">注 册</button>
-          <button class="chip" data-m="login" type="button">登 录</button>
-        </div>
-        <input class="field-input t-user" placeholder="用户名（2-20位中文/字母/数字）">
-        <input class="field-input t-pwd" type="password" placeholder="密码（至少6位）" style="margin-top:10px">
-        <input class="field-input t-pwd2" type="password" placeholder="确认密码" style="margin-top:10px">
-        <button class="btn primary t-go" style="width:100%;justify-content:center;margin-top:14px">注册并继续观影</button>
-      </div>`;
-    document.body.appendChild(box);
     let mode = 'reg';
+    const box = document.createElement('div');
+    box.className = 'modal-mask trial-mask';
+    box.innerHTML = `
+      <div class="modal-box trial-box">
+        <button type="button" class="modal-close t-close" aria-label="关闭">×</button>
+        <div class="trial-hero">
+          <div class="t-ico">🎬</div>
+          <h3 class="t-title">游客免费试看已结束</h3>
+          <p class="t-sub">${State.guest && State.guest.totalMin ? `已免费体验 ${State.guest.totalMin} 分钟` : '免费试看已结束'} · 注册账号可继续观看全部高清影片</p>
+        </div>
+        <div class="trial-tabs">
+          <button type="button" class="t-tab on" data-m="reg">立即免费注册</button>
+          <button type="button" class="t-tab" data-m="login">已有账号登录</button>
+        </div>
+        <div class="trial-form">
+          <input class="field-input t-user" placeholder="用户名(2-20位)" autocomplete="username">
+          <input class="field-input t-pwd" type="password" placeholder="密码(至少6位)" autocomplete="current-password">
+          <input class="field-input t-pwd2" type="password" placeholder="确认密码" autocomplete="new-password">
+          <button type="button" class="btn primary t-go">免费注册并继续播放</button>
+          <p class="hint t-hint">注册完全免费 · 收藏与播放记录自动云同步</p>
+        </div>
+      </div>`;
+    const close = () => { box.remove(); trialModalShown = false; };
+    box.addEventListener('click', (ev) => { if (ev.target === box && !force) close(); });
+    $('.t-close', box).addEventListener('click', close);
     const syncMode = () => {
-      $$('.chip', box).forEach((c) => c.classList.toggle('on', c.dataset.m === mode));
-      $('.t-go', box).textContent = mode === 'reg' ? '注册并继续观影' : '登录并继续观影';
-      $('.t-pwd2', box).style.display = mode === 'reg' ? '' : 'none';
+      $$('.t-tab', box).forEach((b) => b.classList.toggle('on', b.dataset.m === mode));
+      $('.t-pwd2', box).classList.toggle('hidden', mode === 'login');
+      $('.t-go', box).textContent = mode === 'reg' ? '免费注册并继续播放' : '登 录 并继续播放';
+      $('.t-title', box).textContent = mode === 'reg' ? '游客免费试看已结束' : '欢迎登录晓林影视';
     };
-    $$('.chip', box).forEach((c) => c.addEventListener('click', () => { mode = c.dataset.m; syncMode(); }));
-    const close = () => { trialModalShown = false; box.remove(); };
-    $('.trial-x', box).addEventListener('click', close);
-    box.addEventListener('click', (e) => { if (e.target === box) close(); });
+    $$('.t-tab', box).forEach((b) => b.addEventListener('click', () => { mode = b.dataset.m; syncMode(); }));
     const submit = async () => {
       const username = $('.t-user', box).value.trim();
       const pwd = $('.t-pwd', box).value;
@@ -2788,8 +2859,18 @@
           await API.userLogin(username, pwd);
         }
         State.me = username;
+        try {
+          const mm = await API.userMe();
+          if (mm && mm.me) {
+            State.meCreated = Number(mm.me.createdAt || 0);
+            State.adultAllowed = Boolean(mm.me.adultAllowed);
+            State.adultExpireAt = Number(mm.me.adultExpireAt || 0);
+            State.unreadMsgCount = Number(mm.me.unreadMsgCount || 0);
+          }
+        } catch (e) {}
+        try { State.config = await API.getConfig(); } catch (e) {}
         updateUserBox();
-        try { const mm = await API.userMe(); if (mm && mm.me) State.meCreated = Number(mm.me.createdAt || 0); } catch (e) {}
+        renderBottomNav();
         pullFavsMerge();
         toast((mode === 'reg' ? '注册成功，' : '欢迎回来，') + username + '，继续观影吧', 'ok');
         close();
@@ -2819,8 +2900,12 @@
       if (mRes.status === 'fulfilled' && mRes.value && mRes.value.me) {
         State.me = mRes.value.me.username;
         State.meCreated = Number(mRes.value.me.createdAt || 0);
+        State.adultAllowed = Boolean(mRes.value.me.adultAllowed);
+        State.adultExpireAt = Number(mRes.value.me.adultExpireAt || 0);
+        State.unreadMsgCount = Number(mRes.value.me.unreadMsgCount || 0);
       }
       updateUserBox();
+      renderBottomNav();
       toast('会员数据已刷新至最新', 'ok');
     } catch (err) {
       toast('刷新失败，请检查网络连接', 'err');
@@ -2848,7 +2933,8 @@
     const favs = store.get('favs', []);
     const watchItems = data ? data.items.filter((it) => it.kind === 'watch') : [];
     const searchItems = data ? data.items.filter((it) => it.kind === 'search') : [];
-    let tab = store.get('uTab', 'watch');
+    const { query } = parseHash();
+    let tab = (query && query.tab) ? query.tab : store.get('uTab', 'watch');
     const hasAdult = Boolean(State.config && State.config.adultEnabled);
     const isAdultUnlocked = Boolean(State.config && State.config.adultUnlocked);
 
@@ -2867,7 +2953,7 @@
                   <span class="user-name-text">${esc(State.me)}</span>
                   ${hasAdult ? `
                     <span class="user-vip-tag ${isAdultUnlocked ? 'unlocked' : 'locked'}">
-                      ${isAdultUnlocked ? '👑 私密福利VIP特权 · 已激活' : '🔒 注册会员 · 私密福利未解锁'}
+                      ${isAdultUnlocked ? ('👑 私密福利VIP特权 · 已激活' + (State.adultExpireAt ? ` (至 ${fmtDateTime(State.adultExpireAt).slice(0, 16)})` : '')) : '🔒 注册会员 · 私密福利未解锁'}
                     </span>` : ''}
                 </div>
                 <div class="user-profile-sub">
@@ -2915,7 +3001,7 @@
               <div class="user-kpi-content">
                 <div class="user-kpi-label">私密福利专区</div>
                 <div class="user-kpi-val" style="color:${isAdultUnlocked ? 'var(--ok)' : 'var(--danger)'}">
-                  ${isAdultUnlocked ? '已解锁 · 畅享播放' : '未解锁 · 仅图片预览'}
+                  ${isAdultUnlocked ? (State.adultExpireAt ? `至 ${fmtDateTime(State.adultExpireAt).slice(0, 10)} 有效` : '已解锁 · 畅享播放') : '未解锁 · 仅图片预览'}
                 </div>
               </div>
             </div>` : `
@@ -2934,6 +3020,7 @@
           <button class="user-tab-btn ${tab === 'fav' ? 'on' : ''}" data-t="fav">⭐ 我的收藏 (${favs.length})</button>
           <button class="user-tab-btn ${tab === 'search' ? 'on' : ''}" data-t="search">🔍 搜索记录 (${searchItems.length})</button>
           ${hasAdult ? `<button class="user-tab-btn tab-adult ${tab === 'adult' ? 'on' : ''}" data-t="adult">🔞 私密福利影片 ${isAdultUnlocked ? '👑' : '🔒'}</button>` : ''}
+          <a class="user-tab-btn" href="#/messages" style="text-decoration:none">📬 站内消息${State.unreadMsgCount > 0 ? ` (${State.unreadMsgCount})` : ''}</a>
         </div>
 
         <div id="uBody"></div>
@@ -3558,7 +3645,12 @@
       $('#uLogout') && $('#uLogout').addEventListener('click', async () => {
         try { await API.userLogout(); } catch (e) {}
         State.me = null;
+        State.adultAllowed = false;
+        State.adultExpireAt = 0;
+        State.unreadMsgCount = 0;
+        try { State.config = await API.getConfig(); } catch (e) {}
         updateUserBox();
+        renderBottomNav();
         toast('已退出登录');
         location.hash = '#/home';
       });
@@ -3584,6 +3676,149 @@
 
     bindUserHeaderEvents();
     renderBody();
+  }
+
+  /* ============================================================
+     视图：站内消息中心
+     ============================================================ */
+  async function viewMessages(alive) {
+    const life = { ok: alive };
+    const v = $('#view');
+    if (!State.me) {
+      v.innerHTML = `
+        <div class="container page-wrap msg-wrap">
+          <div class="side-card" style="text-align:center;padding:50px 20px">
+            <div style="font-size:52px">📬</div>
+            <h3 style="margin:16px 0 8px">请先登录查看站内消息</h3>
+            <p class="hint" style="max-width:440px;margin:0 auto 20px;line-height:1.6">
+              登录后即可接收系统通知、特权到期提醒与私密福利开启指引。<br>新用户注册自动赠送私密福利影片特权！
+            </p>
+            <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+              <a class="btn primary" href="#/login">立即登录 / 注册</a>
+              <a class="btn ghost" href="#/home">返回首页</a>
+            </div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    v.innerHTML = `
+      <div class="container page-wrap msg-wrap">
+        <div class="msg-head">
+          <div>
+            <h2 style="font-size:20px;margin:0;display:flex;align-items:center;gap:8px">
+              📬 站内消息中心
+            </h2>
+            <div style="font-size:12px;color:var(--dim);margin-top:4px" id="msgStatHint">正在同步消息…</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn ghost small" id="msgReadAllBtn" style="display:none">全部标为已读</button>
+            <a class="btn ghost small" href="#/user">返回个人中心</a>
+          </div>
+        </div>
+        <div id="msgListBody" class="msg-list">
+          <div class="msg-empty"><span class="spin"></span> 正在加载消息…</div>
+        </div>
+      </div>`;
+
+    async function loadMsgList() {
+      try {
+        const res = await API.userMessages();
+        if (!life.ok()) return;
+        const list = (res && res.messages) || [];
+        const unreadList = list.filter((m) => !m.read);
+        State.unreadMsgCount = unreadList.length;
+        renderBottomNav();
+
+        const statHint = $('#msgStatHint');
+        if (statHint) {
+          statHint.textContent = list.length
+            ? `共 ${list.length} 条通知${unreadList.length ? ` · ${unreadList.length} 条未读` : ' · 全部已读'}`
+            : '暂无站内通知';
+        }
+        const readAllBtn = $('#msgReadAllBtn');
+        if (readAllBtn) readAllBtn.style.display = unreadList.length > 0 ? '' : 'none';
+
+        const body = $('#msgListBody');
+        if (!body) return;
+        if (!list.length) {
+          body.innerHTML = `
+            <div class="side-card msg-empty">
+              <div style="font-size:44px;margin-bottom:10px">📭</div>
+              <div>暂无站内消息</div>
+              <p class="hint" style="margin-top:6px">系统通知、特权赠送与升级提醒都会在此显示</p>
+            </div>`;
+          return;
+        }
+
+        body.innerHTML = list.map((m) => {
+          const isAdult = /福利|特权|成人|私密/.test(m.title + m.content);
+          return `
+            <div class="msg-card ${m.read ? '' : 'unread'}" data-id="${esc(m.id)}">
+              <div class="msg-card-top">
+                <div class="msg-card-title">
+                  ${m.read ? '' : '<span class="msg-dot" title="未读"></span>'}
+                  <span>${esc(m.title)}</span>
+                </div>
+                <time class="msg-card-time">${fmtDateTime(m.createdAt)}</time>
+              </div>
+              <div class="msg-card-body">${esc(m.content).replace(/\n/g, '<br>')}</div>
+              <div class="msg-card-footer">
+                ${isAdult ? '<a class="btn primary small" href="#/user?tab=adult" style="font-weight:700">🚀 直达私密福利专区</a>' : ''}
+                ${m.read ? '' : `<button type="button" class="btn ghost small btn-read-msg" data-id="${esc(m.id)}">标为已读</button>`}
+                <button type="button" class="btn ghost small btn-del-msg" data-id="${esc(m.id)}" title="删除消息" style="color:var(--dim)">🗑</button>
+              </div>
+            </div>`;
+        }).join('');
+
+        // 绑定单条已读
+        $$('.btn-read-msg', body).forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            try {
+              await API.userReadMessage(id);
+              loadMsgList();
+            } catch (err) { toast('操作失败：' + err.message, 'err'); }
+          });
+        });
+
+        // 绑定单条删除
+        $$('.btn-del-msg', body).forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            if (!confirm('确定删除此条消息？')) return;
+            try {
+              await API.userDeleteMessage(id);
+              toast('消息已删除', 'ok');
+              loadMsgList();
+            } catch (err) { toast('删除失败：' + err.message, 'err'); }
+          });
+        });
+
+      } catch (err) {
+        if (!life.ok()) return;
+        const body = $('#msgListBody');
+        if (body) {
+          body.innerHTML = `<div class="side-card msg-empty"><div style="font-size:44px">⚠️</div>加载消息失败：${esc(err.message)}</div>`;
+        }
+      }
+    }
+
+    const readAllBtn = $('#msgReadAllBtn');
+    if (readAllBtn) {
+      readAllBtn.addEventListener('click', async () => {
+        try {
+          await API.userReadMessage(null);
+          State.unreadMsgCount = 0;
+          toast('所有消息已标为已读', 'ok');
+          loadMsgList();
+        } catch (err) { toast('操作失败：' + err.message, 'err'); }
+      });
+    }
+
+    await loadMsgList();
   }
 
   /* ============================================================
@@ -3677,7 +3912,7 @@
     restoreSpeeds(); // 先恢复测速缓存, 便于默认选中快速源
     const list = visibleSources();
     if (!list.length) {
-      v.innerHTML = '<div class="container empty"><div class="big">📭</div>没有可用影视源，请检查后台设置<br><br><a class="btn ghost small" href="#/' + esc(store.get('adminPathLive', 'admin')) + '">前往后台</a></div>';
+      v.innerHTML = '<div class="container empty"><div class="big">📭</div>没有可用影视源，请检查后台设置<br><br><a class="btn ghost small" href="#/' + esc(store.get('adminPathLive', 'xiaolin1991')) + '">前往后台</a></div>';
       return;
     }
     if (!selKey || !list.some((s) => s.key === selKey)) {
@@ -3964,6 +4199,7 @@
     const v = $('#view');
     const dlUrl = resolveDownloadUrl((State.settings && State.settings.downloadUrl) || '');
     const dlUrlTv = resolveDownloadUrl((State.settings && State.settings.downloadUrlTv) || '');
+    const dlUrlIos = resolveDownloadUrl((State.settings && State.settings.downloadUrlIos) || '');
     const isAndroid = /Android/i.test(navigator.userAgent);
     const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (isClientOrDownloaded()) {
@@ -3988,6 +4224,9 @@
     const tvBtn = dlUrlTv
       ? `<a class="btn primary" href="${esc(dlUrlTv)}" target="_blank" rel="noopener">📥 下载 TV / 盒子版</a>`
       : '';
+    const iosBtn = dlUrlIos
+      ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener" style="margin-bottom:12px">📥 安装 iPhone 客户端</a>`
+      : '';
     const siteName = esc((State.settings && State.settings.siteName) || '晓林影院');
     v.innerHTML = `
       <div class="container page-wrap dl-wrap">
@@ -3998,7 +4237,7 @@
           <img class="dl-icon" src="./icons/icon-192.png" alt="app">
           <h2 class="dl-name">${siteName} <em>App</em></h2>
           <p class="dl-slogan">装进口袋的私人影院 —— 全屏沉浸 · 收藏云同步 · 大屏同享</p>
-          <div class="dl-hero-cta">${apkBtn}${isIOS ? '<a class="btn ghost" href="#dl-ios">🍎 我用 iPhone</a>' : ''}</div>
+          <div class="dl-hero-cta">${apkBtn}${isIOS ? (dlUrlIos ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 安装 iPhone 版</a>` : '<a class="btn ghost" href="#dl-ios">🍎 我用 iPhone</a>') : ''}</div>
         </section>
 
         <!-- 特性条 -->
@@ -4025,6 +4264,8 @@
             ${isIOS ? '<i class="dl-ribbon">当前设备</i>' : ''}
             <div class="dl-badge iosb">🍎</div>
             <h4>iPhone / iPad</h4>
+            ${iosBtn}
+            <p style="font-size:12px;color:var(--dim);margin:6px 0 10px">${dlUrlIos ? '或使用 Safari 免下载添加至主屏幕：' : '轻量网页应用 · 免安装免签名：'}</p>
             <ol class="dl-timeline">
               <li><b>Safari</b> 打开本站<span>微信内请点 ⋯ 选「在浏览器打开」</span></li>
               <li>点底部<b>分享</b>按钮 ⎋<span>方框加向上箭头</span></li>
@@ -4211,56 +4452,79 @@
 
   /* ---- App 内版本更新弹窗 ---- */
   function openAppUpdateModal(opts) {
-    const { latestName, latestCode, force, changelog, apkUrl } = opts;
+    const { latestName, latestCode, force, changelog, apkUrl, platform } = opts;
     if (document.getElementById('appUpdateMask')) return;
     const client = parseAppClient();
     const box = document.createElement('div');
     box.id = 'appUpdateMask';
-    box.className = 'modal-mask app-update-mask';
+    box.className = 'modal-mask app-update-mask' + (force ? ' force-mask' : '');
     const notes = (changelog || '').trim()
       ? `<div class="upd-notes">${esc(changelog).replace(/\n/g, '<br>')}</div>`
       : '<div class="upd-notes dim">修复问题并提升稳定性，建议立即更新。</div>';
+    const platLabel = platform === 'ios' ? '🍎 iPhone / iPad' : (platform === 'tv' ? '📺 TV 电视版' : '🤖 安卓手机版');
+
     box.innerHTML = `<div class="modal-box promo-box upd-box">
         ${force ? '' : '<button type="button" class="modal-close promo-x" aria-label="关闭">×</button>'}
         <div class="promo-hero">
           <img class="promo-icon" src="./icons/icon-192.png" alt="App">
           <div class="promo-title-wrap">
-            <h3 class="promo-title">发现新版本</h3>
-            <div class="promo-sub">v${esc(latestName || String(latestCode))}${client && client.name ? ` · 当前 ${esc(client.name)}` : ''}</div>
+            <h3 class="promo-title">${force ? '🚨 发现重要强制更新' : '发现新版本'}</h3>
+            <div class="promo-sub">v${esc(latestName || String(latestCode))} (${platLabel})${client && client.name ? ` · 当前 ${esc(client.name)}` : ''}</div>
           </div>
         </div>
         ${notes}
-        <a class="btn primary promo-go" id="updGoBtn" href="${esc(apkUrl)}" rel="noopener">⬇️ 立即更新</a>
-        ${force ? '<div class="upd-force-tip">此版本为强制更新，请更新后再继续观看</div>' : '<button type="button" class="promo-skip" id="updLater">稍后提醒</button>'}
+        <a class="btn primary promo-go" id="updGoBtn" href="${esc(apkUrl)}" target="_blank" rel="noopener">⬇️ 立即更新 (${platLabel})</a>
+        ${force ? '<div class="upd-force-tip" style="color:var(--danger);font-weight:700;margin-top:10px;text-align:center">⚠️ 此版本为强制更新，必须更新后方可继续使用</div>' : '<button type="button" class="promo-skip" id="updLater">稍后提醒</button>'}
       </div>`;
-    const close = () => {
-      if (force) return;
-      store.set('appUpdateState', { ...(store.get('appUpdateState', {}) || {}), skipCode: latestCode, skipAt: Date.now() });
-      box.remove();
-    };
-    if (!force) {
+
+    if (force) {
+      // 强制更新：阻断背景点击与传播，阻断视频播放
+      box.addEventListener('click', (ev) => { ev.stopPropagation(); });
+      const blocker = setInterval(() => {
+        const v = $('video');
+        if (v && !v.paused) { try { v.pause(); } catch (e) {} }
+        if (!document.getElementById('appUpdateMask')) clearInterval(blocker);
+      }, 300);
+    } else {
+      const close = () => {
+        store.set('appUpdateState', { ...(store.get('appUpdateState', {}) || {}), skipCode: latestCode, skipAt: Date.now() });
+        box.remove();
+      };
       box.addEventListener('click', (ev) => { if (ev.target === box) close(); });
       const x = $('.promo-x', box);
       if (x) x.addEventListener('click', close);
       const later = $('#updLater', box);
       if (later) later.addEventListener('click', close);
-    } else {
-      box.addEventListener('click', (ev) => { ev.stopPropagation(); });
     }
     document.body.appendChild(box);
   }
+
   function maybeAppUpdate() {
     try {
       if (!inApp()) return;
-      // 仅安卓壳带 versionCode; PWA/旧壳无 code 时不弹
       const client = parseAppClient();
       if (!client || !client.code) return;
       const st = State.settings || {};
-      const latestCode = Math.max(0, Math.round(Number(st.appVersionCode || 0)) || 0);
+      const latestCode = Math.max(0, Math.round(Number(st.appPublishedCode || st.appVersionCode || 0)) || 0);
       if (!latestCode || client.code >= latestCode) return;
-      const apkUrl = resolveDownloadUrl(st.downloadUrl || '/APP/xiaolintv-phone-latest.apk');
+
+      const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+      const isTv = isTvDevice() || (client && client.name && /tv/i.test(client.name));
+      let apkUrl = '';
+      let platform = 'android';
+      if (isIos) {
+        apkUrl = resolveDownloadUrl(st.downloadUrlIos || st.downloadUrl || '');
+        platform = 'ios';
+      } else if (isTv) {
+        apkUrl = resolveDownloadUrl(st.downloadUrlTv || st.downloadUrl || '');
+        platform = 'tv';
+      } else {
+        apkUrl = resolveDownloadUrl(st.downloadUrl || '/APP/xiaolintv-phone-latest.apk');
+        platform = 'android';
+      }
       if (!apkUrl) return;
-      const force = !!st.appForceUpdate;
+
+      const force = Boolean(st.appPublishedForce !== undefined ? st.appPublishedForce : st.appForceUpdate);
       if (force) {
         // 强制更新：立即暂停正在播放的视频，阻断一切观看
         const v = $('video');
@@ -4271,11 +4535,12 @@
         if (skip.skipCode === latestCode && skip.skipAt && Date.now() - skip.skipAt < 12 * 3600 * 1000) return;
       }
       setTimeout(() => openAppUpdateModal({
-        latestName: st.appVersionName || String(latestCode),
+        latestName: st.appPublishedName || st.appVersionName || String(latestCode),
         latestCode,
         force,
-        changelog: st.appChangelog || '',
+        changelog: st.appPublishedChangelog || st.appChangelog || '',
         apkUrl,
+        platform,
       }), force ? 100 : 1200);
     } catch (e) { /* ignore */ }
   }
@@ -4532,13 +4797,13 @@
      ============================================================ */
   async function viewAdmin(query, seg) {
     const v = $('#view');
-    const usedSeg = seg || (parseHash().parts[0] || 'admin');
+    const usedSeg = seg || (parseHash().parts[0] || 'xiaolin1991');
 
     /* ---- 入口守卫: 已有会话任意入口直达; 未登录时路径必须与服务端配置一致 ---- */
     let hasSession = false;
     try { await API.adminSession(); hasSession = true; } catch (e) { /* 未登录 */ }
     if (!hasSession) {
-      const okPath = await API.checkAdminPath(usedSeg).then((r) => !!r.ok).catch(() => usedSeg === 'admin');
+      const okPath = await API.checkAdminPath(usedSeg).then((r) => !!r.ok).catch(() => usedSeg === 'xiaolin1991');
       if (!okPath) {
         v.innerHTML = `<div class="container empty"><div class="big">🕳️</div>页面不存在或已迁移<br>
           <small class="hint" style="margin-top:6px">后台入口可能已被管理员自定义，请使用正确入口地址</small></div>`;
@@ -4967,6 +5232,18 @@
               <div class="admin-label">开放前台注册<small>关闭后新用户无法自行注册</small></div>
               <label class="switch"><input type="checkbox" id="allowRegisterSwitch" ${s.allowRegister !== false ? 'checked' : ''}><span class="track"></span></label>
             </div>
+            <div class="admin-row">
+              <div class="admin-label">新会员注册自动赠送福利<small>新用户注册自动赠送私密福利影片特权（0~3个月），并自动发送使用说明站内信</small></div>
+              <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+                <select class="field-input" id="regGiftMonthsSelect" style="width:130px">
+                  <option value="0" ${Number(s.regGiftAdultMonths || 0) === 0 ? 'selected' : ''}>不赠送</option>
+                  <option value="1" ${Number(s.regGiftAdultMonths === undefined ? 1 : s.regGiftAdultMonths) === 1 ? 'selected' : ''}>赠送 1 个月</option>
+                  <option value="2" ${Number(s.regGiftAdultMonths || 0) === 2 ? 'selected' : ''}>赠送 2 个月</option>
+                  <option value="3" ${Number(s.regGiftAdultMonths || 0) === 3 ? 'selected' : ''}>赠送 3 个月</option>
+                </select>
+                <button class="btn primary small" id="saveRegGiftBtn">保存</button>
+              </div>
+            </div>
             <div class="admin-row" id="trialRow">
               <div class="admin-label">游客试看时长<small>新 IP / 新设备 / 新访客无需注册即可试看 <b id="trialHintMin">${Number(s.trialMinutes === undefined ? 20 : s.trialMinutes)}</b> 分钟，到期自动弹出注册框；填 <b>0</b> = 不提供试看（立即要求登录）。<b id="trialDepHint" style="color:${s.requireLogin !== false ? 'var(--ok)' : 'var(--danger)'}">${s.requireLogin !== false ? '✔ 已生效（强制登录观看开启中）' : '⚠ 未生效：请先开启上方「强制登录观看」'}</b></small></div>
               <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
@@ -5009,6 +5286,15 @@
             State.settings = { ...State.settings, allowRegister: on };
             toast(on ? '已开放注册' : '已关闭注册', 'ok');
           } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
+        });
+        $('#saveRegGiftBtn').addEventListener('click', async () => {
+          const m = Number($('#regGiftMonthsSelect').value);
+          try {
+            await API.adminSaveSettings({ regGiftAdultMonths: m });
+            s.regGiftAdultMonths = m;
+            State.settings = { ...State.settings, regGiftAdultMonths: m };
+            toast(`新注册赠送特权设置已保存：${m === 0 ? '不赠送' : '赠送 ' + m + ' 个月'}`, 'ok');
+          } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
         $('#saveTrialBtn').addEventListener('click', async () => {
           const n = Math.round(Number($('#trialMinInput').value));
@@ -5077,7 +5363,7 @@
                     <td>${fmtDateTime(u.createdAt)}</td>
                     <td>${fmtDateTime(u.lastLoginAt)}</td>
                     <td>${esc(u.lastLoginIp || '—')}${u.lastLoginIpGeo ? '<br><small style="color:var(--dim)">' + esc(u.lastLoginIpGeo) + '</small>' : ''}</td>
-                    <td title="需全局「成人内容」开关开启生效；绿色=已解锁播放，灰色=未解锁(仅预览)"><button type="button" class="u-adult-tag ${u.adultAllowed ? 'on' : 'off'}" data-u="${esc(u.username)}">${u.adultAllowed ? '已解锁' : '未解锁'}</button></td>
+                    <td title="需全局「成人内容」开关开启生效；绿色=已解锁播放，灰色=未解锁(仅预览)"><button type="button" class="u-adult-tag ${u.adultAllowed ? 'on' : 'off'}" data-u="${esc(u.username)}">${u.adultAllowed ? ('已解锁' + (u.adultExpireAt ? `<br><small style="font-size:11px;opacity:.85">至 ${fmtDateTime(u.adultExpireAt).slice(0, 10)}</small>` : '')) : '未解锁'}</button></td>
                     <td>${fmtWatchSec(u.watchSec)}</td>
                     <td>${u.activeItems}/${u.totalItems}</td>
                     <td style="white-space:nowrap;text-align:right">
@@ -5564,6 +5850,7 @@
       else if (admTab === 'app') {
         const phoneMode = s.downloadUrlMode === 'custom' ? 'custom' : 'fixed';
         const tvMode = (s.downloadUrlTvMode === 'fixed' || s.downloadUrlTvMode === 'custom') ? s.downloadUrlTvMode : 'off';
+        const iosMode = s.downloadUrlIosMode === 'custom' ? 'custom' : 'off';
         const fixedPhone = '/APP/xiaolintv-phone-latest.apk';
         const fixedTv = '/APP/xiaolintv-tv-latest.apk';
 
@@ -5627,6 +5914,19 @@
             <div id="tvCustomBox" class="${tvMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
               <label class="field-label">自定义 TV 下载地址</label>
               <input class="field-input" id="dlUrlTvInput" value="${esc(s.downloadUrlTv || '')}" placeholder="https://… 或 /APP/xxx.apk">
+            </div>
+
+            <h4 style="margin:22px 0 8px;font-size:14px">🍎 苹果 iPhone / iPad 版</h4>
+            <div class="dl-mode-row" id="iosModeRow">
+              <button type="button" class="chip dl-mode-btn ${iosMode === 'off' ? 'on' : ''}" data-mode="off">关闭（使用主屏教程）</button>
+              <button type="button" class="chip dl-mode-btn ${iosMode === 'custom' ? 'on' : ''}" data-mode="custom">自定义下载/安装地址</button>
+            </div>
+            <div id="iosOffHint" class="${iosMode === 'off' ? '' : 'hidden'}" style="margin-top:10px">
+              <p class="hint">已关闭安装链接：前台下载页仅展示 Safari 添加到主屏幕教程。</p>
+            </div>
+            <div id="iosCustomBox" class="${iosMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
+              <label class="field-label">iPhone / iPad 下载或安装地址（支持 App Store / TestFlight / 企业签 / 描述文件 / 站内路径）</label>
+              <input class="field-input" id="dlUrlIosInput" value="${esc(s.downloadUrlIos || '')}" placeholder="https://… 或 /APP/xiaolin.mobileconfig">
             </div>
 
             <button class="btn primary" id="savePromoBtn" style="margin-top:16px">保存下载与访问控制</button>
@@ -5757,6 +6057,7 @@
 
         let curPhoneMode = phoneMode;
         let curTvMode = tvMode;
+        let curIosMode = iosMode;
         const syncPhoneUi = () => {
           $$('#phoneModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curPhoneMode));
           $('#phoneFixedBox').classList.toggle('hidden', curPhoneMode !== 'fixed');
@@ -5768,22 +6069,34 @@
           $('#tvFixedBox').classList.toggle('hidden', curTvMode !== 'fixed');
           $('#tvCustomBox').classList.toggle('hidden', curTvMode !== 'custom');
         };
+        const syncIosUi = () => {
+          $$('#iosModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curIosMode));
+          $('#iosOffHint').classList.toggle('hidden', curIosMode !== 'off');
+          $('#iosCustomBox').classList.toggle('hidden', curIosMode !== 'custom');
+        };
         $$('#phoneModeRow .dl-mode-btn').forEach((btn) => {
           btn.addEventListener('click', () => { curPhoneMode = btn.dataset.mode; syncPhoneUi(); });
         });
         $$('#tvModeRow .dl-mode-btn').forEach((btn) => {
           btn.addEventListener('click', () => { curTvMode = btn.dataset.mode; syncTvUi(); });
         });
+        $$('#iosModeRow .dl-mode-btn').forEach((btn) => {
+          btn.addEventListener('click', () => { curIosMode = btn.dataset.mode; syncIosUi(); });
+        });
 
         $('#savePromoBtn').addEventListener('click', async () => {
           const url = ($('#dlUrlInput') && $('#dlUrlInput').value.trim()) || '';
           const urlTv = ($('#dlUrlTvInput') && $('#dlUrlTvInput').value.trim()) || '';
+          const urlIos = ($('#dlUrlIosInput') && $('#dlUrlIosInput').value.trim()) || '';
           const mobileLimit = Number(($('#mobileLimitInput') && $('#mobileLimitInput').value) || 10);
           if (curPhoneMode === 'custom' && !isValidDownloadUrlInput(url)) {
             return toast('手机自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
           }
           if (curTvMode === 'custom' && !isValidDownloadUrlInput(urlTv)) {
             return toast('TV 自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
+          }
+          if (curIosMode === 'custom' && !isValidDownloadUrlInput(urlIos)) {
+            return toast('iPhone 自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
           }
           try {
             const patch = {
@@ -5793,15 +6106,19 @@
               downloadUrl: url,
               downloadUrlTvMode: curTvMode,
               downloadUrlTv: urlTv,
+              downloadUrlIosMode: curIosMode,
+              downloadUrlIos: urlIos,
             };
             await API.adminSaveSettings(patch);
             const effPhone = curPhoneMode === 'custom' ? url : fixedPhone;
             const effTv = curTvMode === 'fixed' ? fixedTv : (curTvMode === 'custom' ? urlTv : '');
+            const effIos = curIosMode === 'custom' ? urlIos : '';
             State.settings = {
               ...State.settings,
               ...patch,
               downloadUrl: effPhone,
               downloadUrlTv: effTv,
+              downloadUrlIos: effIos,
             };
             store.set('cached_settings', State.settings);
             toast('下载与访问控制已保存', 'ok');
@@ -6212,9 +6529,9 @@
           </div>
           <div class="admin-card">
             <h3>🚪 后台入口路径</h3>
-            <p class="hint">自定义后台访问地址：<b>留空/填 admin</b> 使用默认 <code>#/admin</code>；例如填 <code>my-panel</code> 后，只有 <code>#/my-panel</code> 能进入后台，旧地址对外显示「页面不存在」。<br>当前完整入口：<code>${esc(location.origin + '/#/' + (s.adminPath || 'admin'))}</code>（建议收藏到书签）</p>
+            <p class="hint">自定义后台访问地址：<b>留空/填 xiaolin1991</b> 使用默认 <code>#/xiaolin1991</code>；例如填 <code>my-panel</code> 后，只有 <code>#/my-panel</code> 能进入后台，旧地址对外显示「页面不存在」。<br>当前完整入口：<code>${esc(location.origin + '/#/' + (s.adminPath || 'xiaolin1991'))}</code>（建议收藏到书签）</p>
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">
-              <input class="field-input" id="admPathInput" style="max-width:260px" value="${esc(s.adminPath || '')}" placeholder="admin（留空=默认）" maxlength="40">
+              <input class="field-input" id="admPathInput" style="max-width:260px" value="${esc(s.adminPath || '')}" placeholder="xiaolin1991（留空=默认）" maxlength="40">
               <button class="btn primary" id="saveAdmPathBtn">保存入口路径</button>
             </div>
           </div>`;
@@ -6235,7 +6552,7 @@
           if (np && !/^[a-z0-9][a-z0-9-_]{1,39}$/.test(np)) return toast('仅支持 2-40 位小写字母/数字/短横线', 'err');
           try {
             const res = await API.adminSaveSettings({ adminPath: np });
-            const eff = (res.settings && res.settings.adminPath) || 'admin';
+            const eff = (res.settings && res.settings.adminPath) || 'xiaolin1991';
             store.set('adminPathLive', eff);
             toast(`入口路径已保存：今后请从 #/${eff} 进入后台`, 'ok');
             setTimeout(() => { location.hash = '#/' + eff; }, 900);
@@ -6248,10 +6565,10 @@
         main.innerHTML = `
           ${buildStorageCardHtml(s)}
           <div class="admin-card">
-            <h3>🧾 系统信息</h3>
-            <div class="admin-row"><div class="admin-label">设置存储<small>${
+            <h3>ℹ️ 系统运行信息</h3>
+            <div class="admin-row"><div class="admin-label">数据存储方式<small>${
               s.storage === 'd1+kv'
-                ? '已绑定 Cloudflare D1 数据库 (dianying) + KV 缓存 (dianying_KV)，双轨持久容灾'
+                ? '已绑定 D1 数据库 (dianying) + KV (dianying_KV)，SQL 双轨持久存储，重启不丢失'
                 : (s.storage === 'd1'
                   ? '已绑定 Cloudflare D1 数据库 (dianying)，SQL 持久存储，重启不丢失'
                   : (s.storage === 'kv'
@@ -6265,7 +6582,7 @@
               <span class="status-pill ${s.hasCustomPassword || s.passwordFromEnv ? 'ok' : 'warn'}">${s.hasCustomPassword ? '后台自定义' : s.passwordFromEnv ? '环境变量' : '默认'}</span></div>
             <div class="admin-row"><div class="admin-label">影视源配置<small>${(s.customSources || []).length} 个自定义源 · ${(s.disabledSources || []).length} 个停用中 · 内置源每日同步自 LunaTV-config</small></div>
               <span class="status-pill ok">${State.config.count}/${State.config.total} 源可用</span></div>
-            <div class="admin-row"><div class="admin-label">后台入口<small>${s.adminPath ? `已自定义：#/${esc(s.adminPath)}` : '默认：#/admin（可在安全中心自定义）'}</small></div>
+            <div class="admin-row"><div class="admin-label">后台入口<small>${s.adminPath ? `已自定义：#/${esc(s.adminPath)}` : '默认：#/xiaolin1991（可在安全中心自定义）'}</small></div>
               <span class="status-pill ${s.adminPath ? 'ok' : 'warn'}">${s.adminPath ? '自定义' : '默认'}</span></div>
           </div>`;
         setupStorageCard(s);
@@ -6527,13 +6844,20 @@
     try {
       const m = await API.userMe();
       State.me = m.me ? m.me.username : null;
-      if (m.me) { State.meCreated = Number(m.me.createdAt || 0); pullFavsMerge(); }
+      if (m.me) {
+        State.meCreated = Number(m.me.createdAt || 0);
+        State.adultAllowed = Boolean(m.me.adultAllowed);
+        State.adultExpireAt = Number(m.me.adultExpireAt || 0);
+        State.unreadMsgCount = Number(m.me.unreadMsgCount || 0);
+        pullFavsMerge();
+      }
     }
     catch (e) { State.me = null; }
     if (!State.me) {
       try { await API.adminSession(); State.me = '管理员'; } catch (e2) { /* 未登录管理员 */ }
     }
     updateUserBox();
+    renderBottomNav();
 
     // 应用服务端默认主题（用户本地无偏好时）
     if (!store.get('theme', null) && State.settings.defaultTheme) applyTheme(State.settings.defaultTheme);
