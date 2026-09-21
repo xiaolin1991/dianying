@@ -1719,8 +1719,16 @@
       if (isMobilePlayer) bumpMCtrl();
     };
     const togglePlay = () => {
-      if (video.paused) video.play().catch(() => {});
-      else video.pause();
+      if (video.paused) {
+        const p = video.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch((err) => {
+            console.warn('Playback play() catch:', err);
+          });
+        }
+      } else {
+        video.pause();
+      }
       syncPpBtn();
     };
     applyPlayerPrefs();
@@ -1736,7 +1744,26 @@
     video.addEventListener('volumechange', () => {
       try { if (!video.muted && video.volume >= 0) store.set('vidVol', Number(video.volume.toFixed(2))); } catch (e) {}
     });
-    if (ppBtn) ppBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); bumpMCtrl(); });
+    if (ppBtn) {
+      ppBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (tip && !tip.querySelector('.failover-box')) {
+          tip.classList.add('hidden');
+          tip.innerHTML = '';
+        }
+        togglePlay();
+        bumpMCtrl();
+      });
+    }
+    if (tip) {
+      tip.addEventListener('click', (e) => {
+        if (e.target.closest('.failover-box, button, a')) return;
+        tip.classList.add('hidden');
+        tip.innerHTML = '';
+        togglePlay();
+        bumpMCtrl();
+      });
+    }
     if (mSeek) {
       mSeek.addEventListener('pointerdown', () => { mSeeking = true; bumpMCtrl(); });
       mSeek.addEventListener('input', () => {
@@ -1888,7 +1915,13 @@
     });
 
     let saveTimer = null; // 进度保存定时器(换集/离开页面时必须停掉, 否则污染旧集进度)
-    function stopSaveTimer() { if (saveTimer) { clearInterval(saveTimer); saveTimer = null; } }
+    let readyCheckTimer = null;
+    let failoverCheckTimer = null;
+    function stopSaveTimer() {
+      if (saveTimer) { clearInterval(saveTimer); saveTimer = null; }
+      if (readyCheckTimer) { clearTimeout(readyCheckTimer); readyCheckTimer = null; }
+      if (failoverCheckTimer) { clearTimeout(failoverCheckTimer); failoverCheckTimer = null; }
+    }
 
     const swapHits = [];
     let swapPending = 0;
@@ -1977,22 +2010,51 @@
       const ep = groups[gi].eps[ei];
       hasPlaybackFailed = false;
       clearTimeout(autoFailoverTimer);
+      clearTimeout(readyCheckTimer);
+      clearTimeout(failoverCheckTimer);
+
+      tip.classList.remove('hidden');
+      tip.textContent = '正在加载…';
+      const clear = () => {
+        clearTimeout(readyCheckTimer);
+        clearTimeout(failoverCheckTimer);
+        sessionStorage.removeItem('ntv_swap_count');
+        hasPlaybackFailed = false;
+        tip.classList.add('hidden');
+        tip.innerHTML = '';
+        syncPpBtn();
+      };
+      const clearEvents = ['playing', 'play', 'canplay', 'loadeddata', 'loadedmetadata', 'timeupdate', 'player-autoplay-blocked'];
+      clearEvents.forEach((ev) => video.addEventListener(ev, clear, { once: true }));
+      video.addEventListener('error', (e) => handlePlaybackFailure(e), { once: true });
+      video.addEventListener('player-error', (e) => handlePlaybackFailure(e.detail), { once: true });
+
       Player.play(video, ep.url, tip, {
         optimize: !!(State.settings && State.settings.playerOptimize),
         onError: (err) => handlePlaybackFailure(err),
       });
       applyPlayerPrefs();
-      tip.classList.remove('hidden');
-      tip.textContent = '正在加载…';
-      const clear = () => {
-        sessionStorage.removeItem('ntv_swap_count');
-        hasPlaybackFailed = false;
-        tip.classList.add('hidden');
-        tip.innerHTML = '';
-      };
-      video.addEventListener('playing', clear, { once: true });
-      video.addEventListener('error', (e) => handlePlaybackFailure(e), { once: true });
-      video.addEventListener('player-error', (e) => handlePlaybackFailure(e.detail), { once: true });
+
+      // 即时检查：如果流元数据已就绪或正在播放，直接解除加载遮罩
+      if (video.readyState >= 1 || (video.duration && video.duration > 0) || !video.paused) {
+        clear();
+      }
+
+      // iOS 移动端加载检测兜底: 若 3.5 秒内视频元数据或首帧就绪，清除遮罩，显示播放按钮
+      readyCheckTimer = setTimeout(() => {
+        if (!alive() || !video.isConnected || hasPlaybackFailed) return;
+        if (video.readyState >= 1 || (video.duration && video.duration > 0) || !video.paused) {
+          clear();
+        }
+      }, 3500);
+
+      // 超时兜底(14秒): 若完全无法连接/无流到达，尝试自动换源
+      failoverCheckTimer = setTimeout(() => {
+        if (!alive() || !video.isConnected || hasPlaybackFailed) return;
+        if (video.readyState === 0 && video.paused && !tip.classList.contains('hidden') && !tip.querySelector('.failover-box')) {
+          handlePlaybackFailure('timeout_no_stream');
+        }
+      }, 14000);
 
       if (resume && allProg[gi + ':' + ei] && allProg[gi + ':' + ei].t > 20) {
         const onceSeek = () => { try { video.currentTime = allProg[gi + ':' + ei].t; } catch (e) {} };
@@ -2287,7 +2349,7 @@
         let lastTapAt = 0, singleTapTimer = null;
 
         wrap.addEventListener('touchstart', (e) => {
-          if (e.target.closest('.m-ctrl, .video-tip, a, button, input, select')) return;
+          if (e.target.closest('.m-ctrl, .failover-box, a, button, input, select')) return;
           if (!e.touches || e.touches.length !== 1) return;
           const t = e.touches[0];
           touchStartX = t.clientX;
@@ -2300,7 +2362,7 @@
         }, { passive: true });
 
         wrap.addEventListener('touchmove', (e) => {
-          if (e.target.closest('.m-ctrl, .video-tip, a, button, input, select')) return;
+          if (e.target.closest('.m-ctrl, .failover-box, a, button, input, select')) return;
           if (!e.touches || e.touches.length !== 1) return;
           const t = e.touches[0];
           const dx = t.clientX - touchStartX;
@@ -2346,7 +2408,7 @@
         }, { passive: false });
 
         wrap.addEventListener('touchend', (e) => {
-          if (e.target.closest('.m-ctrl, .video-tip, a, button, input, select')) return;
+          if (e.target.closest('.m-ctrl, .failover-box, a, button, input, select')) return;
           if (touchMode === 'seek') {
             if (seekTarget >= 0 && video.duration) {
               try { video.currentTime = seekTarget; } catch (err) {}
