@@ -57,6 +57,8 @@ jobs:
 
       - name: Generate launcher icons from public/icons/icon-512.png
         run: |
+          # ubuntu-latest(24.04) 已不再预装 ImageMagick, 先安装
+          sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick
           SRC="public/icons/icon-512.png"
           for spec in "mdpi 48" "hdpi 72" "xhdpi 96" "xxhdpi 144" "xxxhdpi 192"; do
             set -- $spec
