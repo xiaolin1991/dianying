@@ -44,9 +44,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
+      # ubuntu-latest runner 已预装 Android SDK (含 licenses), 无需 setup-android
+      # (setup-android@v3 会执行 sdkmanager tools, 新版 cmdline-tools 16.0 已移除 tools 包导致失败)
       - name: Setup Gradle 8.7
         uses: gradle/actions/setup-gradle@v3
         with:

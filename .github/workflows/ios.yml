@@ -29,9 +29,11 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Select Xcode
+      - name: Select latest Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
           xcodebuild -version
 
       - name: Install XcodeGen
@@ -51,18 +53,26 @@ jobs:
         env:
           START_URL: ${{ vars.START_URL }}
         run: |
+          set -o pipefail
           cd ios
           ARGS="MARKETING_VERSION=1.0.${{ github.run_number }} CURRENT_PROJECT_VERSION=${{ github.run_number }}"
           if [ -n "$START_URL" ]; then ARGS="$ARGS START_URL=$START_URL"; fi
           xcodebuild -project XiaoLinTV.xcodeproj -scheme XiaoLinTV \
             -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            $ARGS build | tee ../ios-build-log.txt
+            $ARGS build 2>&1 | tee ../ios-build-log.txt
 
       - name: Package IPA (通用 + iPad 专用)
         run: |
-          APP="ios/build/Build/Products/Release-iphoneos/XiaoLinTV.app"
+          APP=$(find ios/build -type d -name "XiaoLinTV.app" | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::未找到 XiaoLinTV.app 构建产物"
+            find ios/build -maxdepth 5 | head -50
+            exit 1
+          fi
+          echo "APP = $APP"
           mkdir -p out
           # 通用包 (iPhone + iPad)
           rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
