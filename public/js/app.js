@@ -4238,14 +4238,15 @@
      视图：下载 APP(安卓 APK / 电视 / iOS PWA 教程)
      ============================================================ */
   /* ============================================================
-     视图：下载 APP(设备智能检测 / 安卓 APK / 电视 / iOS 免签描述文件)
+     视图：下载 APP(设备智能检测 / 多平台独立客户端 / iOS 免签描述文件)
      ============================================================ */
   function detectClientDevice() {
     const ua = navigator.userAgent || '';
-    const isIos = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isIpad = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isIphone = /iPhone|iPod/i.test(ua);
     const isAndroid = /Android/i.test(ua);
     const isTv = isTvDevice() || /Android.*(LargeScreen|TV|Box|SmartTV|GoogleTV)/i.test(ua);
-    const isMac = /Macintosh|Mac OS X/i.test(ua) && !isIos;
+    const isMac = /Macintosh|Mac OS X/i.test(ua) && !isIpad;
     const isWindows = /Windows/i.test(ua);
 
     let brand = '安卓手机 / 平板';
@@ -4260,27 +4261,35 @@
     if (isTv) {
       return { type: 'tv', name: '智能电视 / 电视盒子', icon: '📺', isMobile: true };
     }
-    if (isIos) {
-      const isTablet = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      return { type: 'ios', name: isTablet ? '苹果 iPad 平板' : '苹果 iPhone 手机', icon: '🍎', isMobile: true };
+    if (isIpad) {
+      return { type: 'ipad', name: '苹果 iPad 平板', icon: '📱', isMobile: true };
+    }
+    if (isIphone) {
+      return { type: 'iphone', name: '苹果 iPhone 手机', icon: '🍎', isMobile: true };
     }
     if (isAndroid) {
       return { type: 'android', name: brand, icon: '🤖', isMobile: true };
     }
     if (isWindows) {
-      return { type: 'pc', name: 'Windows 电脑', icon: '💻', isMobile: false };
+      return { type: 'windows', name: 'Windows 电脑', icon: '💻', isMobile: false };
     }
     if (isMac) {
-      return { type: 'pc', name: 'Mac 电脑', icon: '💻', isMobile: false };
+      return { type: 'mac', name: 'Mac 苹果电脑', icon: '🖥️', isMobile: false };
     }
-    return { type: 'pc', name: '桌面电脑浏览器', icon: '🌐', isMobile: false };
+    return { type: 'pc', name: '桌面电脑浏览器', icon: '💻', isMobile: false };
   }
 
   async function viewDownload(alive, initialTarget) {
     const v = $('#view');
     const dlUrl = resolveDownloadUrl((State.settings && State.settings.downloadUrl) || '');
     const dlUrlTv = resolveDownloadUrl((State.settings && State.settings.downloadUrlTv) || '');
-    const dlUrlIos = resolveDownloadUrl((State.settings && State.settings.downloadUrlIos) || '');
+    const dlUrlIphone = resolveDownloadUrl((State.settings && (State.settings.downloadUrlIos || State.settings.downloadUrlIphone)) || '');
+    const dlUrlIpad = resolveDownloadUrl((State.settings && State.settings.downloadUrlIpad) || '');
+    const dlUrlPc = resolveDownloadUrl((State.settings && State.settings.downloadUrlPc) || '');
+    const dlUrlMac = resolveDownloadUrl((State.settings && State.settings.downloadUrlMac) || '');
+    const customClients = (State.settings && Array.isArray(State.settings.customClients))
+      ? State.settings.customClients.filter(c => c && c.url && c.enabled !== false)
+      : [];
     const dev = detectClientDevice();
     const siteName = esc((State.settings && State.settings.siteName) || '晓林影院');
 
@@ -4299,13 +4308,21 @@
         ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrl)}" target="_blank" rel="noopener">📥 立即下载安卓版 (推荐此版本)</a>`
         : `<span class="dl-soon">安卓安装包整备中</span>`;
       recGuideBtn = `<button type="button" class="btn ghost js-scroll-to" data-target="dl-android-guide">⚠️ 报毒/拦截放行指引 ↓</button>`;
-    } else if (dev.type === 'ios') {
+    } else if (dev.type === 'iphone') {
       recIcon = '🍎';
-      recTitle = `推荐安装：苹果 iPhone / iPad 客户端 (免签版)`;
-      recDesc = `专为苹果 iOS 打造 · 免签证书描述文件封装 · 永久有效不掉签 · 独立全屏运行 · 丝滑秒播`;
-      recPrimaryBtn = dlUrlIos
-        ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 立即安装 iPhone 版 (推荐此版本)</a>`
-        : '';
+      recTitle = `推荐安装：苹果 iPhone 手机专版 (免签版)`;
+      recDesc = `专为苹果 iPhone 打造 · 免签证书描述文件封装 · 永久有效不掉签 · 独立全屏运行 · 丝滑秒播`;
+      recPrimaryBtn = dlUrlIphone
+        ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrlIphone)}" target="_blank" rel="noopener">🍎 立即安装 iPhone 版 (推荐此版本)</a>`
+        : `<span class="dl-soon">iPhone 版整备中</span>`;
+      recGuideBtn = `<button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">📖 4步安装教程 ↓</button>`;
+    } else if (dev.type === 'ipad') {
+      recIcon = '📱';
+      recTitle = `推荐安装：苹果 iPad 平板专版 (免签版)`;
+      recDesc = `专为苹果 iPad 大屏触控优化 · 免签证书描述文件封装 · 永不掉签 · 支持横屏与多任务分屏`;
+      recPrimaryBtn = (dlUrlIpad || dlUrlIphone)
+        ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrlIpad || dlUrlIphone)}" target="_blank" rel="noopener">📱 立即安装 iPad 专版 (推荐此版本)</a>`
+        : `<span class="dl-soon">iPad 专版整备中</span>`;
       recGuideBtn = `<button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">📖 4步安装教程 ↓</button>`;
     } else if (dev.type === 'tv') {
       recIcon = '📺';
@@ -4315,6 +4332,28 @@
         ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrlTv)}" target="_blank" rel="noopener">📺 立即下载 TV 专版 (推荐此版本)</a>`
         : `<span class="dl-soon">TV 包可联系管理员获取</span>`;
       recGuideBtn = '';
+    } else if (dev.type === 'windows') {
+      recIcon = '💻';
+      recTitle = `检测到您当前使用 Windows 电脑系统`;
+      if (dlUrlPc) {
+        recDesc = `推荐下载 Windows 官方客户端：独立桌面窗口运行 · 硬件加速 · 4K 原画超清极致秒播！`;
+        recPrimaryBtn = `<a class="btn primary dl-rec-btn" href="${esc(dlUrlPc)}" target="_blank" rel="noopener">💻 立即下载 Windows 客户端 (推荐此版本)</a>`;
+      } else {
+        recDesc = `电脑网页端已具备完整的 4K 原画超清体验！若需在手机或电视等设备上观影，可选择下方对应版本：`;
+        recPrimaryBtn = dlUrl ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrl)}" target="_blank" rel="noopener">🤖 下载安卓版 APK</a>` : '';
+      }
+      recGuideBtn = dlUrlIphone ? `<a class="btn ghost" href="${esc(dlUrlIphone)}" target="_blank" rel="noopener">🍎 iPhone 描述文件</a>` : `<button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">🍎 苹果安装指引</button>`;
+    } else if (dev.type === 'mac') {
+      recIcon = '🖥️';
+      recTitle = `检测到您当前使用 Mac 苹果电脑系统`;
+      if (dlUrlMac) {
+        recDesc = `推荐下载 Mac 官方客户端：原生丝滑体验 · 4K 超清秒播与双向云同步！`;
+        recPrimaryBtn = `<a class="btn primary dl-rec-btn" href="${esc(dlUrlMac)}" target="_blank" rel="noopener">🖥️ 立即下载 Mac 客户端 (推荐此版本)</a>`;
+      } else {
+        recDesc = `Mac 网页端已具备完整的 4K 原画超清体验！若需在 iPhone 或 iPad 上安装，请选择下方对应版本：`;
+        recPrimaryBtn = (dlUrlIpad || dlUrlIphone) ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrlIpad || dlUrlIphone)}" target="_blank" rel="noopener">📱 获取 iPad / iPhone 版</a>` : '';
+      }
+      recGuideBtn = dlUrlIphone ? `<a class="btn ghost" href="${esc(dlUrlIphone)}" target="_blank" rel="noopener">🍎 iPhone 描述文件</a>` : `<button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">🍎 苹果安装指引</button>`;
     } else {
       recIcon = '💻';
       recTitle = `检测到您当前使用电脑端浏览器 (${dev.name})`;
@@ -4322,8 +4361,8 @@
       recPrimaryBtn = dlUrl
         ? `<a class="btn primary dl-rec-btn" href="${esc(dlUrl)}" target="_blank" rel="noopener">🤖 下载安卓版 APK</a>`
         : '';
-      recGuideBtn = dlUrlIos
-        ? `<a class="btn ghost" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 iPhone 描述文件</a>`
+      recGuideBtn = dlUrlIphone
+        ? `<a class="btn ghost" href="${esc(dlUrlIphone)}" target="_blank" rel="noopener">🍎 iPhone 描述文件</a>`
         : `<button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">🍎 苹果安装指引</button>`;
     }
 
@@ -4333,9 +4372,18 @@
     const tvBtn = dlUrlTv
       ? `<a class="btn primary" href="${esc(dlUrlTv)}" target="_blank" rel="noopener">📥 下载 TV / 盒子版</a>`
       : '';
-    const iosBtn = dlUrlIos
-      ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener" style="margin-bottom:10px">🍎 安装 iPhone 客户端</a>`
-      : '';
+    const iphoneBtn = dlUrlIphone
+      ? `<a class="btn primary" href="${esc(dlUrlIphone)}" target="_blank" rel="noopener" style="margin-bottom:10px">🍎 安装 iPhone 客户端</a>`
+      : `<span class="dl-soon" style="margin-bottom:10px">iPhone 包整备中</span>`;
+    const ipadBtn = (dlUrlIpad || dlUrlIphone)
+      ? `<a class="btn primary" href="${esc(dlUrlIpad || dlUrlIphone)}" target="_blank" rel="noopener" style="margin-bottom:10px">📱 安装 iPad 专版</a>`
+      : `<span class="dl-soon" style="margin-bottom:10px">iPad 专版整备中</span>`;
+    const pcBtn = dlUrlPc
+      ? `<a class="btn primary" href="${esc(dlUrlPc)}" target="_blank" rel="noopener">💻 下载 Windows 客户端</a>`
+      : `<span class="dl-soon">Windows 客户端整备中</span>`;
+    const macBtn = dlUrlMac
+      ? `<a class="btn primary" href="${esc(dlUrlMac)}" target="_blank" rel="noopener">🖥️ 下载 Mac 客户端</a>`
+      : `<span class="dl-soon">Mac 客户端整备中</span>`;
 
     const inAppNotice = inApp() ? `
       <div class="dl-notice-banner">
@@ -4383,8 +4431,9 @@
           <p class="dl-slogan">装进口袋的私人影院 —— 全屏沉浸 · 收藏云同步 · 大屏同享</p>
           <div class="dl-hero-cta">
             ${apkBtn}
-            ${dlUrlIos ? `<a class="btn primary" href="${esc(dlUrlIos)}" target="_blank" rel="noopener">🍎 安装 iPhone 版</a>` : ''}
-            <button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">🍎 iPhone 教程</button>
+            ${dlUrlIphone ? `<a class="btn primary" href="${esc(dlUrlIphone)}" target="_blank" rel="noopener">🍎 安装 iPhone 版</a>` : ''}
+            ${dlUrlIpad ? `<a class="btn primary" href="${esc(dlUrlIpad)}" target="_blank" rel="noopener">📱 安装 iPad 版</a>` : ''}
+            <button type="button" class="btn ghost js-scroll-to" data-target="dl-ios-guide">🍎 苹果安装教程</button>
           </div>
         </section>
 
@@ -4393,8 +4442,9 @@
           <span>🎬 全屏沉浸</span><span>☁️ 双向云同步</span><span>⚡ 聚合秒搜</span><span>📶 电视直播</span><span>🌗 护眼暗色</span>
         </section>
 
-        <!-- 三端卡片 -->
+        <!-- 多端客户端卡片列表 -->
         <section class="dl-grid">
+          <!-- 1. 安卓手机 / 平板 -->
           <div class="dl-card ${dev.type === 'android' ? 'hot matched' : ''}">
             ${dev.type === 'android' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
             <div class="dl-badge" style="--bd1:#3ddc84;--bd2:#0f9d58">🤖</div>
@@ -4405,6 +4455,8 @@
               <button type="button" class="btn ghost small js-scroll-to" data-target="dl-android-guide" style="font-size:11.5px;padding:4px 10px;cursor:pointer">⚠️ 报毒/拦截放行指引 ↓</button>
             </div>
           </div>
+
+          <!-- 2. 电视 / 机顶盒 -->
           <div class="dl-card ${dev.type === 'tv' ? 'hot matched' : ''}">
             ${dev.type === 'tv' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
             <div class="dl-badge" style="--bd1:#8ab4ff;--bd2:#5b7fff">📺</div>
@@ -4412,20 +4464,65 @@
             <p>内置 TV 启动器 · 遥控器直用<br>大屏观影最佳选择</p>
             ${tvBtn || '<span class="dl-soon">TV 包可联系管理员获取</span>'}
           </div>
-          <div class="dl-card ${dev.type === 'ios' ? 'hot matched' : ''}" id="dl-ios">
-            ${dev.type === 'ios' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
+
+          <!-- 3. iPhone 手机专版 -->
+          <div class="dl-card ${dev.type === 'iphone' ? 'hot matched' : ''}" id="dl-iphone">
+            ${dev.type === 'iphone' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
             <div class="dl-badge iosb">🍎</div>
-            <h4>iPhone / iPad</h4>
+            <h4>iPhone 手机专版</h4>
             <div style="margin-bottom:8px">
               <span class="chip on" style="font-size:11px;background:rgba(91,140,255,.15);color:var(--acc);border-color:rgba(91,140,255,.3)">
                 免签描述文件 · 永不掉签
               </span>
             </div>
-            ${iosBtn}
+            ${iphoneBtn}
             <div style="margin-top:8px">
               <button type="button" class="btn ghost small js-scroll-to" data-target="dl-ios-guide" style="font-size:11.5px;padding:4px 10px;cursor:pointer">📖 描述文件 4步安装教程 ↓</button>
             </div>
           </div>
+
+          <!-- 4. iPad 平板专版 -->
+          <div class="dl-card ${dev.type === 'ipad' ? 'hot matched' : ''}" id="dl-ipad">
+            ${dev.type === 'ipad' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
+            <div class="dl-badge" style="--bd1:#a855f7;--bd2:#7c3aed">📱</div>
+            <h4>iPad 平板专版</h4>
+            <div style="margin-bottom:8px">
+              <span class="chip on" style="font-size:11px;background:rgba(168,85,247,.15);color:#c084fc;border-color:rgba(168,85,247,.3)">
+                大屏免签 · 分屏多任务
+              </span>
+            </div>
+            ${ipadBtn}
+            <div style="margin-top:8px">
+              <button type="button" class="btn ghost small js-scroll-to" data-target="dl-ios-guide" style="font-size:11.5px;padding:4px 10px;cursor:pointer">📖 描述文件 4步安装教程 ↓</button>
+            </div>
+          </div>
+
+          <!-- 5. Windows 电脑客户端 -->
+          <div class="dl-card ${dev.type === 'windows' ? 'hot matched' : ''}" id="dl-pc">
+            ${dev.type === 'windows' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
+            <div class="dl-badge" style="--bd1:#0ea5e9;--bd2:#0284c7">💻</div>
+            <h4>Windows 电脑客户端</h4>
+            <p>支持 Win10 / Win11 桌面版<br>硬件加速 · 4K 原画极致秒播</p>
+            ${pcBtn}
+          </div>
+
+          <!-- 6. Mac 苹果电脑客户端 -->
+          <div class="dl-card ${dev.type === 'mac' ? 'hot matched' : ''}" id="dl-mac">
+            ${dev.type === 'mac' ? '<i class="dl-ribbon">⭐ 本机最适配</i>' : ''}
+            <div class="dl-badge" style="--bd1:#64748b;--bd2:#334155">🖥️</div>
+            <h4>Mac 电脑客户端</h4>
+            <p>macOS 原生独立窗口观影<br>双向云同步 · 丝滑触控板手势</p>
+            ${macBtn}
+          </div>
+
+          <!-- 7. 管理员自定义设备客户端 (若有) -->
+          ${customClients.map(c => `
+          <div class="dl-card">
+            <div class="dl-badge" style="--bd1:#f59e0b;--bd2:#d97706">${esc(c.icon || '📱')}</div>
+            <h4>${esc(c.name)}</h4>
+            <p>${esc(c.desc || '官方独立客户端 · 畅享原画秒播')}</p>
+            <a class="btn primary" href="${esc(resolveDownloadUrl(c.url))}" target="_blank" rel="noopener">📥 立即下载 ${esc(c.name)}</a>
+          </div>`).join('')}
         </section>
 
         <!-- 安卓手机报毒/风险放行指引 -->
@@ -4504,14 +4601,14 @@
 
           <div style="padding:10px 14px;border-radius:10px;background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.25);font-size:13px;line-height:1.6;margin-bottom:14px">
             <b style="color:#facc15">⚠️ 苹果用户关键提示：</b>
-            必须使用 iPhone 自带的 <b>Safari 浏览器</b> 访问并安装（微信内请点右上角「⋯」选择「在 Safari 中打开」）。
+            必须使用 iPhone / iPad 自带的 <b>Safari 浏览器</b> 访问并安装（微信内请点右上角「⋯」选择「在 Safari 中打开」）。
           </div>
 
           <div class="dl-ios-steps-box">
             <div class="dl-ios-step-row">
               <div class="dl-ios-step-num">1</div>
               <div class="dl-ios-step-text">
-                <b>下载描述文件：</b>使用 Safari 打开本页面，点击上方 <b>【🍎 安装 iPhone 客户端】</b> 按钮。
+                <b>下载描述文件：</b>使用 Safari 打开本页面，点击上方 <b>【🍎 安装 iPhone 客户端】</b> 或 <b>【📱 安装 iPad 专版】</b> 按钮。
               </div>
             </div>
             <div class="dl-ios-step-row">
@@ -4523,13 +4620,13 @@
             <div class="dl-ios-step-row">
               <div class="dl-ios-step-num">3</div>
               <div class="dl-ios-step-text">
-                <b>打开手机设置：</b>返回手机主屏幕，打开 <b>【设置】⚙️</b>，在顶部个人账号正下方即可看到 <b>【已下载描述文件】</b>（若未显示，可前往「设置」➔「通用」➔「VPN 与设备管理」）。
+                <b>打开设备设置：</b>返回手机/平板主屏幕，打开 <b>【设置】⚙️</b>，在顶部个人账号正下方即可看到 <b>【已下载描述文件】</b>（若未显示，可前往「设置」➔「通用」➔「VPN 与设备管理」）。
               </div>
             </div>
             <div class="dl-ios-step-row">
               <div class="dl-ios-step-num">4</div>
               <div class="dl-ios-step-text">
-                <b>点击安装并激活：</b>点击进入描述文件，点击右上角 <b>【安装】</b>，输入您的 <b>iPhone 锁屏密码</b>，随后再次点击底部 <b>【安装】</b>。安装完成后桌面上将自动生成官方 App 图标，点击即可畅享观影！
+                <b>点击安装并激活：</b>点击进入描述文件，点击右上角 <b>【安装】</b>，输入您的 <b>设备锁屏密码</b>，随后再次点击底部 <b>【安装】</b>。安装完成后桌面上将自动生成官方 App 图标，点击即可畅享观影！
               </div>
             </div>
           </div>
@@ -6230,6 +6327,10 @@
         const phoneMode = s.downloadUrlMode === 'custom' ? 'custom' : 'fixed';
         const tvMode = (s.downloadUrlTvMode === 'fixed' || s.downloadUrlTvMode === 'custom') ? s.downloadUrlTvMode : 'off';
         const iosMode = s.downloadUrlIosMode === 'custom' ? 'custom' : 'off';
+        const ipadMode = s.downloadUrlIpadMode === 'custom' ? 'custom' : 'off';
+        const pcMode = s.downloadUrlPcMode === 'custom' ? 'custom' : 'off';
+        const macMode = s.downloadUrlMacMode === 'custom' ? 'custom' : 'off';
+        let curCustomClients = Array.isArray(s.customClients) ? JSON.parse(JSON.stringify(s.customClients)) : [];
         const fixedPhone = '/APP/xiaolintv-phone-latest.apk';
         const fixedTv = '/APP/xiaolintv-tv-latest.apk';
 
@@ -6295,20 +6396,77 @@
               <input class="field-input" id="dlUrlTvInput" value="${esc(s.downloadUrlTv || '')}" placeholder="https://… 或 /APP/xxx.apk">
             </div>
 
-            <h4 style="margin:22px 0 8px;font-size:14px">🍎 苹果 iPhone / iPad 版</h4>
+            <!-- 3. iPhone 手机专版 -->
+            <h4 style="margin:22px 0 8px;font-size:14px">🍎 苹果 iPhone 手机专版</h4>
             <div class="dl-mode-row" id="iosModeRow">
               <button type="button" class="chip dl-mode-btn ${iosMode === 'off' ? 'on' : ''}" data-mode="off">关闭（使用主屏教程）</button>
               <button type="button" class="chip dl-mode-btn ${iosMode === 'custom' ? 'on' : ''}" data-mode="custom">自定义下载/安装地址</button>
             </div>
             <div id="iosOffHint" class="${iosMode === 'off' ? '' : 'hidden'}" style="margin-top:10px">
-              <p class="hint">已关闭安装链接：前台下载页仅展示 Safari 添加到主屏幕教程。</p>
+              <p class="hint">已关闭 iPhone 安装链接：前台下载页仅展示 Safari 添加到主屏幕教程。</p>
             </div>
             <div id="iosCustomBox" class="${iosMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
-              <label class="field-label">iPhone / iPad 下载或安装地址（支持 App Store / TestFlight / 企业签 / 描述文件 / 站内路径）</label>
-              <input class="field-input" id="dlUrlIosInput" value="${esc(s.downloadUrlIos || '')}" placeholder="https://… 或 /APP/xiaolin.mobileconfig">
+              <label class="field-label">iPhone 安装/下载地址（免签描述文件 .mobileconfig / IPA / TestFlight / 分发链接）</label>
+              <input class="field-input" id="dlUrlIosInput" value="${esc(s.downloadUrlIos || '')}" placeholder="https://… 或 /APP/xiaolin-iphone.mobileconfig">
             </div>
 
-            <button class="btn primary" id="savePromoBtn" style="margin-top:16px">保存下载与访问控制</button>
+            <!-- 4. iPad 平板专版 -->
+            <h4 style="margin:22px 0 8px;font-size:14px">📱 苹果 iPad 平板专版</h4>
+            <div class="dl-mode-row" id="ipadModeRow">
+              <button type="button" class="chip dl-mode-btn ${ipadMode === 'off' ? 'on' : ''}" data-mode="off">关闭（使用主屏教程）</button>
+              <button type="button" class="chip dl-mode-btn ${ipadMode === 'custom' ? 'on' : ''}" data-mode="custom">自定义下载/安装地址</button>
+            </div>
+            <div id="ipadOffHint" class="${ipadMode === 'off' ? '' : 'hidden'}" style="margin-top:10px">
+              <p class="hint">已关闭 iPad 安装链接：若有 iPhone 链接则共用，否则前台展示 Safari 教程。</p>
+            </div>
+            <div id="ipadCustomBox" class="${ipadMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
+              <label class="field-label">iPad 专属下载/安装地址（iPad 专版描述文件 .mobileconfig / IPA / 分发链接）</label>
+              <input class="field-input" id="dlUrlIpadInput" value="${esc(s.downloadUrlIpad || '')}" placeholder="https://… 或 /APP/xiaolin-ipad.mobileconfig">
+            </div>
+
+            <!-- 5. Windows 电脑客户端 -->
+            <h4 style="margin:22px 0 8px;font-size:14px">💻 Windows 电脑客户端</h4>
+            <div class="dl-mode-row" id="pcModeRow">
+              <button type="button" class="chip dl-mode-btn ${pcMode === 'off' ? 'on' : ''}" data-mode="off">关闭</button>
+              <button type="button" class="chip dl-mode-btn ${pcMode === 'custom' ? 'on' : ''}" data-mode="custom">自定义下载地址</button>
+            </div>
+            <div id="pcOffHint" class="${pcMode === 'off' ? '' : 'hidden'}" style="margin-top:10px">
+              <p class="hint">已关闭：前台提示电脑网页端已享 4K 超清秒播。</p>
+            </div>
+            <div id="pcCustomBox" class="${pcMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
+              <label class="field-label">Windows 客户端下载地址（.exe / .zip / 网盘下载直链）</label>
+              <input class="field-input" id="dlUrlPcInput" value="${esc(s.downloadUrlPc || '')}" placeholder="https://… 或 /APP/xiaolin-win-setup.exe">
+            </div>
+
+            <!-- 6. Mac 苹果电脑客户端 -->
+            <h4 style="margin:22px 0 8px;font-size:14px">🖥️ Mac 苹果电脑客户端</h4>
+            <div class="dl-mode-row" id="macModeRow">
+              <button type="button" class="chip dl-mode-btn ${macMode === 'off' ? 'on' : ''}" data-mode="off">关闭</button>
+              <button type="button" class="chip dl-mode-btn ${macMode === 'custom' ? 'on' : ''}" data-mode="custom">自定义下载地址</button>
+            </div>
+            <div id="macOffHint" class="${macMode === 'off' ? '' : 'hidden'}" style="margin-top:10px">
+              <p class="hint">已关闭：前台提示 Mac 网页端已享 4K 超清秒播。</p>
+            </div>
+            <div id="macCustomBox" class="${macMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
+              <label class="field-label">Mac 客户端下载地址（.dmg / .app.zip / 网盘下载直链）</label>
+              <input class="field-input" id="dlUrlMacInput" value="${esc(s.downloadUrlMac || '')}" placeholder="https://… 或 /APP/xiaolin-mac.dmg">
+            </div>
+
+            <!-- 7. 更多自定义设备客户端管理 -->
+            <div style="border-top:1px dashed var(--card-br);padding-top:16px;margin-top:20px">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+                <h4 style="margin:0;font-size:14px;color:var(--acc)">🌐 更多自定义设备客户端（支持自主增删任意设备）</h4>
+                <button type="button" class="btn small" id="addCustomClientBtn" style="background:rgba(91,140,255,.15);color:var(--acc);border:1px solid rgba(91,140,255,.3)">
+                  ➕ 添加新设备客户端
+                </button>
+              </div>
+              <p class="hint" style="margin-bottom:12px">
+                管理员可根据需要任意增加其他设备版本（如：鸿蒙 NEXT 原生版、Linux 客户端、车机中控版、掌机版等），保存后自动在前台下载中心生成独立卡片！
+              </p>
+              <div id="customClientsContainer" style="display:flex;flex-direction:column;gap:10px"></div>
+            </div>
+
+            <button class="btn primary" id="savePromoBtn" style="margin-top:16px">保存全平台下载与访问控制</button>
           </div>
 
           <!-- 🔄 App 版本更新两阶段确认发布卡片 -->
@@ -6389,6 +6547,10 @@
         let curPhoneMode = phoneMode;
         let curTvMode = tvMode;
         let curIosMode = iosMode;
+        let curIpadMode = ipadMode;
+        let curPcMode = pcMode;
+        let curMacMode = macMode;
+
         const syncPhoneUi = () => {
           $$('#phoneModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curPhoneMode));
           $('#phoneFixedBox').classList.toggle('hidden', curPhoneMode !== 'fixed');
@@ -6405,6 +6567,22 @@
           $('#iosOffHint').classList.toggle('hidden', curIosMode !== 'off');
           $('#iosCustomBox').classList.toggle('hidden', curIosMode !== 'custom');
         };
+        const syncIpadUi = () => {
+          $$('#ipadModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curIpadMode));
+          $('#ipadOffHint').classList.toggle('hidden', curIpadMode !== 'off');
+          $('#ipadCustomBox').classList.toggle('hidden', curIpadMode !== 'custom');
+        };
+        const syncPcUi = () => {
+          $$('#pcModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curPcMode));
+          $('#pcOffHint').classList.toggle('hidden', curPcMode !== 'off');
+          $('#pcCustomBox').classList.toggle('hidden', curPcMode !== 'custom');
+        };
+        const syncMacUi = () => {
+          $$('#macModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curMacMode));
+          $('#macOffHint').classList.toggle('hidden', curMacMode !== 'off');
+          $('#macCustomBox').classList.toggle('hidden', curMacMode !== 'custom');
+        };
+
         $$('#phoneModeRow .dl-mode-btn').forEach((btn) => {
           btn.addEventListener('click', () => { curPhoneMode = btn.dataset.mode; syncPhoneUi(); });
         });
@@ -6414,11 +6592,74 @@
         $$('#iosModeRow .dl-mode-btn').forEach((btn) => {
           btn.addEventListener('click', () => { curIosMode = btn.dataset.mode; syncIosUi(); });
         });
+        $$('#ipadModeRow .dl-mode-btn').forEach((btn) => {
+          btn.addEventListener('click', () => { curIpadMode = btn.dataset.mode; syncIpadUi(); });
+        });
+        $$('#pcModeRow .dl-mode-btn').forEach((btn) => {
+          btn.addEventListener('click', () => { curPcMode = btn.dataset.mode; syncPcUi(); });
+        });
+        $$('#macModeRow .dl-mode-btn').forEach((btn) => {
+          btn.addEventListener('click', () => { curMacMode = btn.dataset.mode; syncMacUi(); });
+        });
+
+        function renderCustomClientsList() {
+          const wrap = $('#customClientsContainer');
+          if (!wrap) return;
+          if (!curCustomClients.length) {
+            wrap.innerHTML = '<div style="padding:14px;text-align:center;color:var(--dim);background:rgba(0,0,0,.15);border-radius:10px;font-size:12.5px">暂无自定义设备客户端。点击上方「➕ 添加新设备客户端」即可自主添加车机版、Linux版、鸿蒙NEXT版等</div>';
+            return;
+          }
+          wrap.innerHTML = curCustomClients.map((c, i) => `
+            <div class="custom-client-row" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid var(--card-br);border-radius:10px;flex-wrap:wrap">
+              <input class="field-input cc-icon" style="width:52px;text-align:center;font-size:18px" value="${esc(c.icon || '📱')}" placeholder="图标" title="图标 Emoji">
+              <input class="field-input cc-name" style="width:160px;font-weight:700" value="${esc(c.name || '')}" placeholder="设备名称(如:鸿蒙NEXT)">
+              <input class="field-input cc-url" style="flex:1;min-width:200px" value="${esc(c.url || '')}" placeholder="下载链接(https://... 或 /APP/...)">
+              <input class="field-input cc-desc" style="flex:1;min-width:180px" value="${esc(c.desc || '')}" placeholder="简要说明(可选)">
+              <button type="button" class="btn danger small cc-del-btn" data-idx="${i}">🗑️ 删除</button>
+            </div>
+          `).join('');
+
+          $$('.cc-del-btn', wrap).forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const idx = parseInt(btn.dataset.idx, 10);
+              curCustomClients.splice(idx, 1);
+              renderCustomClientsList();
+            });
+          });
+          $$('.cc-icon', wrap).forEach((inp, idx) => {
+            inp.addEventListener('input', () => { curCustomClients[idx].icon = inp.value.trim(); });
+          });
+          $$('.cc-name', wrap).forEach((inp, idx) => {
+            inp.addEventListener('input', () => { curCustomClients[idx].name = inp.value.trim(); });
+          });
+          $$('.cc-url', wrap).forEach((inp, idx) => {
+            inp.addEventListener('input', () => { curCustomClients[idx].url = inp.value.trim(); });
+          });
+          $$('.cc-desc', wrap).forEach((inp, idx) => {
+            inp.addEventListener('input', () => { curCustomClients[idx].desc = inp.value.trim(); });
+          });
+        }
+        renderCustomClientsList();
+
+        $('#addCustomClientBtn') && $('#addCustomClientBtn').addEventListener('click', () => {
+          curCustomClients.push({
+            id: 'client_' + Date.now(),
+            icon: '📱',
+            name: '新设备客户端',
+            url: '',
+            desc: '官方独立客户端 · 畅享原画秒播',
+            enabled: true,
+          });
+          renderCustomClientsList();
+        });
 
         $('#savePromoBtn').addEventListener('click', async () => {
           const url = ($('#dlUrlInput') && $('#dlUrlInput').value.trim()) || '';
           const urlTv = ($('#dlUrlTvInput') && $('#dlUrlTvInput').value.trim()) || '';
           const urlIos = ($('#dlUrlIosInput') && $('#dlUrlIosInput').value.trim()) || '';
+          const urlIpad = ($('#dlUrlIpadInput') && $('#dlUrlIpadInput').value.trim()) || '';
+          const urlPc = ($('#dlUrlPcInput') && $('#dlUrlPcInput').value.trim()) || '';
+          const urlMac = ($('#dlUrlMacInput') && $('#dlUrlMacInput').value.trim()) || '';
           const mobileLimit = Number(($('#mobileLimitInput') && $('#mobileLimitInput').value) || 10);
           if (curPhoneMode === 'custom' && !isValidDownloadUrlInput(url)) {
             return toast('手机自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
@@ -6428,6 +6669,15 @@
           }
           if (curIosMode === 'custom' && !isValidDownloadUrlInput(urlIos)) {
             return toast('iPhone 自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
+          }
+          if (curIpadMode === 'custom' && !isValidDownloadUrlInput(urlIpad)) {
+            return toast('iPad 自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
+          }
+          if (curPcMode === 'custom' && !isValidDownloadUrlInput(urlPc)) {
+            return toast('Windows 自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
+          }
+          if (curMacMode === 'custom' && !isValidDownloadUrlInput(urlMac)) {
+            return toast('Mac 自定义地址需为 http(s) 或站内路径 /APP/...', 'err');
           }
           try {
             const patch = {
@@ -6439,20 +6689,34 @@
               downloadUrlTv: urlTv,
               downloadUrlIosMode: curIosMode,
               downloadUrlIos: urlIos,
+              downloadUrlIpadMode: curIpadMode,
+              downloadUrlIpad: urlIpad,
+              downloadUrlPcMode: curPcMode,
+              downloadUrlPc: urlPc,
+              downloadUrlMacMode: curMacMode,
+              downloadUrlMac: urlMac,
+              customClients: curCustomClients,
             };
             await API.adminSaveSettings(patch);
             const effPhone = curPhoneMode === 'custom' ? url : fixedPhone;
             const effTv = curTvMode === 'fixed' ? fixedTv : (curTvMode === 'custom' ? urlTv : '');
             const effIos = curIosMode === 'custom' ? urlIos : '';
+            const effIpad = curIpadMode === 'custom' ? urlIpad : '';
+            const effPc = curPcMode === 'custom' ? urlPc : '';
+            const effMac = curMacMode === 'custom' ? urlMac : '';
             State.settings = {
               ...State.settings,
               ...patch,
               downloadUrl: effPhone,
               downloadUrlTv: effTv,
               downloadUrlIos: effIos,
+              downloadUrlIpad: effIpad,
+              downloadUrlPc: effPc,
+              downloadUrlMac: effMac,
+              customClients: curCustomClients,
             };
             store.set('cached_settings', State.settings);
-            toast('下载与访问控制已保存', 'ok');
+            toast('全平台客户端下载与访问控制已保存', 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
 

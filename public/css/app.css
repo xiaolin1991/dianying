@@ -538,6 +538,15 @@ html, body { overflow-x: hidden; }
   position: relative;
 }
 
+/* ---- 自定义客户端后台管理条目 ---- */
+.custom-client-row {
+  transition: border-color .2s, background .2s;
+}
+.custom-client-row:hover {
+  border-color: rgba(91, 140, 255, .4);
+  background: rgba(255, 255, 255, .05);
+}
+
 /* ---- 下载页安装指引卡片增强 ---- */
 .dl-notice-banner {
   display: flex; align-items: center; gap: 10px;

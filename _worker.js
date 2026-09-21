@@ -59,7 +59,14 @@ const DEFAULT_SETTINGS = {
   downloadUrlTvMode: 'off', // off=不提供 | fixed=站内最新 | custom=自定义
   downloadUrlTv: '',    // 自定义 TV APK 地址(仅 custom 模式生效)
   downloadUrlIosMode: 'off', // off=不提供 | custom=自定义
-  downloadUrlIos: '',   // 自定义 iPhone / iOS 客户端安装或下载地址(蒲公英/TestFlight/链接)
+  downloadUrlIos: '',   // 自定义 iPhone / iOS 手机客户端安装或下载地址(蒲公英/TestFlight/免签/链接)
+  downloadUrlIpadMode: 'off', // off=不提供 | custom=自定义
+  downloadUrlIpad: '',  // 自定义 iPad 平板客户端安装或下载地址
+  downloadUrlPcMode: 'off', // off=不提供 | custom=自定义
+  downloadUrlPc: '',    // 自定义 Windows 电脑客户端下载地址
+  downloadUrlMacMode: 'off', // off=不提供 | custom=自定义
+  downloadUrlMac: '',   // 自定义 Mac 苹果电脑客户端下载地址
+  customClients: [],    // 更多自定义设备客户端: [{ id, name, icon, url, desc, enabled }]
   regGiftAdultMonths: 1, // 新注册用户自动赠送私密福利时长(月数, 0=不赠送, 1=1个月, 2=2个月, 3=3个月)
   // App 版本发布控制 (必须管理员点击【确认正式发布】后才向客户端下发弹窗)
   appVersionActive: false, // 线上客户端是否激活推送
@@ -335,6 +342,32 @@ function iosDlMode(s) {
   const m = s && s.downloadUrlIosMode;
   return m === 'custom' ? 'custom' : (s && s.downloadUrlIos ? 'custom' : 'off');
 }
+function ipadDlMode(s) {
+  const m = s && s.downloadUrlIpadMode;
+  return m === 'custom' ? 'custom' : (s && s.downloadUrlIpad ? 'custom' : 'off');
+}
+function pcDlMode(s) {
+  const m = s && s.downloadUrlPcMode;
+  return m === 'custom' ? 'custom' : (s && s.downloadUrlPc ? 'custom' : 'off');
+}
+function macDlMode(s) {
+  const m = s && s.downloadUrlMacMode;
+  return m === 'custom' ? 'custom' : (s && s.downloadUrlMac ? 'custom' : 'off');
+}
+function sanitizeCustomClients(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 30).map((item, idx) => {
+    if (!item || typeof item !== 'object') return null;
+    const name = String(item.name || '').trim().slice(0, 40);
+    const url = String(item.url || '').trim().slice(0, 300);
+    if (!name || !url) return null;
+    const icon = String(item.icon || '📱').trim().slice(0, 10);
+    const desc = String(item.desc || '').trim().slice(0, 120);
+    const id = String(item.id || ('client_' + (idx + 1))).trim().slice(0, 30);
+    const enabled = item.enabled !== false;
+    return { id, name, icon, url, desc, enabled };
+  }).filter(Boolean);
+}
 /** 对外生效的下载地址(固定模式忽略自定义字段) */
 function effectiveDownloadUrls(s) {
   const phone = phoneDlMode(s) === 'custom'
@@ -345,7 +378,19 @@ function effectiveDownloadUrls(s) {
   if (tm === 'fixed') tv = FIXED_TV_APK;
   else if (tm === 'custom') tv = String(s.downloadUrlTv || '').trim();
   const ios = String((s && s.downloadUrlIos) || '').trim();
-  return { downloadUrl: phone, downloadUrlTv: tv, downloadUrlIos: ios };
+  const ipad = String((s && s.downloadUrlIpad) || '').trim();
+  const pc = String((s && s.downloadUrlPc) || '').trim();
+  const mac = String((s && s.downloadUrlMac) || '').trim();
+  const customClients = sanitizeCustomClients((s && s.customClients) || []);
+  return {
+    downloadUrl: phone,
+    downloadUrlTv: tv,
+    downloadUrlIos: ios,
+    downloadUrlIpad: ipad,
+    downloadUrlPc: pc,
+    downloadUrlMac: mac,
+    customClients,
+  };
 }
 
 const APP_MANIFEST_KEY = 'app_manifest';
@@ -793,6 +838,21 @@ async function saveSettings(env, patch) {
     next.downloadUrlIosMode = patch.downloadUrlIosMode === 'custom' ? 'custom' : 'off';
   }
   if (typeof patch.downloadUrlIos === 'string') next.downloadUrlIos = patch.downloadUrlIos.trim().slice(0, 300);
+  if (typeof patch.downloadUrlIpadMode === 'string') {
+    next.downloadUrlIpadMode = patch.downloadUrlIpadMode === 'custom' ? 'custom' : 'off';
+  }
+  if (typeof patch.downloadUrlIpad === 'string') next.downloadUrlIpad = patch.downloadUrlIpad.trim().slice(0, 300);
+  if (typeof patch.downloadUrlPcMode === 'string') {
+    next.downloadUrlPcMode = patch.downloadUrlPcMode === 'custom' ? 'custom' : 'off';
+  }
+  if (typeof patch.downloadUrlPc === 'string') next.downloadUrlPc = patch.downloadUrlPc.trim().slice(0, 300);
+  if (typeof patch.downloadUrlMacMode === 'string') {
+    next.downloadUrlMacMode = patch.downloadUrlMacMode === 'custom' ? 'custom' : 'off';
+  }
+  if (typeof patch.downloadUrlMac === 'string') next.downloadUrlMac = patch.downloadUrlMac.trim().slice(0, 300);
+  if (Array.isArray(patch.customClients)) {
+    next.customClients = sanitizeCustomClients(patch.customClients);
+  }
   if (patch.regGiftAdultMonths !== undefined) {
     const rm = Math.max(0, Math.min(12, Math.round(Number(patch.regGiftAdultMonths)) || 0));
     next.regGiftAdultMonths = rm;
@@ -1632,9 +1692,16 @@ export default {
           downloadUrl: dl.downloadUrl,
           downloadUrlTv: dl.downloadUrlTv,
           downloadUrlIos: dl.downloadUrlIos || '',
+          downloadUrlIpad: dl.downloadUrlIpad || '',
+          downloadUrlPc: dl.downloadUrlPc || '',
+          downloadUrlMac: dl.downloadUrlMac || '',
           downloadUrlMode: phoneDlMode(s),
           downloadUrlTvMode: tvDlMode(s),
           downloadUrlIosMode: iosDlMode(s),
+          downloadUrlIpadMode: ipadDlMode(s),
+          downloadUrlPcMode: pcDlMode(s),
+          downloadUrlMacMode: macDlMode(s),
+          customClients: dl.customClients || [],
           regGiftAdultMonths: Number(s.regGiftAdultMonths == null ? 1 : s.regGiftAdultMonths),
           appVersionActive: !!s.appVersionActive,
           appVersionAuto: ver.appVersionAuto,
@@ -2339,6 +2406,16 @@ export default {
             downloadUrlIosMode: iosDlMode(s),
             downloadUrlIos: s.downloadUrlIos || '',
             downloadUrlIosEffective: dl.downloadUrlIos,
+            downloadUrlIpadMode: ipadDlMode(s),
+            downloadUrlIpad: s.downloadUrlIpad || '',
+            downloadUrlIpadEffective: dl.downloadUrlIpad,
+            downloadUrlPcMode: pcDlMode(s),
+            downloadUrlPc: s.downloadUrlPc || '',
+            downloadUrlPcEffective: dl.downloadUrlPc,
+            downloadUrlMacMode: macDlMode(s),
+            downloadUrlMac: s.downloadUrlMac || '',
+            downloadUrlMacEffective: dl.downloadUrlMac,
+            customClients: dl.customClients || [],
             regGiftAdultMonths: Number(s.regGiftAdultMonths == null ? 1 : s.regGiftAdultMonths),
             // App 版本发布控制 (线上发布状态 vs 待发布草稿)
             appVersionActive: !!s.appVersionActive,
