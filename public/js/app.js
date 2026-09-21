@@ -3716,7 +3716,7 @@
             <button class="chip ${sortBySpeed ? 'on' : ''}" id="sortSpeed" title="按响应速度排序">⚡ 速度优先</button>
           </div>
         </div>
-        <button class="btn ghost small src-switch-m" id="srcPickBtn">🔀 切换播放源：当前「${esc(cleanSrcName(cur))}」 ${speedBadge(cur.key)}</button>
+        <button class="btn ghost small src-switch-m" id="srcPickBtn" type="button">🔀 切换播放源：当前「${esc(cleanSrcName(cur))}」 ${speedBadge(cur.key)}</button>
         <div class="src-layout">
           <aside class="src-list" id="srcList">
             ${ordered.map((s) => `
@@ -3739,6 +3739,7 @@
       });
       const pickBtn = $('#srcPickBtn');
       if (pickBtn) pickBtn.addEventListener('click', () => {
+        document.querySelectorAll('.modal-mask').forEach(m => m.remove());
         const box = document.createElement('div');
         box.className = 'modal-mask';
         box.innerHTML = `<div class="modal-box" style="width:min(92vw,540px)">
@@ -3752,11 +3753,17 @@
               </a>`).join('')}</div>
           </div>`;
         box.addEventListener('click', (ev) => {
-          if (ev.target === box || ev.target.closest('a.src-row')) box.remove();
+          if (ev.target === box) {
+            box.remove();
+          } else if (ev.target.closest('a.src-row')) {
+            setTimeout(() => box.remove(), 120);
+          }
         });
         const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
         closeBtn.className = 'modal-close';
         closeBtn.textContent = '×';
+        closeBtn.setAttribute('aria-label', '关闭');
         closeBtn.addEventListener('click', () => box.remove());
         const mbox1918 = box.querySelector('.modal-box');
         if (mbox1918) mbox1918.appendChild(closeBtn);
