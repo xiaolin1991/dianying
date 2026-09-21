@@ -2395,17 +2395,24 @@
     document.addEventListener('keydown', onFsEsc);
     const onFsChange = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-      if (fsEl === video) {
+      if (fsEl === video || fsEl === wrap) {
         syncPpBtn();
         refreshPlayerWm();
         return;
       }
       if (!fsEl) {
-        resetBrightness();
         const wrapEl = $('#videoWrap');
-        if (wrapEl && !wrapEl.classList.contains('fake-fs')) {
-          document.body.style.overflow = '';
-          document.documentElement.classList.remove('player-fs');
+        if (wrapEl && wrapEl.classList.contains('fake-fs')) {
+          // 浏览器原生全屏被退出(如按返回键), 同步清除 fake-fs/fs-rotated 旋转态
+          // fromPopstate=true 防止再次 history.back() 误退出播放页
+          autoFsByOrient = false;
+          exitFakeFs(true);
+        } else {
+          resetBrightness();
+          if (wrapEl) {
+            document.body.style.overflow = '';
+            document.documentElement.classList.remove('player-fs');
+          }
         }
       }
       syncPpBtn();
