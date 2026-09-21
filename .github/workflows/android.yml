@@ -3,7 +3,8 @@
 # 方式 1: 网页测试正常后，在 GitHub Actions 页面点击 "Run workflow"，输入 yes 确认触发
 # 方式 2: 后台管理中心「App 版本更新」点击「🚀 确认网页正常，立即触发构建 APK」
 # 方式 3: 确认版本后推送版本标签触发（例如 git tag v1.0.77 && git push origin v1.0.77）
-# 方式 4: 提交信息含有 [build-apk] 或 [apk] 标签（例如 git commit -m "release: ... [build-apk]"）
+name: 'Build APK'
+
 on:
   workflow_dispatch:
     inputs:
