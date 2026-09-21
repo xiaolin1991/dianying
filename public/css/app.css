@@ -773,6 +773,12 @@ video:fullscreen, video:-webkit-full-screen { width: 100vw !important; height: 1
   transform-origin: center center !important;
 }
 html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% !important; }
+html.player-fs #app { overflow: visible !important; }
+html.player-fs .topbar,
+html.player-fs #bottomTabBar,
+html.player-fs #backTop {
+  display: none !important;
+}
 /* 中央播放钮: 仅暂停时显示 */
 .pp-btn {
   display: none;
@@ -784,7 +790,8 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
   place-items: center; padding: 0;
   opacity: 0; pointer-events: none; transition: opacity .18s, transform .15s;
 }
-.video-wrap.is-mobile-player .pp-btn.paused {
+.video-wrap.is-mobile-player .pp-btn.paused,
+.video-wrap.fake-fs .pp-btn.paused {
   display: grid; opacity: 1; pointer-events: auto;
   animation: ppPulse 2s infinite ease-in-out;
 }
@@ -792,15 +799,76 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
   0%, 100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(229,9,20,0.5); }
   50% { transform: translate(-50%, -50%) scale(1.06); box-shadow: 0 0 0 12px rgba(229,9,20,0); }
 }
-/* 手机底部控制条: 点按出现, 无操作 1s 隐藏 */
+/* 全屏顶部栏: 退出全屏返回按钮 + 影片名称 */
+.fs-top-bar {
+  display: none;
+  position: absolute; left: 0; right: 0; top: 0;
+  z-index: 35;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 14px;
+  background: linear-gradient(180deg, rgba(0,0,0,.85) 0%, rgba(0,0,0,.35) 65%, transparent 100%);
+  align-items: center;
+  gap: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+.video-wrap.fake-fs .fs-top-bar,
+.video-wrap:fullscreen .fs-top-bar,
+.video-wrap:-webkit-full-screen .fs-top-bar {
+  display: flex;
+}
+.fs-top-bar.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+.fs-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255,255,255,.18);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.35);
+  padding: 6px 14px 6px 10px;
+  border-radius: 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  flex-shrink: 0;
+}
+.fs-back-btn:active {
+  background: rgba(255,255,255,.35);
+  transform: scale(0.96);
+}
+.fs-vod-title {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  text-shadow: 0 1px 4px rgba(0,0,0,.9);
+}
+.fs-vod-title small {
+  font-size: 12.5px;
+  font-weight: 400;
+  opacity: .85;
+  margin-left: 6px;
+}
+/* 手机底部控制条: 点按出现 */
 .m-ctrl {
   display: none;
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 8;
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 35;
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
   background: linear-gradient(transparent, rgba(0,0,0,.72));
   opacity: 0; pointer-events: none; transition: opacity .15s;
 }
-.video-wrap.is-mobile-player .m-ctrl { display: block; }
+.video-wrap.is-mobile-player .m-ctrl,
+.video-wrap.fake-fs .m-ctrl,
+.video-wrap:fullscreen .m-ctrl,
+.video-wrap:-webkit-full-screen .m-ctrl { display: block; }
 .m-ctrl.show { opacity: 1; pointer-events: auto; }
 .m-ctrl-row {
   display: flex; align-items: center; gap: 8px;
@@ -861,7 +929,7 @@ html.player-fs, html.player-fs body { overflow: hidden !important; height: 100% 
 }
 .video-wrap:fullscreen .gest-hud,
 .video-wrap:-webkit-full-screen .gest-hud,
-.video-wrap.fake-fs .gest-hud { z-index: 20; }
+.video-wrap.fake-fs .gest-hud { z-index: 40; }
 .fs-exit-btn { display: none !important; }
 /* 当前播放源: 播放器下方操作行左侧(不挡画面) */
 .src-badge {

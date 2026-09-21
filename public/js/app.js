@@ -609,6 +609,14 @@
     if (prev && prev.key && isListRoute(prev.parts)) saveListPageCache(prev.key);
 
     Player.destroy();
+    document.documentElement.classList.remove('player-fs');
+    document.body.style.overflow = '';
+    try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
+    try {
+      if (window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function') {
+        window.AndroidBridge.setOrientation('portrait');
+      }
+    } catch (e) {}
     markNav('#/' + (parts[0] || 'home'));
 
     const alive = makeAlive();
@@ -1596,6 +1604,13 @@
           <div class="play-col">
             <div class="play-stage">
               <div class="video-wrap" id="videoWrap"><video id="videoEl" playsinline webkit-playsinline autoplay></video>
+                <div class="fs-top-bar" id="fsTopBar">
+                  <button type="button" class="fs-back-btn" id="fsBackBtn" title="退出全屏" aria-label="退出全屏">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19l-7-7 7-7"/></svg>
+                    <span>返回</span>
+                  </button>
+                  <div class="fs-vod-title" id="fsVodTitle">${esc(vod.vod_name)} <small id="fsEpName">${esc(groups[gi].eps[ei].name)}</small></div>
+                </div>
                 <button class="pp-btn" id="ppBtn" type="button" title="播放" aria-label="播放">▶</button>
                 <div class="m-ctrl" id="mCtrl">
                   <div class="m-ctrl-row">
@@ -1654,16 +1669,18 @@
     const playerWm = $('#playerWm');
     const mTimeCur = $('#mTimeCur');
     const mTimeDur = $('#mTimeDur');
-    const stageHome = wrap && wrap.parentElement; // 假全屏结束后还原位置
+    const fsTopBar = $('#fsTopBar');
+    const fsBackBtn = $('#fsBackBtn');
+    const fsEpName = $('#fsEpName');
     let autoFsByOrient = false;
     let fakeFsHistPushed = false;
-    // 仅真手机/APK WebView 走假全屏与横屏自动全屏; 带触摸的笔记本不算手机
+    // 仅真手机/平板/APK WebView 走假全屏与横屏自动全屏; 带触摸的笔记本不算手机
     const isMobilePlayer = (() => {
       const ua = navigator.userAgent || '';
-      if (/Windows NT|Macintosh|Linux x86_64|CrOS/i.test(ua) && !/Android|iPhone|iPod|Mobile/i.test(ua)) return false;
-      if (/iPhone|iPod|Android.+Mobile|Mobile.+Android|xiaolin/i.test(ua)) return true;
-      if (/Android/i.test(ua) && Math.min(screen.width, screen.height) <= 820) return true;
-      return window.matchMedia('(max-width: 820px) and (hover: none) and (pointer: coarse)').matches;
+      if (/Windows NT|Macintosh|Linux x86_64|CrOS/i.test(ua) && !/Android|iPhone|iPod|iPad|HarmonyOS|HUAWEI|Mobile/i.test(ua)) return false;
+      if (/iPhone|iPod|iPad|Android|HarmonyOS|HUAWEI|xiaolin/i.test(ua)) return true;
+      if (/Android|HarmonyOS|HUAWEI/i.test(ua) && Math.min(screen.width, screen.height) <= 920) return true;
+      return window.matchMedia('(max-width: 920px) and (hover: none) and (pointer: coarse)').matches;
     })();
     if (!isMobilePlayer) {
       // 电脑: 完整原生控件(含原生全屏/音量/画中画); 双击与下方「全屏」走容器真全屏
@@ -1706,12 +1723,23 @@
     };
     let mCtrlHideT = null;
     let mSeeking = false;
-    const bumpMCtrl = () => {
-      if (!isMobilePlayer || !mCtrl) return;
+    const bumpMCtrl = (dur = 3800) => {
+      if (!mCtrl) return;
       mCtrl.classList.add('show');
+      if (fsTopBar) fsTopBar.classList.add('show');
       clearTimeout(mCtrlHideT);
       if (video.paused || mSeeking) return;
-      mCtrlHideT = setTimeout(() => { if (!video.paused && !mSeeking) mCtrl.classList.remove('show'); }, 1000);
+      mCtrlHideT = setTimeout(() => {
+        if (!video.paused && !mSeeking) {
+          mCtrl.classList.remove('show');
+          if (fsTopBar) fsTopBar.classList.remove('show');
+        }
+      }, dur);
+    };
+    const hideMCtrlNow = () => {
+      clearTimeout(mCtrlHideT);
+      if (mCtrl) mCtrl.classList.remove('show');
+      if (fsTopBar) fsTopBar.classList.remove('show');
     };
     const syncMSeek = () => {
       if (!mSeek || !video.duration) return;
@@ -1726,8 +1754,15 @@
         ppBtn.classList.toggle('paused', video.paused);
       }
       if (mFsToggle) mFsToggle.classList.toggle('on', isPlayerFs());
-      if (isMobilePlayer) bumpMCtrl();
+      bumpMCtrl(3800);
     };
+    if (fsBackBtn) {
+      fsBackBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        togglePlayerFs();
+      });
+    }
     const togglePlay = () => {
       if (video.paused) {
         const p = video.play();
@@ -2111,6 +2146,9 @@
       playCurrent(true);
       const t = $('#curEpName');
       if (t) t.textContent = groups[gi].eps[ei].name;
+      if (fsEpName && groups[gi] && groups[gi].eps[ei]) {
+        fsEpName.textContent = groups[gi].eps[ei].name;
+      }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -2153,8 +2191,13 @@
     const togglePlayerFs = async () => {
       autoFsByOrient = false;
       if (isMobilePlayer) {
-        if (wrap.classList.contains('fake-fs')) exitFakeFs();
-        else { await exitNativeFs(); enterFakeFs(); }
+        if (wrap.classList.contains('fake-fs') || isPlayerFs()) {
+          await exitNativeFs();
+          exitFakeFs();
+        } else {
+          await exitNativeFs();
+          enterFakeFs();
+        }
       } else {
         const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
         if (fsEl) await exitNativeFs();
@@ -2197,12 +2240,21 @@
     }
 
     const syncRotatedFs = () => {
+      if (!alive() || !video.isConnected) {
+        window.removeEventListener('resize', syncRotatedFs);
+        return;
+      }
       const wrapEl = $('#videoWrap');
       if (!wrapEl || !wrapEl.classList.contains('fake-fs')) return;
-      if (isMobilePlayer && window.innerWidth < window.innerHeight) {
+      const isPortrait = window.innerWidth < window.innerHeight;
+      if (isPortrait) {
         wrapEl.classList.add('fs-rotated');
+        wrapEl.style.width = window.innerHeight + 'px';
+        wrapEl.style.height = window.innerWidth + 'px';
       } else {
         wrapEl.classList.remove('fs-rotated');
+        wrapEl.style.width = '';
+        wrapEl.style.height = '';
       }
     };
     window.addEventListener('resize', syncRotatedFs);
@@ -2211,7 +2263,6 @@
     function enterFakeFs() {
       const wrapEl = $('#videoWrap');
       if (!wrapEl || wrapEl.classList.contains('fake-fs')) return;
-      if (wrapEl.parentElement !== document.body) document.body.appendChild(wrapEl);
       wrapEl.classList.add('fake-fs');
       document.body.style.overflow = 'hidden';
       document.documentElement.classList.add('player-fs');
@@ -2227,10 +2278,10 @@
       syncRotatedFs();
 
       // 压入一层历史: 系统/浏览器返回键先退出全屏, 不离开播放页
-      if (isMobilePlayer && !fakeFsHistPushed) {
+      if (!fakeFsHistPushed) {
         try { history.pushState({ ntvFakeFs: 1 }, ''); fakeFsHistPushed = true; } catch (e) {}
       }
-      bumpMCtrl();
+      bumpMCtrl(4000);
       syncPpBtn();
       // 全屏后重刷水印(避免被视频合成层盖住 / 正中模式再闪一次)
       requestAnimationFrame(() => refreshPlayerWm());
@@ -2240,9 +2291,10 @@
       if (!wrapEl) return;
       const wasFs = wrapEl.classList.contains('fake-fs');
       wrapEl.classList.remove('fake-fs', 'fs-rotated');
+      wrapEl.style.width = '';
+      wrapEl.style.height = '';
       document.body.style.overflow = '';
       document.documentElement.classList.remove('player-fs');
-      if (stageHome && wrapEl.parentElement !== stageHome) stageHome.insertBefore(wrapEl, stageHome.firstChild);
 
       try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
       try {
@@ -2261,21 +2313,28 @@
       } else {
         fakeFsHistPushed = false;
       }
+      bumpMCtrl(2000);
       syncPpBtn();
       requestAnimationFrame(() => refreshPlayerWm());
     }
     // App / 浏览器返回键: 全屏中优先退出全屏
     const onFakeFsPop = () => {
-      if (!alive() || !video.isConnected || !isMobilePlayer) return;
-      if (wrap && wrap.classList.contains('fake-fs')) {
+      if (!alive() || !video.isConnected) {
+        window.removeEventListener('popstate', onFakeFsPop);
+        window.__ntvExitFs = null;
+        return;
+      }
+      if (wrap && (wrap.classList.contains('fake-fs') || isPlayerFs())) {
         autoFsByOrient = false;
+        exitNativeFs();
         exitFakeFs(true);
       }
     };
     window.addEventListener('popstate', onFakeFsPop);
     window.__ntvExitFs = () => {
-      if (!wrap || !wrap.classList.contains('fake-fs')) return false;
+      if (!wrap || (!wrap.classList.contains('fake-fs') && !isPlayerFs())) return false;
       autoFsByOrient = false;
+      exitNativeFs();
       exitFakeFs(true);
       return true;
     };
@@ -2404,7 +2463,7 @@
         let lastTapAt = 0, singleTapTimer = null;
 
         wrap.addEventListener('touchstart', (e) => {
-          if (e.target.closest('.m-ctrl, .failover-box, a, button, input, select')) return;
+          if (e.target.closest('.fs-top-bar, .m-ctrl, .failover-box, a, button, input, select')) return;
           if (!e.touches || e.touches.length !== 1) return;
           const t = e.touches[0];
           touchStartX = t.clientX;
@@ -2418,7 +2477,7 @@
         }, { passive: true });
 
         wrap.addEventListener('touchmove', (e) => {
-          if (e.target.closest('.m-ctrl, .failover-box, a, button, input, select')) return;
+          if (e.target.closest('.fs-top-bar, .m-ctrl, .failover-box, a, button, input, select')) return;
           if (!e.touches || e.touches.length !== 1) return;
           const t = e.touches[0];
           const isRotated = wrap.classList.contains('fs-rotated');
@@ -2493,7 +2552,7 @@
         }, { passive: false });
 
         wrap.addEventListener('touchend', (e) => {
-          if (e.target.closest('.m-ctrl, .failover-box, a, button, input, select')) return;
+          if (e.target.closest('.fs-top-bar, .m-ctrl, .failover-box, a, button, input, select')) return;
           if (touchMode === 'seek') {
             if (seekTarget >= 0 && video.duration) {
               try { video.currentTime = seekTarget; } catch (err) {}
@@ -2522,9 +2581,10 @@
           } else {
             lastTapAt = now;
             singleTapTimer = setTimeout(() => {
-              if (mCtrl) {
-                if (mCtrl.classList.contains('show')) mCtrl.classList.remove('show');
-                else bumpMCtrl();
+              if (mCtrl && mCtrl.classList.contains('show')) {
+                hideMCtrlNow();
+              } else {
+                bumpMCtrl();
               }
             }, 280);
           }
