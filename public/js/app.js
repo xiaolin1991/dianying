@@ -1696,10 +1696,16 @@
       if (wrap) wrap.classList.add('is-mobile-player');
     }
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
+    // iOS Safari / WebClip(描述文件): 使用系统原生视频全屏(webkitEnterFullscreen)
+    // 原生全屏播放器可突破系统旋转锁定自动横屏(同优酷/腾讯视频), 点"完成"即回到竖屏页面
+    const isIosDevice = /iP(hone|ad|od)/i.test(navigator.userAgent || '')
+      || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+    let iosNativeFs = false; // 当前是否处于 iOS 原生视频全屏
     /** 假全屏 / 容器全屏 / 视频原生全屏 均视为播放器全屏 */
     const isPlayerFs = () => {
       if (!wrap) return false;
       if (wrap.classList.contains('fake-fs')) return true;
+      if (iosNativeFs) return true;
       const fs = document.fullscreenElement || document.webkitFullscreenElement;
       if (fs === wrap || fs === video) return true;
       try { if (video && video.webkitDisplayingFullscreen) return true; } catch (e) {}
@@ -2292,6 +2298,10 @@
       const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
       if (inApk) {
         try { window.AndroidBridge.setOrientation('landscape'); } catch (e) {}
+      } else if (isIosDevice && video && typeof video.webkitEnterFullscreen === 'function') {
+        // iOS Safari/WebClip: 走系统原生视频全屏(锁屏也可横屏, 系统"完成"按钮自动返回竖屏页面)
+        try { iosNativeFs = true; video.webkitEnterFullscreen(); } catch (e) { iosNativeFs = false; }
+
       } else {
         // 手机浏览器: 先尝试系统级全屏 API (自动隐藏地址栏/状态栏)
         const tryNativeFs = () => {
@@ -2345,6 +2355,12 @@
           try { if (document.exitFullscreen) document.exitFullscreen().catch(() => {}); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); } catch (e) {}
         }
       }
+      // iOS 原生视频全屏兜底退出(确保回到竖屏页面)
+      if (iosNativeFs) {
+        iosNativeFs = false;
+        try { if (video && video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
+      }
+
 
 
       resetBrightness();
@@ -2422,6 +2438,13 @@
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
     video.addEventListener('webkitbeginfullscreen', () => {
+      if (isIosDevice) {
+        // iOS: 原生全屏由系统播放器接管(锁屏也可横屏), 不再强制退出改用 fake-fs
+        iosNativeFs = true;
+        syncPpBtn();
+        return;
+      }
+
       try { if (video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
       setTimeout(() => {
         if (!alive() || !video.isConnected) return;
@@ -2430,7 +2453,15 @@
         refreshPlayerWm();
       }, 50);
     });
-    video.addEventListener('webkitendfullscreen', () => { refreshPlayerWm(); });
+video.addEventListener('webkitendfullscreen', () => {
+      const wasIosFs = iosNativeFs;
+      iosNativeFs = false;
+      if (wasIosFs && wrap && wrap.classList.contains('fake-fs')) {
+        // iOS 系统全屏结束(用户点了"完成"): 同步清理全屏状态, 确保回到竖屏页面
+        exitFakeFs();
+      }
+      refreshPlayerWm();
+    });
 
     // 仅纯手机浏览器横屏自动全屏; APK 内部或电脑端绝不触发自动转屏
     const orientMq = window.matchMedia('(orientation: landscape)');
@@ -6791,6 +6822,18 @@
             <button class="btn primary" id="savePromoBtn" style="margin-top:16px">保存全平台下载与访问控制</button>
           </div>
 
+          <!-- 🛰️ 自动同步 GitHub Releases 到站内 /APP -->
+          <div class="admin-card" style="margin-top:16px">
+            <h3>🛰️ 自动获取最新 APP（私有仓 Releases → 站内 /APP）</h3>
+            <p class="hint">
+              一键从 GitHub 私有仓库读取<strong>最新 Release</strong>：① 同步版本号到站内（客户端更新弹窗的检测依据）；② 安装包按需代理到站内 <code>/APP/</code> 目录，访客直接下载、<strong>无需 GitHub 权限</strong>；③ iPhone/iPad 下载地址<strong>自动填写</strong>（您已自定义的地址不会被覆盖，可随时改回自定义）。<br>
+              ⚙️ 前提：Worker 机密已配置 <code>GITHUB_TOKEN</code>（仓库读取权限）。同步结果会填入下方「待发布草稿」，确认后点【🚀 确认正式发布】即向客户端弹窗。
+            </p>
+            <button class="btn primary" id="syncReleaseBtn" type="button">🛰️ 自动获取最新 APP 版本（GitHub Releases）</button>
+            <div id="syncReleaseResult"></div>
+          </div>
+
+
           <!-- 🔄 App 版本更新两阶段确认发布卡片 -->
           <div class="admin-card" style="margin-top:16px">
             <h3>🔄 App 版本更新管理（两阶段安全确认发布）</h3>
@@ -7139,6 +7182,57 @@
             toast('已恢复向客户端推送更新弹窗', 'ok');
             renderAdmTab(fresh);
           } catch (err) { toast('操作失败：' + err.message, 'err'); }
+        });
+
+        // 🛰️ 自动获取最新 APP（GitHub 私有仓 Releases → 站内 /APP）
+        $('#syncReleaseBtn') && $('#syncReleaseBtn').addEventListener('click', async () => {
+          const btn = $('#syncReleaseBtn');
+          const boxEl = $('#syncReleaseResult');
+          btn.disabled = true;
+          btn.innerHTML = '<span class="spin"></span> 正在从 GitHub 私有仓获取最新 Release…';
+          if (boxEl) boxEl.innerHTML = '';
+          try {
+            const r = await API.adminSyncRelease();
+            if (!r || r.ok === false) throw new Error((r && r.error) || '同步失败');
+            // 自动填入「待发布草稿」，管理员确认后一键发布弹窗
+            if ($('#appDraftCodeInput')) $('#appDraftCodeInput').value = r.versionCode || 0;
+            if ($('#appDraftNameInput')) $('#appDraftNameInput').value = r.versionName || '';
+            if ($('#appDraftChangelogInput') && r.changelog) $('#appDraftChangelogInput').value = r.changelog;
+            const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+            const rows = [
+              ['📱 安卓手机', r.assets && r.assets.phone],
+              ['📺 电视/盒子', r.assets && r.assets.tv],
+              ['🍎 iPhone 免签 IPA', r.assets && r.assets.ios],
+              ['📟 iPad 免签 IPA', r.assets && r.assets.ipad],
+            ].map(([label, a]) =>
+              `<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--card-br);font-size:12.5px">`
+              + `<span>${label}</span>`
+              + `<span style="color:${a ? 'var(--ok)' : 'var(--dim)'}">${a ? esc(a.name) + ' · ' + fmtSize(a.size) : '本次 Release 未找到'}</span></div>`
+            ).join('');
+            if (boxEl) {
+              boxEl.innerHTML = `<div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.25)">
+                <div style="font-weight:700;color:var(--ok);margin-bottom:6px">✅ 已同步最新 Release v${esc(r.versionName || '')}（versionCode ${r.versionCode}）</div>
+                ${rows}
+                <div style="margin-top:8px;color:var(--dim);font-size:12px;line-height:1.7">
+                  · 安装包已可通过站内 <code>/APP/&lt;文件名&gt;</code> 直接下载（按需代理，访客无需 GitHub 权限）<br>
+                  · 版本号与更新说明已填入下方「待发布草稿」，确认后点【🚀 确认正式发布】即向客户端弹窗<br>
+                  · iOS/iPad 下载地址已自动填写（若您曾自定义则保持原样）
+                </div>
+              </div>`;
+            }
+            toast('已获取最新 Release v' + (r.versionName || ''), 'ok');
+          } catch (err) {
+            if (boxEl) {
+              boxEl.innerHTML = `<div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);color:#f87171;font-size:12.5px;line-height:1.7">
+                ❌ ${esc(err.message || '同步失败')}<br>
+                排查：① Worker → 设置 → 变量和机密，确认已配置机密 <code>GITHUB_TOKEN</code>（私有仓读取权限）；② 仓库变量 <code>GITHUB_REPO</code> 为 <code>xiaolin1991/dianying</code>；③ 仓库已有成功发布的 Release。
+              </div>`;
+            }
+            toast('同步失败：' + err.message, 'err');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = '🛰️ 自动获取最新 APP 版本（GitHub Releases）';
+          }
         });
 
       }

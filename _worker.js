@@ -793,6 +793,168 @@ async function fetchAppRelease(env, request) {
     ghErr: ghData ? undefined : ghErr,
   };
 }
+/* ============================================================
+ * 私有仓 Releases → 站内 /APP 自动同步
+ * 后台点「自动获取最新APP」→ 读取最新 Release →
+ *   1) 版本号写入 KV manifest (客户端更新弹窗检测)
+ *   2) 资产索引写入 KV (/APP/<文件名> 按需代理下载, 用户无需 GitHub 权限)
+ *   3) iOS/iPad 下载地址自动填写 (已自定义的不覆盖)
+ * ============================================================ */
+const APP_RELEASE_KEY = 'app_release';
+
+/** 获取仓库最新 Release（私有仓需 token） */
+async function githubLatestRelease(env, s) {
+  const cfg = getGithubConfig(env, s);
+  if (!cfg.token) {
+    throw new Error('未配置 GitHub Token：请在 Worker 机密中配置 GITHUB_TOKEN（或后台保存 githubToken），用于读取私有仓 Releases');
+  }
+  const r = await fetch(`https://api.github.com/repos/${cfg.repo}/releases/latest`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${cfg.token}`,
+      'User-Agent': 'xiaolin-tv-worker',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!r.ok) throw new Error(`GitHub Releases API HTTP ${r.status}（仓库 ${cfg.repo}）`);
+  return r.json();
+}
+
+/** 从 Release tag 解析 versionCode（v1.0.86 → 86） */
+function releaseTagVersionCode(tag) {
+  const m = String(tag || '').match(/v?(\d+)\.(\d+)\.(\d+)/i);
+  if (!m) return 0;
+  if (m[1] === '1' && m[2] === '0') return parseInt(m[3], 10) || 0;
+  return (parseInt(m[1], 10) * 10000) + (parseInt(m[2], 10) * 100) + (parseInt(m[3], 10) || 0);
+}
+
+/** 按文件名归类 Release 资产 → phone/tv/ios/ipad（优先 -latest 命名） */
+function classifyReleaseAssets(assets) {
+  const list = (Array.isArray(assets) ? assets : []).filter((a) => a && a.name && a.url);
+  const pick = (pred) => {
+    const m = list.filter((a) => pred(String(a.name)));
+    if (!m.length) return null;
+    const lat = m.find((a) => /-latest\./i.test(String(a.name))) || m[0];
+    return { name: String(lat.name), url: String(lat.url), size: Number(lat.size) || 0 };
+  };
+  return {
+    phone: pick((n) => /\.apk$/i.test(n) && !/tv/i.test(n)),
+    tv: pick((n) => /tv/i.test(n) && /\.apk$/i.test(n)),
+    ios: pick((n) => /\.ipa$/i.test(n) && !/ipad/i.test(n)),
+    ipad: pick((n) => /ipad/i.test(n) && /\.ipa$/i.test(n)),
+  };
+}
+
+/** 后台一键同步：最新 Release → KV manifest + 资产索引 + 自动填写 iOS/iPad 下载地址 */
+async function syncReleaseToSite(env) {
+  const s = await getSettings(env);
+  const rel = await githubLatestRelease(env, s);
+  const code = releaseTagVersionCode(rel.tag_name);
+  if (!code) throw new Error('Release 标签无法解析版本号: ' + String(rel.tag_name || '(无)'));
+  const name = String(rel.tag_name || '').replace(/^v/i, '');
+  const changelog = String(rel.body || '').slice(0, 2000);
+  const assets = classifyReleaseAssets(rel.assets);
+  const allAssets = (Array.isArray(rel.assets) ? rel.assets : [])
+    .filter((a) => a && a.name && a.url)
+    .map((a) => ({ name: String(a.name), url: String(a.url), size: Number(a.size) || 0 }));
+  await writeKvAppManifest(env, {
+    versionCode: code,
+    versionName: name,
+    changelog,
+    publishedAt: rel.published_at || new Date().toISOString(),
+    phone: { path: '/APP/' + (assets.phone ? assets.phone.name : 'xiaolintv-phone-latest.apk') },
+    tv: { path: '/APP/' + (assets.tv ? assets.tv.name : 'xiaolintv-tv-latest.apk') },
+  });
+  await storagePut(env, APP_RELEASE_KEY, JSON.stringify({
+    tag: String(rel.tag_name || ''),
+    versionCode: code,
+    versionName: name,
+    publishedAt: rel.published_at || '',
+    assets: allAssets,
+    syncedAt: new Date().toISOString(),
+  }));
+  const patch = {};
+  if (assets.ios && !String(s.downloadUrlIos || '').trim()) patch.downloadUrlIos = '/APP/xiaolintv-ios-latest.ipa';
+  if (assets.ipad && !String(s.downloadUrlIpad || '').trim()) patch.downloadUrlIpad = '/APP/xiaolintv-ipad-latest.ipa';
+  if (Object.keys(patch).length) await saveSettings(env, patch);
+  return {
+    ok: true,
+    versionCode: code,
+    versionName: name,
+    changelog,
+    publishedAt: rel.published_at || '',
+    assets,
+    autoFilled: patch,
+  };
+}
+
+
+/** /APP/<文件> 静态资源缺失时：从私有仓最新 Release 按需代理下载（带边缘缓存） */
+async function tryServeAppFromRelease(env, fileName, ctx) {
+  const cfg = getGithubConfig(env);
+  if (!cfg.token || !fileName || fileName.includes('..') || fileName.includes('/')) return null;
+  let rec = null;
+  try {
+    const raw = await storageGet(env, APP_RELEASE_KEY);
+    rec = raw ? JSON.parse(raw) : null;
+  } catch (e) { /* ignore */ }
+  if (!rec || !Array.isArray(rec.assets) || !rec.assets.length) {
+    try {
+      const rel = await githubLatestRelease(env);
+      rec = {
+        tag: String(rel.tag_name || ''),
+        assets: (Array.isArray(rel.assets) ? rel.assets : [])
+          .filter((a) => a && a.name && a.url)
+          .map((a) => ({ name: String(a.name), url: String(a.url) })),
+      };
+      await storagePut(env, APP_RELEASE_KEY, JSON.stringify({ ...rec, syncedAt: new Date().toISOString() }));
+    } catch (e) {
+      return null;
+    }
+  }
+  const asset = rec.assets.find((a) => a.name === fileName);
+  if (!asset) return null;
+  const cacheKey = new Request(`https://app-release-cache.local/APP/${fileName}?tag=${encodeURIComponent(rec.tag || '')}`);
+  try {
+    const hit = await caches.default.match(cacheKey);
+    if (hit) return hit;
+  } catch (e) { /* ignore */ }
+  let res = null;
+  try {
+    const r = await fetch(asset.url, {
+      headers: {
+        Accept: 'application/octet-stream',
+        Authorization: `Bearer ${cfg.token}`,
+        'User-Agent': 'xiaolin-tv-worker',
+      },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(30000),
+    });
+    if (r.status >= 300 && r.status < 400 && r.headers.get('Location')) {
+      res = await fetch(r.headers.get('Location'), { signal: AbortSignal.timeout(120000) });
+    } else if (r.ok) {
+      res = r;
+    }
+  } catch (e) {
+    return null;
+  }
+  if (!res || !res.ok || !res.body) return null;
+  const isApk = /\.apk$/i.test(fileName);
+  const headers = {
+    'Content-Type': isApk ? 'application/vnd.android.package-archive' : 'application/octet-stream',
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    'Cache-Control': 'public, max-age=300',
+  };
+  const out = new Response(res.body, { status: 200, headers });
+  try {
+    if (ctx && typeof ctx.waitUntil === 'function' && typeof caches !== 'undefined') {
+      ctx.waitUntil(caches.default.put(cacheKey, out.clone()));
+    }
+  } catch (e) { /* ignore */ }
+  return out;
+}
+
 
 async function saveSettings(env, patch) {
   const cur = await getSettings(env);
@@ -2505,6 +2667,15 @@ export default {
           const { passwordHash, salt, ...safeSettings } = saved;
           return json({ ok: true, settings: safeSettings, storage: getStorageType(env) });
         }
+        /* ---- 一键同步最新 Release 到站内 /APP（私有仓，含 iOS/Android 全平台） ---- */
+        if (path === '/api/admin/sync-release' && request.method === 'POST') {
+          try {
+            return json(await syncReleaseToSite(env));
+          } catch (e) {
+            return json({ ok: false, error: e.message || String(e) }, 500);
+          }
+        }
+
         /* ---- 同步 APK 版本：Node=git checkout；Cloudflare=GitHub API → KV ---- */
         if (path === '/api/admin/sync-app' && request.method === 'POST') {
           try {
@@ -2978,23 +3149,30 @@ export default {
       }
 
       /* ---- 静态资源兜底(Pages 高级模式走这里; Workers 模式一般到不了) ---- */
-      /* APP 目录：KV 版本新于静态资源时，从 GitHub 拉最新包（解决 CF 未重建仍显示旧版） */
+      /* APP 目录：KV 版本新于静态资源、或静态资源缺失(如 iOS IPA 只在私有仓 Releases)时，从 GitHub 拉最新包 */
       if (request.method === 'GET' && path.startsWith('/APP/') && path.length > 5) {
         const fileName = decodeURIComponent(path.slice(5)).replace(/^\/+/, '');
         if (fileName && !fileName.includes('..') && !fileName.includes('/')) {
           let assetVer = 0;
+          let assetRes = null;
           try {
             if (env.ASSETS) {
               const mr = await env.ASSETS.fetch(new URL('/APP/manifest.json', request.url));
               if (mr.ok) assetVer = manifestCode(await mr.json());
+              assetRes = await env.ASSETS.fetch(request);
             }
           } catch (e) { /* ignore */ }
           const kvVer = manifestCode(await readKvAppManifest(env));
           const forceGh = String(env.APP_FROM_GITHUB || '') === '1';
-          if (forceGh || kvVer > assetVer) {
+          const staticMissing = !assetRes || assetRes.status === 404;
+          if (forceGh || kvVer > assetVer || staticMissing) {
             const ghRes = await tryServeAppFromGithub(env, fileName, ctx);
             if (ghRes) return ghRes;
+            // 仓库文件不存在时(如 IPA 未提交进仓库), 从最新 Release 资产按需代理
+            const relRes = await tryServeAppFromRelease(env, fileName, ctx);
+            if (relRes) return relRes;
           }
+          if (assetRes && assetRes.status !== 404) return assetRes;
         }
       }
 

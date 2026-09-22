@@ -80,17 +80,21 @@ npm install && npm run dev     # 本地预览 http://127.0.0.1:8787
 
 ## 📱 原生 App 构建 (GitHub Actions)
 
-本仓库内置三种原生壳构建，均通过 GitHub Actions 手动触发并自动发布到 Releases：
+本仓库内置原生壳构建，均通过 GitHub Actions 手动触发，安卓 + iOS 打包完成后合并发布**单个 Release**（并自动清理历史旧版本）：
 
-| 产物 | 工作流 | 说明 |
+| 产物 | 构建 Job | 说明 |
 |---|---|---|
-| Android APK | `.github/workflows/android.yml` | 原生 WebView 壳 (`android/`)，全屏时经 JS 桥 `AndroidBridge.setOrientation('landscape')` 强制横屏 + 沉浸式，**系统锁屏也能横屏铺满** |
-| iOS 免签 IPA | `.github/workflows/ios.yml` | 原生 WKWebView 壳 (`ios/`)，macos runner 免签构建；TrollStore / AltStore / Sideloadly 安装 |
-| iPad 免签 IPA | 同上 | 同一工作流产出 iPad 专用包 |
+| Android APK | `build-apk` (`android/`) | 原生 WebView 壳，全屏时经 JS 桥 `AndroidBridge.setOrientation('landscape')` 强制横屏 + 沉浸式，**系统锁屏也能横屏铺满** |
+| iPhone/iPad 免签 IPA | `build-ipa` (`ios/`) | 原生 WKWebView 壳，macos runner 免签构建；TrollStore / AltStore / Sideloadly 安装 |
+| iPad 专用免签 IPA | `build-ipa` | 同一构建产出仅 iPad 家族的专用包 |
+| 统一发布 | `publish-release` | 汇总 APK + IPA 到单个 Release，自动删除旧 Release |
 
+- 工作流文件：`.github/workflows/android.yml`（已整合安卓 + iOS + Docker + 统一发布）
 - App 名称：晓林影视；图标统一由 CI 从 `public/icons/icon-512.png` 自动生成
 - 站点地址：仓库 Settings → Variables → `START_URL`（构建时注入）
-- 触发方式：Actions 页面选择对应工作流 → Run workflow → 输入 `yes` 确认
+- 触发方式：Actions 页面 → Run workflow → 输入 `yes` 确认
+- 后台自动同步：后台「APP推广」→「🛰️ 自动获取最新 APP」一键读取私有仓最新 Release，同步版本号 + 把安装包代理到站内 `/APP/`（访客无需 GitHub 权限），iOS/iPad 下载地址自动填写且可改自定义（需 Worker 机密 `GITHUB_TOKEN`）
+- iOS 全屏修复：iPhone/iPad 走系统原生视频全屏（`webkitEnterFullscreen`），**锁屏状态下也能横屏铺满**，点「完成」即回到原竖屏页面
 - PakePlus 方案可弃用：其 WebView 壳无法在全屏时强制横屏，原生壳从根本上解决
 
 ## ⚖️ 免责声明

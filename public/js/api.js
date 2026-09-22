@@ -88,6 +88,8 @@
       jfetch('/api/admin/sync-app', { method: 'POST' }, 120000),
     adminFetchAppRelease: () =>
       jfetch('/api/admin/fetch-app-release', { method: 'POST' }, 20000),
+    adminSyncRelease: () =>
+      jfetch('/api/admin/sync-release', { method: 'POST' }, 60000),
     adminGithubTest: (params) =>
       jfetch('/api/admin/github-test', {
         method: 'POST',
