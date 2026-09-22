@@ -2298,10 +2298,6 @@
       const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
       if (inApk) {
         try { window.AndroidBridge.setOrientation('landscape'); } catch (e) {}
-      } else if (isIosDevice && video && typeof video.webkitEnterFullscreen === 'function') {
-        // iOS Safari/WebClip: 走系统原生视频全屏(锁屏也可横屏, 系统"完成"按钮自动返回竖屏页面)
-        try { iosNativeFs = true; video.webkitEnterFullscreen(); } catch (e) { iosNativeFs = false; }
-
       } else {
         // 手机浏览器: 先尝试系统级全屏 API (自动隐藏地址栏/状态栏)
         const tryNativeFs = () => {
@@ -2438,13 +2434,7 @@
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
     video.addEventListener('webkitbeginfullscreen', () => {
-      if (isIosDevice) {
-        // iOS: 原生全屏由系统播放器接管(锁屏也可横屏), 不再强制退出改用 fake-fs
-        iosNativeFs = true;
-        syncPpBtn();
-        return;
-      }
-
+      // iOS 一律把原生全屏抢回为 CSS 假全屏(fake-fs): 锁屏可横屏 + 自定义手势(进度/亮度/音量)全部保留
       try { if (video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
       setTimeout(() => {
         if (!alive() || !video.isConnected) return;
@@ -2475,7 +2465,8 @@ video.addEventListener('webkitendfullscreen', () => {
         }
       } else {
         userExitedFs = false;
-        if (autoFsByOrient && wrap.classList.contains('fake-fs')) {
+        // iOS 修复: 全屏中物理转回竖屏时无条件退出全屏, 解决"返回不了竖屏页面"
+        if ((autoFsByOrient || isIosDevice) && wrap.classList.contains('fake-fs')) {
           autoFsByOrient = false;
           exitFakeFs();
         }
@@ -6829,7 +6820,10 @@ video.addEventListener('webkitendfullscreen', () => {
               一键从 GitHub 私有仓库读取<strong>最新 Release</strong>：① 同步版本号到站内（客户端更新弹窗的检测依据）；② 安装包按需代理到站内 <code>/APP/</code> 目录，访客直接下载、<strong>无需 GitHub 权限</strong>；③ iPhone/iPad 下载地址<strong>自动填写</strong>（您已自定义的地址不会被覆盖，可随时改回自定义）。<br>
               ⚙️ 前提：Worker 机密已配置 <code>GITHUB_TOKEN</code>（仓库读取权限）。同步结果会填入下方「待发布草稿」，确认后点【🚀 确认正式发布】即向客户端弹窗。
             </p>
-            <button class="btn primary" id="syncReleaseBtn" type="button">🛰️ 自动获取最新 APP 版本（GitHub Releases）</button>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn primary" id="syncReleaseBtn" type="button">🛰️ 自动获取最新 APP 版本（GitHub Releases）</button>
+              <button class="btn primary" id="triggerBuildBtn" type="button" style="background:linear-gradient(135deg,#b45309,#d97706)">🚀 确认网页正常，一键构建客户端（安卓 + 苹果 + Docker）</button>
+            </div>
             <div id="syncReleaseResult"></div>
           </div>
 
@@ -7234,6 +7228,33 @@ video.addEventListener('webkitendfullscreen', () => {
             btn.textContent = '🛰️ 自动获取最新 APP 版本（GitHub Releases）';
           }
         });
+        // 🚀 一键构建客户端（安卓 + 苹果 + Docker → 统一 Release）
+        $('#triggerBuildBtn') && $('#triggerBuildBtn').addEventListener('click', async () => {
+          if (!confirm('确认当前网页版浏览与功能均已正常？\n\n点击确定将立即触发全平台客户端构建：\n• 安卓手机/电视 APK\n• iPhone/iPad 免签 IPA\n• Docker 镜像\n\n约 3-8 分钟后完成并自动发布到 GitHub Releases，旧版本会被自动清理。\n构建完成后回到本页点「🛰️ 自动获取最新 APP」即可同步到站内。')) return;
+          const btn = $('#triggerBuildBtn');
+          const boxEl = $('#syncReleaseResult');
+          btn.disabled = true;
+          btn.innerHTML = '<span class="spin"></span> 正在下达构建命令…';
+          try {
+            const r = await API.adminTriggerBuild();
+            if (!r || r.ok === false) throw new Error((r && r.error) || '触发失败');
+            if (boxEl) {
+              boxEl.innerHTML = `<div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.3);color:#93c5fd;font-size:12.5px;line-height:1.8">
+                🚀 <b>构建命令已下达！</b>GitHub Actions 正在构建全平台客户端：<br>
+                · 安卓 APK（手机 + 电视）· iPhone/iPad 免签 IPA · Docker 镜像<br>
+                · 约 3-8 分钟后自动发布统一 Release，并自动清理历史旧版本<br>
+                · 可到 GitHub → Actions →「Build APP (APK + iOS IPA + Docker)」查看进度；完成后回本站点「🛰️ 自动获取最新 APP」同步版本号与下载地址
+              </div>`;
+            }
+            toast('构建已触发，请稍候约 3-8 分钟', 'ok');
+          } catch (err) {
+            toast('触发失败：' + err.message, 'err');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = '🚀 确认网页正常，一键构建客户端（安卓 + 苹果 + Docker）';
+          }
+        });
+
 
       }
 

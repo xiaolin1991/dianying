@@ -241,6 +241,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'yes'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Select latest Xcode
         run: |
@@ -295,6 +297,40 @@ jobs:
           cp "out/晓林影视-ipad-免签-v1.0.${{ github.run_number }}.ipa" "out/xiaolintv-ipad-latest.ipa"
           rm -rf Payload
           ls -la out
+
+      - name: Publish IPA to public/APP (自动覆盖网站 APP 目录)
+        env:
+          RUN_NO: ${{ github.run_number }}
+        run: |
+          set -e
+          cp "out/xiaolintv-ios-latest.ipa" "public/APP/xiaolintv-ios-latest.ipa"
+          cp "out/xiaolintv-ipad-latest.ipa" "public/APP/xiaolintv-ipad-latest.ipa"
+          # manifest.json 合并写入 ios/ipad 条目(版本号取最大, 不覆盖 APK 的更高版本)
+          node -e "
+            const fs=require('fs');
+            const p='public/APP/manifest.json';
+            const m=fs.existsSync(p)?JSON.parse(fs.readFileSync(p,'utf8')):{};
+            m.versionCode=Math.max(Number(m.versionCode)||0, Number('$RUN_NO'));
+            m.versionName='1.0.'+m.versionCode;
+            m.publishedAt=new Date().toISOString();
+            m.ios={path:'/APP/xiaolintv-ios-latest.ipa'};
+            m.ipad={path:'/APP/xiaolintv-ipad-latest.ipa'};
+            fs.writeFileSync(p, JSON.stringify(m,null,2)+'\n');
+            console.log('manifest updated versionCode=', m.versionCode);
+          "
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/APP
+          if git diff --cached --quiet; then echo "No IPA changes"; exit 0; fi
+          git commit -m "chore(app): sync IPA v1.0.${RUN_NO} to main"
+          for i in 1 2 3 4 5 6; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              echo "synced IPA to main"; exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            echo "push rejected, retry $i"; sleep 4
+          done
+          echo "::warning::未能推送 IPA 到 main（不影响发布：后台点「自动获取最新 APP」仍可从 Release 代理下载）"
 
       - name: Upload build log (always)
         if: always()

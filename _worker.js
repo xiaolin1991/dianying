@@ -536,6 +536,8 @@ async function writeKvAppManifest(env, manifest) {
     publishedAt: String(manifest.publishedAt || new Date().toISOString()),
     phone: manifest.phone && typeof manifest.phone === 'object' ? manifest.phone : undefined,
     tv: manifest.tv && typeof manifest.tv === 'object' ? manifest.tv : undefined,
+    ios: manifest.ios && typeof manifest.ios === 'object' ? manifest.ios : undefined,
+    ipad: manifest.ipad && typeof manifest.ipad === 'object' ? manifest.ipad : undefined,
   };
   await storagePut(env, APP_MANIFEST_KEY, JSON.stringify(clean));
 }
@@ -802,20 +804,36 @@ async function fetchAppRelease(env, request) {
  * ============================================================ */
 const APP_RELEASE_KEY = 'app_release';
 
-/** 获取仓库最新 Release（私有仓需 token） */
+/** 获取仓库最新 Release（私有仓需 token）。优先选 v1.0.* 正式标签中版本号最大者，忽略 ios-v* 等历史标签 */
 async function githubLatestRelease(env, s) {
   const cfg = getGithubConfig(env, s);
   if (!cfg.token) {
     throw new Error('未配置 GitHub Token：请在 Worker 机密中配置 GITHUB_TOKEN（或后台保存 githubToken），用于读取私有仓 Releases');
   }
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${cfg.token}`,
+    'User-Agent': 'xiaolin-tv-worker',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+  // 1) 列表中筛选 v1.0.* 正式 Release, 取版本号最大者
+  try {
+    const r = await fetch(`https://api.github.com/repos/${cfg.repo}/releases?per_page=30`, {
+      headers, signal: AbortSignal.timeout(10000),
+    });
+    if (r.ok) {
+      const list = await r.json();
+      const cands = (Array.isArray(list) ? list : [])
+        .filter((rel) => rel && !rel.draft && /^v1\.0\.\d+$/i.test(String(rel.tag_name || '')));
+      if (cands.length) {
+        cands.sort((a, b) => releaseTagVersionCode(b.tag_name) - releaseTagVersionCode(a.tag_name));
+        return cands[0];
+      }
+    }
+  } catch (e) { /* ignore, 走 latest 兜底 */ }
+  // 2) 兜底: GitHub 标记的 latest
   const r = await fetch(`https://api.github.com/repos/${cfg.repo}/releases/latest`, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${cfg.token}`,
-      'User-Agent': 'xiaolin-tv-worker',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-    signal: AbortSignal.timeout(10000),
+    headers, signal: AbortSignal.timeout(10000),
   });
   if (!r.ok) throw new Error(`GitHub Releases API HTTP ${r.status}（仓库 ${cfg.repo}）`);
   return r.json();
@@ -2676,6 +2694,37 @@ export default {
           }
         }
 
+        /* ---- 一键触发全平台客户端构建（安卓 APK + iOS IPA + Docker → 统一 Release） ---- */
+        if (path === '/api/admin/trigger-build' && request.method === 'POST') {
+          try {
+            const cfg = getGithubConfig(env);
+            if (!cfg.token) {
+              throw new Error('未配置 GitHub Token：请在 Worker 机密中配置 GITHUB_TOKEN（需 repo + workflow 权限）');
+            }
+            const r = await fetch(
+              `https://api.github.com/repos/${cfg.repo}/actions/workflows/android.yml/dispatches`,
+              {
+                method: 'POST',
+                headers: {
+                  Accept: 'application/vnd.github+json',
+                  Authorization: `Bearer ${cfg.token}`,
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'xiaolin-tv-worker',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                },
+                body: JSON.stringify({ ref: cfg.branch || 'main', inputs: { confirm: 'yes' } }),
+                signal: AbortSignal.timeout(15000),
+              }
+            );
+            if (r.status === 204) {
+              return json({ ok: true, message: '构建已触发，约 3-8 分钟后完成并自动发布 Release（安卓 APK + iPhone/iPad IPA + Docker 镜像）' });
+            }
+            const txt = await r.text().catch(() => '');
+            throw new Error(`GitHub API HTTP ${r.status}：${txt.slice(0, 200)}（Token 需勾选 repo 与 workflow 权限）`);
+          } catch (e) {
+            return json({ ok: false, error: e.message || String(e) }, 500);
+          }
+        }
         /* ---- 同步 APK 版本：Node=git checkout；Cloudflare=GitHub API → KV ---- */
         if (path === '/api/admin/sync-app' && request.method === 'POST') {
           try {
