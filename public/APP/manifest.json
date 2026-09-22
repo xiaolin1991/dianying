@@ -1,8 +1,8 @@
 {
-  "versionCode": 80,
-  "versionName": "1.0.80",
+  "versionCode": 90,
+  "versionName": "1.0.90",
   "changelog": "晓林影视 1.0.80\n优化私密福利双栏体验、会员中心UI全面升级",
-  "publishedAt": "2026-09-08T03:55:56.837Z",
+  "publishedAt": "2026-09-22T05:18:01.448Z",
   "phone": {
     "path": "/APP/xiaolintv-phone-latest.apk",
     "versioned": "/APP/xiaolintv-phone-v1.0.80.apk"
@@ -10,5 +10,11 @@
   "tv": {
     "path": "/APP/xiaolintv-tv-latest.apk",
     "versioned": "/APP/xiaolintv-tv-v1.0.80.apk"
+  },
+  "ios": {
+    "path": "/APP/xiaolintv-ios-latest.ipa"
+  },
+  "ipad": {
+    "path": "/APP/xiaolintv-ipad-latest.ipa"
   }
 }
