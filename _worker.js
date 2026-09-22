@@ -329,6 +329,8 @@ async function getSettings(env) {
 /** 站内固定最新包路径(CI 覆盖同名文件, 链接永不变) */
 const FIXED_PHONE_APK = '/APP/xiaolintv-phone-latest.apk';
 const FIXED_TV_APK = '/APP/xiaolintv-tv-latest.apk';
+const FIXED_IOS_MC = '/APP/xiaolintv-ios-latest.mobileconfig';   // iPhone 免签名描述文件(CI 自动生成)
+const FIXED_IPAD_MC = '/APP/xiaolintv-ios-latest.mobileconfig';  // iPad 共用同一描述文件
 
 function phoneDlMode(s) {
   return s && s.downloadUrlMode === 'custom' ? 'custom' : 'fixed';
@@ -340,11 +342,13 @@ function tvDlMode(s) {
 }
 function iosDlMode(s) {
   const m = s && s.downloadUrlIosMode;
-  return m === 'custom' ? 'custom' : (s && s.downloadUrlIos ? 'custom' : 'off');
+  if (m === 'fixed' || m === 'custom') return m;
+  return (s && s.downloadUrlIos) ? 'custom' : 'off';
 }
 function ipadDlMode(s) {
   const m = s && s.downloadUrlIpadMode;
-  return m === 'custom' ? 'custom' : (s && s.downloadUrlIpad ? 'custom' : 'off');
+  if (m === 'fixed' || m === 'custom') return m;
+  return (s && s.downloadUrlIpad) ? 'custom' : 'off';
 }
 function pcDlMode(s) {
   const m = s && s.downloadUrlPcMode;
@@ -377,8 +381,14 @@ function effectiveDownloadUrls(s) {
   const tm = tvDlMode(s);
   if (tm === 'fixed') tv = FIXED_TV_APK;
   else if (tm === 'custom') tv = String(s.downloadUrlTv || '').trim();
-  const ios = String((s && s.downloadUrlIos) || '').trim();
-  const ipad = String((s && s.downloadUrlIpad) || '').trim();
+  let ios = '';
+  const im = iosDlMode(s);
+  if (im === 'fixed') ios = FIXED_IOS_MC;
+  else if (im === 'custom') ios = String((s && s.downloadUrlIos) || '').trim();
+  let ipad = '';
+  const ipm = ipadDlMode(s);
+  if (ipm === 'fixed') ipad = FIXED_IPAD_MC;
+  else if (ipm === 'custom') ipad = String((s && s.downloadUrlIpad) || '').trim();
   const pc = String((s && s.downloadUrlPc) || '').trim();
   const mac = String((s && s.downloadUrlMac) || '').trim();
   const customClients = sanitizeCustomClients((s && s.customClients) || []);
@@ -883,6 +893,8 @@ async function syncReleaseToSite(env) {
     publishedAt: rel.published_at || new Date().toISOString(),
     phone: { path: '/APP/' + (assets.phone ? assets.phone.name : 'xiaolintv-phone-latest.apk') },
     tv: { path: '/APP/' + (assets.tv ? assets.tv.name : 'xiaolintv-tv-latest.apk') },
+    ios: { path: '/APP/xiaolintv-ios-latest.ipa' },
+    ipad: { path: '/APP/xiaolintv-ipad-latest.ipa' },
   });
   await storagePut(env, APP_RELEASE_KEY, JSON.stringify({
     tag: String(rel.tag_name || ''),
@@ -892,9 +904,10 @@ async function syncReleaseToSite(env) {
     assets: allAssets,
     syncedAt: new Date().toISOString(),
   }));
+  // 3) 自动把 iOS/iPad 切到「固定最新包」模式（站内描述文件，已自定义的保持不动）
   const patch = {};
-  if (assets.ios && !String(s.downloadUrlIos || '').trim()) patch.downloadUrlIos = '/APP/xiaolintv-ios-latest.ipa';
-  if (assets.ipad && !String(s.downloadUrlIpad || '').trim()) patch.downloadUrlIpad = '/APP/xiaolintv-ipad-latest.ipa';
+  if (assets.ios && iosDlMode(s) !== 'custom') patch.downloadUrlIosMode = 'fixed';
+  if (assets.ipad && ipadDlMode(s) !== 'custom') patch.downloadUrlIpadMode = 'fixed';
   if (Object.keys(patch).length) await saveSettings(env, patch);
   return {
     ok: true,
@@ -910,7 +923,7 @@ async function syncReleaseToSite(env) {
 
 /** /APP/<文件> 静态资源缺失时：从私有仓最新 Release 按需代理下载（带边缘缓存） */
 async function tryServeAppFromRelease(env, fileName, ctx) {
-  const cfg = getGithubConfig(env);
+  const cfg = getGithubConfig(env, await getSettings(env));
   if (!cfg.token || !fileName || fileName.includes('..') || fileName.includes('/')) return null;
   let rec = null;
   try {
@@ -2697,7 +2710,7 @@ export default {
         /* ---- 一键触发全平台客户端构建（安卓 APK + iOS IPA + Docker → 统一 Release） ---- */
         if (path === '/api/admin/trigger-build' && request.method === 'POST') {
           try {
-            const cfg = getGithubConfig(env);
+            const cfg = getGithubConfig(env, await getSettings(env));
             if (!cfg.token) {
               throw new Error('未配置 GitHub Token：请在 Worker 机密中配置 GITHUB_TOKEN（需 repo + workflow 权限）');
             }
@@ -3221,7 +3234,16 @@ export default {
             const relRes = await tryServeAppFromRelease(env, fileName, ctx);
             if (relRes) return relRes;
           }
-          if (assetRes && assetRes.status !== 404) return assetRes;
+          if (assetRes && assetRes.status !== 404) {
+            // iOS 描述文件必须以 application/x-apple-aspen-config 返回, 否则 Safari 只会下载不安装
+            if (/\.mobileconfig$/i.test(fileName)) {
+              const h = new Headers(assetRes.headers);
+              h.set('Content-Type', 'application/x-apple-aspen-config');
+              h.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+              return new Response(assetRes.body, { status: assetRes.status, headers: h });
+            }
+            return assetRes;
+          }
         }
       }
 

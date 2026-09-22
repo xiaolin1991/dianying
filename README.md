@@ -93,8 +93,10 @@ npm install && npm run dev     # 本地预览 http://127.0.0.1:8787
 - App 名称：晓林影视；图标统一由 CI 从 `public/icons/icon-512.png` 自动生成
 - 站点地址：仓库 Settings → Variables → `START_URL`（构建时注入）
 - 触发方式：Actions 页面 → Run workflow → 输入 `yes` 确认
-- 后台自动同步：后台「APP推广」→「🛰️ 自动获取最新 APP」一键读取私有仓最新 Release，同步版本号 + 把安装包代理到站内 `/APP/`（访客无需 GitHub 权限），iOS/iPad 下载地址自动填写且可改自定义（需 Worker 机密 `GITHUB_TOKEN`）
-- iOS 全屏修复：iPhone/iPad 走系统原生视频全屏（`webkitEnterFullscreen`），**锁屏状态下也能横屏铺满**，点「完成」即回到原竖屏页面
+- 后台自动同步：后台「APP推广」→「🛰️ 自动获取最新 APP」一键读取私有仓最新 Release，同步版本号 + 把安装包代理到站内 `/APP/`（访客无需 GitHub 权限），iOS/iPad 下载地址自动填入「固定最新包」模式且可改自定义（Token 在后台「数据与 GitHub 同步」页配置，卡片内可「🔍 一键检测 Token 与仓库权限」）
+- 一键构建：后台「🚀 确认网页正常，一键构建客户端（安卓 + 苹果 + Docker）」直接下达构建命令，平时推送代码不会自动打包
+- iOS 免签安装：CI 自动生成 `public/APP/xiaolintv-ios-latest.mobileconfig` 描述文件（无需签名），同时产出未签名 IPA，全部随 Release 一起发布
+- iOS 全屏修复：iPhone/iPad 使用 CSS 旋转假全屏（锁屏状态即可横屏铺满、支持拖动快进/左右滑动亮度与音量），转回竖屏自动退出
 - PakePlus 方案可弃用：其 WebView 壳无法在全屏时强制横屏，原生壳从根本上解决
 
 ## ⚖️ 免责声明

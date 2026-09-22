@@ -1993,8 +1993,38 @@
     let autoFailoverTimer = null;
     let hasPlaybackFailed = false;
 
+    /** 用户取消自动换源后的静态面板（保证随时可返回/重试，绝不卡死） */
+    function renderFailoverCancelled() {
+      if (!alive() || !tip) return;
+      clearTimeout(autoFailoverTimer);
+      tip.classList.remove('hidden');
+      tip.innerHTML = `
+        <div class="failover-box" style="padding:16px 20px;background:rgba(0,0,0,0.85);border-radius:12px;border:1px solid rgba(255,255,255,0.15);max-width:380px;margin:0 auto">
+          <div style="font-size:15px;font-weight:600;margin-bottom:6px">⏸️ 已停止自动换源</div>
+          <div style="font-size:13px;color:var(--dim);margin-bottom:14px">当前线路播放失败。你可以重试，或返回继续浏览其他影片</div>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+            <button class="btn primary small" id="foResumeBtn">🔄 重试播放</button>
+            <button class="btn ghost small" id="foBackBtn">← 返回上一页</button>
+            <a class="btn ghost small" href="#/home">🏠 回首页</a>
+          </div>
+        </div>`;
+      const bR = $('#foResumeBtn');
+      if (bR) bR.onclick = () => {
+        sessionStorage.removeItem('ntv_failover_cancel');
+        hasPlaybackFailed = false;
+        playCurrent(true);
+      };
+      const bB = $('#foBackBtn');
+      if (bB) bB.onclick = () => {
+        sessionStorage.removeItem('ntv_failover_cancel');
+        try { history.back(); } catch (e) { location.hash = '#/home'; }
+      };
+    }
+
     function handlePlaybackFailure(trigger) {
       if (!alive()) return;
+      // 用户已手动取消自动换源：停止一切自动切换，仅保留可返回的静态面板
+      if (sessionStorage.getItem('ntv_failover_cancel') === '1') { renderFailoverCancelled(); return; }
       if (trigger !== 'swap_hit_arrived' && trigger !== 'all_swap_finished') {
         if (hasPlaybackFailed) return;
         hasPlaybackFailed = true;
@@ -2018,9 +2048,10 @@
             <div class="failover-box" style="padding:16px 20px;background:rgba(0,0,0,0.85);border-radius:12px;border:1px solid rgba(255,255,255,0.15);max-width:380px;margin:0 auto">
               <div style="font-size:15px;font-weight:600;margin-bottom:6px">⚠️ 播放失败（上游CDN失效或断连）</div>
               <div style="font-size:13px;color:var(--dim);margin-bottom:14px">已为您找到可用源【<b>${esc(targetHit.s.name)}</b>】，正在自动无缝切换…</div>
-              <div style="display:flex;gap:10px;justify-content:center">
+              <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
                 <button class="btn primary small" id="doSwapNowBtn">⚡ 立即切源</button>
                 <button class="btn ghost small" id="doRetryBtn">🔄 重试</button>
+                <button class="btn ghost small" id="foCancelBtn">✕ 取消自动换源</button>
               </div>
             </div>`;
           const doSwap = () => {
@@ -2033,6 +2064,11 @@
           if (b1) b1.onclick = doSwap;
           const b2 = $('#doRetryBtn');
           if (b2) b2.onclick = () => { hasPlaybackFailed = false; playCurrent(true); };
+          const bC = $('#foCancelBtn');
+          if (bC) bC.onclick = () => {
+            sessionStorage.setItem('ntv_failover_cancel', '1');
+            renderFailoverCancelled();
+          };
           clearTimeout(autoFailoverTimer);
           autoFailoverTimer = setTimeout(doSwap, 1200);
         } else if (swapPending > 0) {
@@ -2040,13 +2076,19 @@
             <div class="failover-box" style="padding:16px 20px;background:rgba(0,0,0,0.85);border-radius:12px;border:1px solid rgba(255,255,255,0.15);max-width:380px;margin:0 auto">
               <div style="font-size:15px;font-weight:600;margin-bottom:6px">⚠️ 播放连接异常（上游CDN失效）</div>
               <div style="font-size:13px;color:var(--dim);margin-bottom:14px"><span class="spin"></span> 正在自动探测其他可用源，探测到将立即无缝切换…</div>
-              <div style="display:flex;gap:10px;justify-content:center">
+              <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
                 <button class="btn ghost small" id="doRetryBtn">🔄 重试当前源</button>
+                <button class="btn ghost small" id="foCancelBtn2">✕ 停止自动探测</button>
                 <a class="btn ghost small" href="#/home">回首页</a>
               </div>
             </div>`;
           const b2 = $('#doRetryBtn');
           if (b2) b2.onclick = () => { hasPlaybackFailed = false; playCurrent(true); };
+          const bC2 = $('#foCancelBtn2');
+          if (bC2) bC2.onclick = () => {
+            sessionStorage.setItem('ntv_failover_cancel', '1');
+            renderFailoverCancelled();
+          };
         } else {
           tip.innerHTML = `
             <div class="failover-box" style="padding:16px 20px;background:rgba(0,0,0,0.85);border-radius:12px;border:1px solid rgba(255,255,255,0.15);max-width:380px;margin:0 auto">
@@ -2084,6 +2126,7 @@
         clearTimeout(readyCheckTimer);
         clearTimeout(failoverCheckTimer);
         sessionStorage.removeItem('ntv_swap_count');
+        sessionStorage.removeItem('ntv_failover_cancel');
         hasPlaybackFailed = false;
         tip.classList.add('hidden');
         tip.innerHTML = '';
@@ -2158,6 +2201,7 @@
     }
 
     function gotoEp(nextEi, nextGi) {
+      sessionStorage.removeItem('ntv_failover_cancel'); // 手动切集/切线后重新允许自动换源
       if (nextGi != null) gi = nextGi;
       ei = nextEi;
       epsPg = Math.floor(ei / EPP);
@@ -6670,13 +6714,15 @@ video.addEventListener('webkitendfullscreen', () => {
       else if (admTab === 'app') {
         const phoneMode = s.downloadUrlMode === 'custom' ? 'custom' : 'fixed';
         const tvMode = (s.downloadUrlTvMode === 'fixed' || s.downloadUrlTvMode === 'custom') ? s.downloadUrlTvMode : 'off';
-        const iosMode = s.downloadUrlIosMode === 'custom' ? 'custom' : 'off';
-        const ipadMode = s.downloadUrlIpadMode === 'custom' ? 'custom' : 'off';
+        const iosMode = (s.downloadUrlIosMode === 'fixed' || s.downloadUrlIosMode === 'custom') ? s.downloadUrlIosMode : 'off';
+        const ipadMode = (s.downloadUrlIpadMode === 'fixed' || s.downloadUrlIpadMode === 'custom') ? s.downloadUrlIpadMode : 'off';
         const pcMode = s.downloadUrlPcMode === 'custom' ? 'custom' : 'off';
         const macMode = s.downloadUrlMacMode === 'custom' ? 'custom' : 'off';
         let curCustomClients = Array.isArray(s.customClients) ? JSON.parse(JSON.stringify(s.customClients)) : [];
         const fixedPhone = '/APP/xiaolintv-phone-latest.apk';
         const fixedTv = '/APP/xiaolintv-tv-latest.apk';
+        const fixedIos = '/APP/xiaolintv-ios-latest.mobileconfig';
+        const fixedIpad = '/APP/xiaolintv-ios-latest.mobileconfig';
 
         // 线上生效状态计算
         const isLive = s.appVersionActive !== false && ((s.appPublishedCode && s.appPublishedCode > 0) || (s.appVersionCode && s.appVersionCode > 0));
@@ -6744,10 +6790,15 @@ video.addEventListener('webkitendfullscreen', () => {
             <h4 style="margin:22px 0 8px;font-size:14px">🍎 苹果 iPhone 手机专版</h4>
             <div class="dl-mode-row" id="iosModeRow">
               <button type="button" class="chip dl-mode-btn ${iosMode === 'off' ? 'on' : ''}" data-mode="off">关闭（使用主屏教程）</button>
+              <button type="button" class="chip dl-mode-btn ${iosMode === 'fixed' ? 'on' : ''}" data-mode="fixed">固定最新包</button>
               <button type="button" class="chip dl-mode-btn ${iosMode === 'custom' ? 'on' : ''}" data-mode="custom">自定义下载/安装地址</button>
             </div>
             <div id="iosOffHint" class="${iosMode === 'off' ? '' : 'hidden'}" style="margin-top:10px">
               <p class="hint">已关闭 iPhone 安装链接：前台下载页仅展示 Safari 添加到主屏幕教程。</p>
+            </div>
+            <div id="iosFixedBox" class="${iosMode === 'fixed' ? '' : 'hidden'}" style="margin-top:10px">
+              <div class="field-input" style="opacity:.85;cursor:default;user-select:all">${esc(fixedIos)}</div>
+              <p class="hint" style="margin-top:6px">免签名描述文件（CI 每次构建自动生成/覆盖），iPhone 安装即得主屏全屏图标、锁屏也能横屏铺满。生效地址：<code>${esc(location.origin + fixedIos)}</code>；如要发 IPA 免签包可切「自定义」填 <code>/APP/xiaolintv-ios-latest.ipa</code></p>
             </div>
             <div id="iosCustomBox" class="${iosMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
               <label class="field-label">iPhone 安装/下载地址（免签描述文件 .mobileconfig / IPA / TestFlight / 分发链接）</label>
@@ -6758,10 +6809,15 @@ video.addEventListener('webkitendfullscreen', () => {
             <h4 style="margin:22px 0 8px;font-size:14px">📱 苹果 iPad 平板专版</h4>
             <div class="dl-mode-row" id="ipadModeRow">
               <button type="button" class="chip dl-mode-btn ${ipadMode === 'off' ? 'on' : ''}" data-mode="off">关闭（使用主屏教程）</button>
+              <button type="button" class="chip dl-mode-btn ${ipadMode === 'fixed' ? 'on' : ''}" data-mode="fixed">固定最新包</button>
               <button type="button" class="chip dl-mode-btn ${ipadMode === 'custom' ? 'on' : ''}" data-mode="custom">自定义下载/安装地址</button>
             </div>
             <div id="ipadOffHint" class="${ipadMode === 'off' ? '' : 'hidden'}" style="margin-top:10px">
               <p class="hint">已关闭 iPad 安装链接：若有 iPhone 链接则共用，否则前台展示 Safari 教程。</p>
+            </div>
+            <div id="ipadFixedBox" class="${ipadMode === 'fixed' ? '' : 'hidden'}" style="margin-top:10px">
+              <div class="field-input" style="opacity:.85;cursor:default;user-select:all">${esc(fixedIpad)}</div>
+              <p class="hint" style="margin-top:6px">iPad 同样使用免签名描述文件（CI 自动生成/覆盖）。生效地址：<code>${esc(location.origin + fixedIpad)}</code>；如要发 iPad 专版 IPA 可切「自定义」填 <code>/APP/xiaolintv-ipad-latest.ipa</code></p>
             </div>
             <div id="ipadCustomBox" class="${ipadMode === 'custom' ? '' : 'hidden'}" style="margin-top:10px">
               <label class="field-label">iPad 专属下载/安装地址（iPad 专版描述文件 .mobileconfig / IPA / 分发链接）</label>
@@ -6823,6 +6879,7 @@ video.addEventListener('webkitendfullscreen', () => {
             <div style="display:flex;gap:10px;flex-wrap:wrap">
               <button class="btn primary" id="syncReleaseBtn" type="button">🛰️ 自动获取最新 APP 版本（GitHub Releases）</button>
               <button class="btn primary" id="triggerBuildBtn" type="button" style="background:linear-gradient(135deg,#b45309,#d97706)">🚀 确认网页正常，一键构建客户端（安卓 + 苹果 + Docker）</button>
+              <button class="btn ghost" id="ghTokenTestBtn" type="button">🔍 一键检测 Token 与仓库权限</button>
             </div>
             <div id="syncReleaseResult"></div>
           </div>
@@ -6945,11 +7002,13 @@ video.addEventListener('webkitendfullscreen', () => {
         const syncIosUi = () => {
           $$('#iosModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curIosMode));
           $('#iosOffHint').classList.toggle('hidden', curIosMode !== 'off');
+          $('#iosFixedBox').classList.toggle('hidden', curIosMode !== 'fixed');
           $('#iosCustomBox').classList.toggle('hidden', curIosMode !== 'custom');
         };
         const syncIpadUi = () => {
           $$('#ipadModeRow .dl-mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === curIpadMode));
           $('#ipadOffHint').classList.toggle('hidden', curIpadMode !== 'off');
+          $('#ipadFixedBox').classList.toggle('hidden', curIpadMode !== 'fixed');
           $('#ipadCustomBox').classList.toggle('hidden', curIpadMode !== 'custom');
         };
         const syncPcUi = () => {
@@ -7255,6 +7314,43 @@ video.addEventListener('webkitendfullscreen', () => {
           }
         });
 
+
+        // 🔍 一键检测 GitHub Token 与仓库权限（配置在「数据与 GitHub 同步」页，与同步共用同一个 Token）
+        $('#ghTokenTestBtn') && $('#ghTokenTestBtn').addEventListener('click', async () => {
+          const btn = $('#ghTokenTestBtn');
+          const boxEl = $('#syncReleaseResult');
+          btn.disabled = true;
+          btn.innerHTML = '<span class="spin"></span> 正在检测 Token 与仓库权限…';
+          if (boxEl) boxEl.innerHTML = '';
+          try {
+            const r = await API.adminGithubTest({});
+            const scopes = String((r && r.scopes) || '');
+            const canRepo = r && r.ok !== false;
+            const canWorkflow = /workflow/i.test(scopes);
+            if (boxEl) {
+              boxEl.innerHTML = `<div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:${canRepo ? 'rgba(34,197,94,.08)' : 'rgba(239,68,68,.08)'};border:1px solid ${canRepo ? 'rgba(34,197,94,.25)' : 'rgba(239,68,68,.3)'};font-size:12.5px;line-height:1.9">
+                <div style="font-weight:700;color:${canRepo ? 'var(--ok)' : '#f87171'}">${canRepo ? '✅ Token 有效，仓库可访问' : '❌ 检测未通过'}</div>
+                <div>账号：<code>${esc(String((r && r.user) || '-'))}</code> · 仓库：<code>${esc(String((r && r.repo) || '-'))}</code></div>
+                <div>Token 权限 scopes：<code>${esc(scopes || '（未返回，细粒度 Token 常见）')}</code></div>
+                <div>workflow 权限（一键构建必需）：<b style="color:${canWorkflow ? 'var(--ok)' : '#fbbf24'}">${canWorkflow ? '已具备 ✅' : '未检测到（若是经典 PAT 请勾选 workflow；细粒度 Token 需 Actions: Read and write 权限）'}</b></div>
+                ${r && r.error ? `<div style="color:#f87171">错误：${esc(String(r.error))}</div>` : ''}
+                <div style="color:var(--dim)">💡 Token 配置入口：后台「🗄️ 数据与 GitHub 同步」→ GitHub Personal Access Token 输入框 → 保存。此处与一键同步/一键构建共用同一 Token，无需再配 Cloudflare 环境变量。</div>
+              </div>`;
+            }
+            toast(canRepo ? 'Token 检测通过' : 'Token 检测未通过', canRepo ? 'ok' : 'err');
+          } catch (err) {
+            if (boxEl) {
+              boxEl.innerHTML = `<div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);color:#f87171;font-size:12.5px;line-height:1.8">
+                ❌ 检测失败：${esc(err.message || '未知错误')}<br>
+                Token 配置入口：后台「🗄️ 数据与 GitHub 同步」→ GitHub Personal Access Token → 保存（需 repo + workflow 权限）。
+              </div>`;
+            }
+            toast('检测失败：' + err.message, 'err');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = '🔍 一键检测 Token 与仓库权限';
+          }
+        });
 
       }
 

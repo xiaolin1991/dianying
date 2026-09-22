@@ -126,6 +126,17 @@ jobs:
             --name "1.0.$RUN_NO" \
             --changelog "$NOTES"
 
+      - name: Generate iPhone/iPad 免签名描述文件 (.mobileconfig)
+        env:
+          START_URL: ${{ vars.START_URL }}
+        run: |
+          node scripts/gen-mobileconfig.mjs
+          mkdir -p out
+          if [ -f public/APP/xiaolintv-ios-latest.mobileconfig ]; then
+            cp public/APP/xiaolintv-ios-latest.mobileconfig "out/晓林影视-描述文件-免签名.mobileconfig"
+          fi
+          ls -la out
+
       - name: Push APP to publish/app branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -197,7 +208,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: xiaolintv-apk
-          path: out/*.apk
+          path: out/*
           if-no-files-found: error
 
 
@@ -410,6 +421,7 @@ jobs:
             | 安卓手机 | xiaolintv-phone-v1.0.${{ github.run_number }}.apk | `/APP/xiaolintv-phone-latest.apk` |
             | 电视/盒子 | xiaolintv-tv-v1.0.${{ github.run_number }}.apk | `/APP/xiaolintv-tv-latest.apk` |
             | iPhone/iPad 免签 | 晓林影视-ios-免签-v1.0.${{ github.run_number }}.ipa | `/APP/xiaolintv-ios-latest.ipa` |
+            | iPhone/iPad 描述文件 | 晓林影视-描述文件-免签名.mobileconfig | `/APP/xiaolintv-ios-latest.mobileconfig` |
             | iPad 专用免签 | 晓林影视-ipad-免签-v1.0.${{ github.run_number }}.ipa | `/APP/xiaolintv-ipad-latest.ipa` |
 
             ### 🍎 iOS 免签安装方式 (任选其一)
