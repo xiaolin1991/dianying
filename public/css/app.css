@@ -932,6 +932,16 @@ html.player-fs .play-stage {
   display: flex; align-items: center; gap: 8px;
   min-height: 36px; /* iOS Safari 兼容: 防止行高塌陷成一条细线 */
 }
+/* iOS Safari ≤14.0 不支持 flex gap(14.1+ 才有): 兄弟 margin 兜底防元素粘连。
+   检测: -webkit-touch-callout 仅 iOS WebKit 支持; translate 属性 Safari 14.1+ 才支持 → 精确命中旧 iOS */
+@supports (-webkit-touch-callout: none) and (not (translate: 1px)) {
+  .m-ctrl-row > * + * { margin-left: 8px; }
+  .play-actions > * + * { margin-left: 10px; }
+}
+/* 操作行「全屏」按钮(收藏那行): SVG 图标 + 文字, 不用 ⛶ 字符(iOS 豆腐块) */
+.play-fs-btn { display: inline-flex; align-items: center; }
+.play-fs-btn svg { flex-shrink: 0; }
+.play-fs-btn svg + span { margin-left: 5px; }
 .m-time { color: #fff; font-size: 12px; font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; opacity: 1; text-shadow: 0 1px 3px rgba(0,0,0,.85); }
 .m-seek {
   flex: 1; min-width: 0; height: 24px; margin: 0; display: block;
@@ -1549,7 +1559,11 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
 @media (max-width: 820px) {
   /* 播放器全宽 */
   .play-stage { width: 100%; }
-  .play-stage .video-wrap { height: auto; aspect-ratio: 16/9; }
+  /* iOS≤14 不支持 aspect-ratio: 保留 56.25vw 高度兜底, 否则播放器容器塌陷 */
+  .play-stage .video-wrap { height: 56.25vw; aspect-ratio: 16/9; }
+  @supports (aspect-ratio: 16/9) {
+    .play-stage .video-wrap { height: auto; }
+  }
   /* 播放页换源: 手机隐藏药丸区, 用按钮+弹窗选择(一行3个) */
   .src-switch.swap-flow { display: none; }
   .swap-open { display: inline-flex; align-items: center; gap: 6px; }

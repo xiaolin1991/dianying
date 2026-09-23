@@ -1631,6 +1631,7 @@
             <div class="play-actions">
               <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
               <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
+              <button class="chip play-fs-btn" id="playFsBtn" type="button" title="全屏"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg><span>全屏</span></button>
               <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
             </div>
           </div>
@@ -1693,6 +1694,24 @@
       video.removeAttribute('controlsList');
       if (wrap) wrap.classList.add('is-mobile-player');
     }
+    // 采集源 m3u8 常内嵌 DEFAULT=YES 的赌博广告"字幕轨": iOS 原生 HLS(AVPlayer) 会自动显示并盖住画面(桌面 hls.js 不会)
+    // 本站无字幕功能, 一律禁用内嵌文本轨
+    const killAdTextTracks = () => {
+      try {
+        const tts = video.textTracks;
+        if (!tts) return;
+        for (let i = 0; i < tts.length; i++) {
+          if (tts[i].mode !== 'disabled') tts[i].mode = 'disabled';
+        }
+      } catch (e) {}
+    };
+    video.addEventListener('loadedmetadata', killAdTextTracks);
+    video.addEventListener('play', killAdTextTracks);
+    try {
+      if (video.textTracks && video.textTracks.addEventListener) {
+        video.textTracks.addEventListener('addtrack', () => setTimeout(killAdTextTracks, 0));
+      }
+    } catch (e) {}
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
     // iOS Safari / WebClip(描述文件): 使用系统原生视频全屏(webkitEnterFullscreen)
     // 原生全屏播放器可突破系统旋转锁定自动横屏(同优酷/腾讯视频), 点"完成"即回到竖屏页面
@@ -2234,12 +2253,13 @@
     const exitNativeFs = async () => {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
       resetBrightness();
+      // iOS 原生视频全屏不产生 fullscreenElement, 必须在提前 return 之前兜底退出
+      try { if (video.webkitDisplayingFullscreen && video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
       if (!fsEl) return;
       try {
         const exit = document.exitFullscreen || document.webkitExitFullscreen;
         if (exit) await exit.call(document);
       } catch (e) {}
-      try { if (video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
     };
     const enterNativeFs = () => {
       const wrapEl = $('#videoWrap');
@@ -2282,6 +2302,16 @@
     // 控制栏全屏按钮 (移动端与电脑端通用)
     if (mFsToggle) {
       mFsToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.currentTarget && e.currentTarget.blur) e.currentTarget.blur();
+        togglePlayerFs();
+      });
+    }
+    // 操作行(收藏那行)常驻「全屏」按钮: iOS 上控制条需先点视频唤出, 此按钮保证一键直达全屏
+    const playFsBtn = $('#playFsBtn');
+    if (playFsBtn) {
+      playFsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
         e.stopPropagation();
         if (e.currentTarget && e.currentTarget.blur) e.currentTarget.blur();
         togglePlayerFs();
@@ -2360,6 +2390,18 @@
     function enterFakeFs() {
       const wrapEl = $('#videoWrap');
       if (!wrapEl || wrapEl.classList.contains('fake-fs')) return;
+      // iOS(Safari/WebClip/App壳)一律走系统原生视频全屏, 不用 CSS 假全屏:
+      // 1) iPhone 无元素级 Fullscreen API, tryNativeFs 里全是空调用;
+      // 2) iOS≤14 WebKit 硬件解码视频层在 transform 旋转容器(fs-rotated)内不渲染 → 黑屏只剩声音;
+      // 3) 原生全屏播放器可突破系统旋转锁定自动横屏(优酷/腾讯视频同款方案), 点"完成"即回竖屏页面
+      if (isIosDevice && video && video.webkitEnterFullscreen) {
+        try {
+          iosNativeFs = true;
+          video.webkitEnterFullscreen();
+          syncPpBtn();
+          return;
+        } catch (e) { iosNativeFs = false; }
+      }
       // 记录进入前的页面方向, 退出全屏时原样恢复(原来竖屏回竖屏, 横屏回横屏)
       prevOrientPortrait = window.innerHeight >= window.innerWidth;
       wrapEl.classList.add('fake-fs');
@@ -2507,22 +2549,19 @@
     document.addEventListener('fullscreenchange', onFsChange);
     document.addEventListener('webkitfullscreenchange', onFsChange);
     video.addEventListener('webkitbeginfullscreen', () => {
-      // iOS 一律把原生全屏抢回为 CSS 假全屏(fake-fs): 锁屏可横屏 + 自定义手势(进度/亮度/音量)全部保留
-      try { if (video.webkitExitFullscreen) video.webkitExitFullscreen(); } catch (e) {}
-      setTimeout(() => {
-        if (!alive() || !video.isConnected) return;
-        if (wrap && !wrap.classList.contains('fake-fs')) enterFakeFs();
-        syncPpBtn();
-        refreshPlayerWm();
-      }, 50);
+      // iOS 原生全屏已接管: 只记录状态(自定义控制条/手势在原生全屏层之下不适用, 退出点系统"完成")
+      iosNativeFs = true;
+      syncPpBtn();
+      refreshPlayerWm();
     });
-video.addEventListener('webkitendfullscreen', () => {
+    video.addEventListener('webkitendfullscreen', () => {
       const wasIosFs = iosNativeFs;
       iosNativeFs = false;
       if (wasIosFs && wrap && wrap.classList.contains('fake-fs')) {
         // iOS 系统全屏结束(用户点了"完成"): 同步清理全屏状态, 确保回到竖屏页面
         exitFakeFs();
       }
+      syncPpBtn();
       refreshPlayerWm();
     });
 
