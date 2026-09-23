@@ -1630,10 +1630,8 @@
             </div>
             <div class="play-actions">
               <div class="src-badge" id="srcBadge" title="当前播放源">${srcIconHtml(src)}<span>${esc(cleanSrcName(src))}</span></div>
-              <a class="btn ghost small" href="#/detail/${key}/${encodeURIComponent(id)}">← 详情</a>
               <button class="chip ${store.get('autoNext', true) ? 'on' : ''}" id="autoNext">连播: ${store.get('autoNext', true) ? '开' : '关'}</button>
               <button class="chip play-fav ${isFav ? 'on' : ''}" id="playFav">${isFav ? '★ 已收藏' : '☆ 收藏'}</button>
-              <button class="chip" id="fsBtn" title="全屏播放">⛶ 全屏</button>
             </div>
           </div>
           <aside class="rel-rail" id="relRail">
@@ -1711,6 +1709,15 @@
       try { if (video && video.webkitDisplayingFullscreen) return true; } catch (e) {}
       return false;
     };
+    // 依据影片实际宽高比判定: 竖屏短剧(h>w)走竖屏全屏, 电影/剧集横屏全屏
+    const isPortraitVideo = () => {
+      try {
+        const w = video.videoWidth || 0, h = video.videoHeight || 0;
+        if (w > 0 && h > 0) return h > w;
+      } catch (e) {}
+      return false; // 元数据未就绪时按横屏处理
+    };
+    let prevOrientPortrait = true; // 进入全屏前的页面方向(退出全屏时原样恢复)
     let curBrightness = 1.0;
     const setBrightness = (b) => {
       curBrightness = Math.min(1.8, Math.max(0.2, Number(b) || 1.0));
@@ -2271,12 +2278,7 @@
       syncPpBtn();
       bumpMCtrl();
     };
-    const toggleFakeFs = () => { togglePlayerFs(); };
-    $('#fsBtn').addEventListener('click', (e) => {
-      e.preventDefault();
-      if (e.currentTarget && e.currentTarget.blur) e.currentTarget.blur();
-      togglePlayerFs();
-    });
+    // 全屏切换: 统一由控制条 ⛶ 按钮(mFsToggle)触发
     // 控制栏全屏按钮 (移动端与电脑端通用)
     if (mFsToggle) {
       mFsToggle.addEventListener('click', (e) => {
@@ -2318,6 +2320,13 @@
         wrapEl.style.height = '';
         return;
       }
+      if (isPortraitVideo()) {
+        // 竖屏短剧: 任何窗口方向下都不旋转, 竖屏铺满
+        wrapEl.classList.remove('fs-rotated');
+        wrapEl.style.width = '';
+        wrapEl.style.height = '';
+        return;
+      }
       const isPortrait = window.innerWidth < window.innerHeight;
       if (isPortrait) {
         wrapEl.classList.add('fs-rotated');
@@ -2332,16 +2341,35 @@
     window.addEventListener('resize', syncRotatedFs);
     window.addEventListener('orientationchange', () => setTimeout(syncRotatedFs, 150));
 
+    // 影片元数据晚到时(width/height 就绪或流内切换分辨率)重新校准全屏横竖方向
+    const onVideoAspectReady = () => {
+      if (!alive() || !video.isConnected) return;
+      const wrapEl = $('#videoWrap');
+      if (!wrapEl || !wrapEl.classList.contains('fake-fs')) return;
+      const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
+      if (inApk) {
+        try { window.AndroidBridge.setOrientation(isPortraitVideo() ? 'portrait' : 'landscape'); } catch (e) {}
+      } else {
+        try { screen.orientation && screen.orientation.lock && screen.orientation.lock(isPortraitVideo() ? 'portrait' : 'landscape'); } catch (e) {}
+      }
+      syncRotatedFs();
+    };
+    video.addEventListener('loadedmetadata', onVideoAspectReady);
+    video.addEventListener('resize', onVideoAspectReady);
+
     function enterFakeFs() {
       const wrapEl = $('#videoWrap');
       if (!wrapEl || wrapEl.classList.contains('fake-fs')) return;
+      // 记录进入前的页面方向, 退出全屏时原样恢复(原来竖屏回竖屏, 横屏回横屏)
+      prevOrientPortrait = window.innerHeight >= window.innerWidth;
       wrapEl.classList.add('fake-fs');
       document.body.style.overflow = 'hidden';
       document.documentElement.classList.add('player-fs');
 
       const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
+      const wantPortrait = isPortraitVideo(); // 竖屏短剧→竖屏全屏; 电影/剧集→横屏全屏
       if (inApk) {
-        try { window.AndroidBridge.setOrientation('landscape'); } catch (e) {}
+        try { window.AndroidBridge.setOrientation(wantPortrait ? 'portrait' : 'landscape'); } catch (e) {}
       } else {
         // 手机浏览器: 先尝试系统级全屏 API (自动隐藏地址栏/状态栏)
         const tryNativeFs = () => {
@@ -2359,7 +2387,7 @@
           return Promise.resolve();
         };
         // 同时保留 CSS rotate 方案作为 fallback（系统全屏 API 不可用时保证体验）
-        try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); } catch (e) {}
+        try { screen.orientation && screen.orientation.lock && screen.orientation.lock(wantPortrait ? 'portrait' : 'landscape'); } catch (e) {}
         syncRotatedFs();
         tryNativeFs();
       }
@@ -2386,7 +2414,8 @@
 
       const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
       if (inApk) {
-        try { window.AndroidBridge.setOrientation('portrait'); } catch (e) {}
+        // 恢复到进入全屏之前的方向(之前竖屏就回竖屏, 之前横屏就回横屏)
+        try { window.AndroidBridge.setOrientation(prevOrientPortrait ? 'portrait' : 'landscape'); } catch (e) {}
       } else {
         try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
         // 若进入时触发了浏览器真全屏, 退出时同步退出
@@ -2503,14 +2532,16 @@ video.addEventListener('webkitendfullscreen', () => {
       if (!alive() || !video.isConnected || !isMobilePlayer) return;
       if (window.AndroidBridge) return; // APK 壳内全屏完全由用户点击控制，避免传感器冲突
       if (orientMq.matches) {
-        if (!isPlayerFs() && !userExitedFs) {
+        // 竖屏短剧: 转横屏不自动进入全屏(竖屏全屏本就铺满, 无需跟着传感器切)
+        if (!isPlayerFs() && !userExitedFs && !isPortraitVideo()) {
           autoFsByOrient = true;
           enterFakeFs();
         }
       } else {
         userExitedFs = false;
         // iOS 修复: 全屏中物理转回竖屏时无条件退出全屏, 解决"返回不了竖屏页面"
-        if ((autoFsByOrient || isIosDevice) && wrap.classList.contains('fake-fs')) {
+        // 竖屏短剧例外: 竖屏全屏本身就是竖屏, 物理转向不应踢出全屏
+        if ((autoFsByOrient || isIosDevice) && wrap.classList.contains('fake-fs') && !isPortraitVideo()) {
           autoFsByOrient = false;
           exitFakeFs();
         }
@@ -2578,7 +2609,7 @@ video.addEventListener('webkitendfullscreen', () => {
         let touchStartTime = 0, touchStartVol = 1, touchStartBright = 1;
         let touchMode = ''; // '' | 'seek' | 'vol' | 'bright'
         let seekTarget = -1;
-        let lastTapAt = 0, singleTapTimer = null;
+        let lastTapAt = 0, singleTapTimer = null, tapHadCtrl = false;
 
         wrap.addEventListener('touchstart', (e) => {
           if (e.target.closest('.fs-top-bar, .m-ctrl, .failover-box, a, button, input, select')) return;
@@ -2591,7 +2622,8 @@ video.addEventListener('webkitendfullscreen', () => {
           touchStartBright = curBrightness;
           touchMode = '';
           seekTarget = -1;
-          bumpMCtrl();
+          // 只记录按下瞬间控制条是否已显示, 不在这里显示(否则轻触会被误判为"点掉已显示的控制条"导致闪现)
+          tapHadCtrl = !!(mCtrl && mCtrl.classList.contains('show'));
         }, { passive: true });
 
         wrap.addEventListener('touchmove', (e) => {
@@ -2699,10 +2731,11 @@ video.addEventListener('webkitendfullscreen', () => {
           } else {
             lastTapAt = now;
             singleTapTimer = setTimeout(() => {
-              if (mCtrl && mCtrl.classList.contains('show')) {
+              // 点一下: 控制条+顶部退出栏显示约2.6秒; 显示中再点一下: 立即收回纯净全屏
+              if (tapHadCtrl && mCtrl && mCtrl.classList.contains('show')) {
                 hideMCtrlNow();
               } else {
-                bumpMCtrl();
+                bumpMCtrl(2600);
               }
             }, 280);
           }

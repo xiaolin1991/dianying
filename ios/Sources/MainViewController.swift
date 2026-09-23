@@ -23,7 +23,8 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
         view.backgroundColor = .black
 
         let config = WKWebViewConfiguration()
-        config.allowsInlineMediaPlayback = false           // 视频可走系统全屏播放器(可横屏)
+        // 必须为 true: 否则 iPhone 上视频一律被系统原生全屏接管, 网页自定义控制条/手势/退出键全部失效(点不动、退不出)
+        config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = [] // 允许自动连播
         config.userContentController.add(self, name: "orientation")
         // 注入与安卓壳一致的 JS 桥: 网页全屏逻辑统一走 AndroidBridge 路径
