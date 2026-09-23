@@ -834,7 +834,7 @@ html.player-fs .play-stage {
   display: none;
   position: absolute; left: 0; right: 0; top: 0;
   z-index: 45;
-  padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 14px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) 14px calc(16px + env(safe-area-inset-left, 0px));
   background: linear-gradient(180deg, rgba(0,0,0,.85) 0%, rgba(0,0,0,.35) 60%, transparent 100%);
   align-items: center;
   gap: 8px;
@@ -919,7 +919,7 @@ html.player-fs .play-stage {
 .m-ctrl {
   display: none;
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 35;
-  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  padding: 10px calc(12px + env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px));
   background: linear-gradient(transparent, rgba(0,0,0,.72));
   opacity: 0; pointer-events: none; transition: opacity .15s;
 }
@@ -930,23 +930,25 @@ html.player-fs .play-stage {
 .m-ctrl.show { opacity: 1; pointer-events: auto; }
 .m-ctrl-row {
   display: flex; align-items: center; gap: 8px;
+  min-height: 36px; /* iOS Safari 兼容: 防止行高塌陷成一条细线 */
 }
-.m-time { color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; min-width: 34px; opacity: .9; }
+.m-time { color: #fff; font-size: 12px; font-variant-numeric: tabular-nums; min-width: 36px; text-align: center; opacity: 1; text-shadow: 0 1px 3px rgba(0,0,0,.85); }
 .m-seek {
-  flex: 1; min-width: 0; height: 22px; margin: 0;
+  flex: 1; min-width: 0; height: 24px; margin: 0; display: block;
   -webkit-appearance: none; appearance: none; background: transparent;
 }
 .m-seek::-webkit-slider-runnable-track {
-  height: 3px; border-radius: 99px; background: rgba(255,255,255,.28);
+  -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 99px; background: rgba(255,255,255,.32);
 }
 .m-seek::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
-  width: 14px; height: 14px; margin-top: -5.5px; border-radius: 50%;
-  background: #fff; border: none; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+  width: 16px; height: 16px; margin-top: -6px; border-radius: 50%;
+  background: #fff; border: none; box-shadow: 0 1px 5px rgba(0,0,0,.5);
 }
-.m-seek::-moz-range-track { height: 3px; border-radius: 99px; background: rgba(255,255,255,.28); }
+.m-seek::-moz-range-track { height: 4px; border-radius: 99px; background: rgba(255,255,255,.32); }
 .m-seek::-moz-range-thumb {
-  width: 14px; height: 14px; border-radius: 50%; background: #fff; border: none;
+  width: 16px; height: 16px; border-radius: 50%; background: #fff; border: none;
 }
 .m-icon-btn {
   flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
@@ -954,6 +956,7 @@ html.player-fs .play-stage {
   color: #fff; font-size: 15px; line-height: 1; padding: 0;
   display: grid; place-items: center; cursor: pointer;
 }
+.m-icon-btn svg { display: block; }
 .m-icon-btn.on { border-color: var(--acc); color: var(--acc); }
 /* 播放器 PNG 水印(不铺满遮罩, 避免挡住点击暂停; pointer-events 全关) */
 .player-wm {

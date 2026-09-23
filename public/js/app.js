@@ -1620,7 +1620,7 @@
                     <span class="m-time" id="mTimeCur">0:00</span>
                     <input class="m-seek" id="mSeek" type="range" min="0" max="1000" value="0" step="1" aria-label="进度" />
                     <span class="m-time" id="mTimeDur">0:00</span>
-                    <button type="button" class="m-icon-btn" id="mFsToggle" title="全屏" aria-label="全屏">⛶</button>
+                    <button type="button" class="m-icon-btn" id="mFsToggle" title="全屏" aria-label="全屏"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/></svg></button>
                   </div>
                 </div>
                 <img class="player-wm" id="playerWm" alt="" draggable="false" />
