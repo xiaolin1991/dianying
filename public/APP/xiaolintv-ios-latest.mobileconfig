@@ -18,13 +18,13 @@
 			<key>PayloadDisplayName</key>
 			<string>晓林影视</string>
 			<key>PayloadIdentifier</key>
-			<string>com.xiaolintv.webclip.C19E8FB4-7772-4527-BA23-CBB476A5C2DC</string>
+			<string>com.xiaolintv.webclip.349CE02F-5FEA-45BB-8C64-B599362072E3</string>
 			<key>PayloadOrganization</key>
 			<string>晓林影视</string>
 			<key>PayloadType</key>
 			<string>com.apple.webClip.managed</string>
 			<key>PayloadUUID</key>
-			<string>C19E8FB4-7772-4527-BA23-CBB476A5C2DC</string>
+			<string>349CE02F-5FEA-45BB-8C64-B599362072E3</string>
 			<key>PayloadVersion</key>
 			<integer>1</integer>
 			<key>Precomposed</key>
@@ -38,7 +38,7 @@
 	<key>PayloadDisplayName</key>
 	<string>晓林影视 免签安装描述文件</string>
 	<key>PayloadIdentifier</key>
-	<string>com.xiaolintv.profile.05569F83-16DB-459C-A2CE-6AD6B78A9215</string>
+	<string>com.xiaolintv.profile.5A96116A-5C44-4801-B141-8A0A17B43F83</string>
 	<key>PayloadOrganization</key>
 	<string>晓林影视</string>
 	<key>PayloadRemovalDisallowed</key>
@@ -46,7 +46,7 @@
 	<key>PayloadType</key>
 	<string>Configuration</string>
 	<key>PayloadUUID</key>
-	<string>05569F83-16DB-459C-A2CE-6AD6B78A9215</string>
+	<string>5A96116A-5C44-4801-B141-8A0A17B43F83</string>
 	<key>PayloadVersion</key>
 	<integer>1</integer>
 </dict>
