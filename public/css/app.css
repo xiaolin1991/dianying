@@ -2456,3 +2456,14 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
 /* 2. 竖屏旋转全屏(系统锁屏状态)时铺满去黑边: 裁掉超出部分, 不留左右黑边 */
 .video-wrap.fake-fs.fs-rotated video { object-fit: cover !important; }
 
+/* 3. iPhone 刘海屏横屏全屏(fake-fs): 控制条/顶部栏避开刘海与底部 Home 条安全区 */
+.video-wrap.fake-fs .m-ctrl {
+  padding-left: max(10px, env(safe-area-inset-left));
+  padding-right: max(10px, env(safe-area-inset-right));
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+.video-wrap.fake-fs .fs-top-bar {
+  padding-left: max(10px, env(safe-area-inset-left));
+  padding-right: max(10px, env(safe-area-inset-right));
+}
+

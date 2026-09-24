@@ -1738,18 +1738,34 @@
     };
     let prevOrientPortrait = true; // 进入全屏前的页面方向(退出全屏时原样恢复)
     let curBrightness = 1.0;
+    // iOS App 壳注入的原生桥(音量/亮度): 网页 video.volume 在 iOS 上无效, 需走原生
+    const nativeVol = () => (window.AndroidBridge && typeof window.AndroidBridge.setVolume === 'function') ? window.AndroidBridge : null;
+    const nativeBright = () => (window.AndroidBridge && typeof window.AndroidBridge.setBrightness === 'function') ? window.AndroidBridge : null;
     const setBrightness = (b) => {
       curBrightness = Math.min(1.8, Math.max(0.2, Number(b) || 1.0));
+      const nb = nativeBright();
+      if (nb) {
+        // 原生调节系统屏幕亮度(0~1); 超过1的部分再用 CSS 滤镜补偿提亮
+        try { nb.setBrightness(Math.min(1, Math.max(0.05, curBrightness))); } catch (e) {}
+        if (video) video.style.filter = curBrightness > 1.02 ? `brightness(${curBrightness.toFixed(2)})` : '';
+        return;
+      }
       if (video) {
         video.style.filter = Math.abs(curBrightness - 1.0) < 0.02 ? '' : `brightness(${curBrightness.toFixed(2)})`;
       }
     };
     const resetBrightness = () => {
-      setBrightness(1.0);
+      curBrightness = 1.0;
+      if (video) video.style.filter = '';
+      const nb = nativeBright();
+      // 原生模式: 恢复用户进入全屏前的系统亮度, 而不是粗暴重置为最亮
+      if (nb && typeof nb.resetBrightness === 'function') { try { nb.resetBrightness(); } catch (e) {} }
     };
     const applyPlayerPrefs = () => {
       const vol = getSavedVol();
       try { video.volume = vol; if (vol > 0) video.muted = false; } catch (e) {}
+      const nv = nativeVol();
+      if (nv) { try { nv.setVolume(vol); } catch (e) {} }
     };
     const fmtClock = (sec) => {
       sec = Math.max(0, Math.floor(sec || 0));
@@ -2390,11 +2406,14 @@
     function enterFakeFs() {
       const wrapEl = $('#videoWrap');
       if (!wrapEl || wrapEl.classList.contains('fake-fs')) return;
-      // iOS(Safari/WebClip/App壳)一律走系统原生视频全屏, 不用 CSS 假全屏:
-      // 1) iPhone 无元素级 Fullscreen API, tryNativeFs 里全是空调用;
-      // 2) iOS≤14 WebKit 硬件解码视频层在 transform 旋转容器(fs-rotated)内不渲染 → 黑屏只剩声音;
-      // 3) 原生全屏播放器可突破系统旋转锁定自动横屏(优酷/腾讯视频同款方案), 点"完成"即回竖屏页面
-      if (isIosDevice && video && video.webkitEnterFullscreen) {
+      const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
+      // iOS 分两种环境:
+      // A) iOS App 壳(XIAOLIN-TV-IOS, 有原生桥): 走 CSS 假全屏 + 原生层强制横屏。
+      //    原生层程序性强制旋转可突破系统旋转锁定(优酷/腾讯视频同款),
+      //    且假全屏容器不做 transform 旋转(syncRotatedFs 的 inApk 分支不加 fs-rotated),
+      //    因此不会触发 iOS≤14 硬件解码视频层黑屏, 自定义控制条/手势/退出键全部可用;
+      // B) iOS Safari / WebClip(描述文件, 无原生桥): 仍走系统原生视频全屏兜底。
+      if (isIosDevice && !inApk && video && video.webkitEnterFullscreen) {
         try {
           iosNativeFs = true;
           video.webkitEnterFullscreen();
@@ -2408,7 +2427,6 @@
       document.body.style.overflow = 'hidden';
       document.documentElement.classList.add('player-fs');
 
-      const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
       const wantPortrait = isPortraitVideo(); // 竖屏短剧→竖屏全屏; 电影/剧集→横屏全屏
       if (inApk) {
         try { window.AndroidBridge.setOrientation(wantPortrait ? 'portrait' : 'landscape'); } catch (e) {}
@@ -2727,6 +2745,8 @@
             const h = isRotated ? (window.innerWidth || 240) : Math.max(140, (wrap.clientHeight || 240) * 0.7);
             const nv = Math.min(1, Math.max(0, touchStartVol + dyUp / h));
             try { video.volume = nv; video.muted = nv <= 0; } catch (err) {}
+            const nvb = nativeVol();
+            if (nvb) { try { nvb.setVolume(nv); } catch (err) {} }
             store.set('vidVol', Number(nv.toFixed(2)));
             showBarHud(nv <= 0 ? '🔇' : '🔊', '音量', nv * 100);
           } else if (touchMode === 'bright') {
