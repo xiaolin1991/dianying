@@ -4,10 +4,11 @@ import MediaPlayer
 
 /// 晓林影视 iOS 壳: 全屏 WKWebView 装载线上站点
 /// - 与安卓壳一致的专属 UA (XIAOLIN-TV-IOS), 站点可识别官方 App
-/// - 网页全屏走 CSS 假全屏 + 本类程序性强制旋转横屏:
-///   程序性旋转不受系统"旋转锁定"影响(同优酷/腾讯视频), 锁定竖屏时全屏依然横屏铺满
-/// - 假全屏容器无 transform 旋转 → 不触发 iOS≤14 硬件解码视频层黑屏,
-///   网页自定义控制条(进度/倍速)与手势(快进/音量/亮度)在 iOS 全屏下全部可用
+/// - 网页全屏走 CSS 假全屏 + 容器旋转90°(B站/西瓜同款): 系统"竖排方向锁定"下
+///   程序性强制旋转与原生全屏均无法横屏(iOS 硬限制), CSS 旋转是唯一可靠方案;
+///   未锁定旋转时本类仍会程序性强制真横屏, 体验更佳
+/// - 网页全屏时经 statusbar 桥隐藏系统状态栏(沉浸式, 优酷/腾讯视频同款), 退出全屏恢复
+/// - 网页自定义控制条(进度/倍速)与手势(快进/音量/亮度)在 iOS 全屏下全部可用
 /// - 音量/亮度经 JS 桥真正调节系统值(网页 video.volume 在 iOS 上无效)
 class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
 
@@ -26,6 +27,11 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
 
     override var prefersHomeIndicatorAutoHidden: Bool { true }
 
+    /// 网页全屏时隐藏系统状态栏(沉浸式), 退出全屏恢复
+    private var statusBarHidden = false
+    override var prefersStatusBarHidden: Bool { statusBarHidden }
+    override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation { .fade }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
@@ -37,6 +43,7 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
         config.userContentController.add(self, name: "orientation")
         config.userContentController.add(self, name: "volume")
         config.userContentController.add(self, name: "brightness")
+        config.userContentController.add(self, name: "statusbar")
         // 注入与安卓壳一致的 JS 桥: 网页全屏/音量/亮度逻辑统一走 AndroidBridge 路径
         let bridgeJS = """
         window.AndroidBridge = {
@@ -51,6 +58,9 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
           },
           resetBrightness: function() {
             try { window.webkit.messageHandlers.brightness.postMessage('reset'); } catch (e) {}
+          },
+          setStatusBar: function(hidden) {
+            try { window.webkit.messageHandlers.statusbar.postMessage(hidden ? 'hide' : 'show'); } catch (e) {}
           }
         };
         """
@@ -114,6 +124,16 @@ class MainViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, 
             guard v >= 0 else { return }
             if originalBrightness < 0 { originalBrightness = UIScreen.main.brightness }
             UIScreen.main.brightness = CGFloat(min(1, max(0.02, v)))
+        case "statusbar":
+            // 网页全屏时隐藏系统状态栏(沉浸式), 退出全屏恢复显示
+            guard let mode = message.body as? String else { return }
+            let hide = (mode == "hide")
+            guard hide != statusBarHidden else { return }
+            statusBarHidden = hide
+            UIView.animate(withDuration: 0.25) {
+                self.setNeedsStatusBarAppearanceUpdate()
+            }
+
         default:
             break
         }

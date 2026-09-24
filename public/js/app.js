@@ -611,6 +611,13 @@
     Player.destroy();
     document.documentElement.classList.remove('player-fs');
     document.body.style.overflow = '';
+    // 路由切换兜底: 恢复系统状态栏显示(若销毁时仍处于全屏)
+    try {
+      if (window.AndroidBridge && typeof window.AndroidBridge.setStatusBar === 'function') {
+        window.AndroidBridge.setStatusBar(false);
+      }
+    } catch (e) {}
+
     try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
     try {
       if (window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function') {
@@ -2419,6 +2426,12 @@
       wrapEl.classList.add('fake-fs');
       document.body.style.overflow = 'hidden';
       document.documentElement.classList.add('player-fs');
+      // 沉浸式: 全屏时隐藏系统状态栏(优酷/腾讯视频同款); 仅 iOS 壳有此桥, 其他环境自动跳过
+      try {
+        if (window.AndroidBridge && typeof window.AndroidBridge.setStatusBar === 'function') {
+          window.AndroidBridge.setStatusBar(true);
+        }
+      } catch (e) {}
 
       const wantPortrait = isPortraitVideo(); // 竖屏短剧→竖屏全屏; 电影/剧集→横屏全屏
       if (inApk) {
@@ -2468,6 +2481,12 @@
       wrapEl.style.height = '';
       document.body.style.overflow = '';
       document.documentElement.classList.remove('player-fs');
+      // 退出全屏: 恢复系统状态栏显示
+      try {
+        if (window.AndroidBridge && typeof window.AndroidBridge.setStatusBar === 'function') {
+          window.AndroidBridge.setStatusBar(false);
+        }
+      } catch (e) {}
 
       const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
       if (inApk) {
