@@ -1713,8 +1713,8 @@
       }
     } catch (e) {}
     const getSavedVol = () => Math.min(1, Math.max(0, Number(store.get('vidVol', 1)) || 1));
-    // iOS Safari / WebClip(描述文件): 使用系统原生视频全屏(webkitEnterFullscreen)
-    // 原生全屏播放器可突破系统旋转锁定自动横屏(同优酷/腾讯视频), 点"完成"即回到竖屏页面
+    // iOS 全屏统一走 CSS 假全屏 + fs-rotated 旋转(B站/西瓜同款):
+    // 旋转锁定下原生强制横屏/原生全屏均无法横屏(iOS 硬限制), CSS 旋转是唯一可靠方案
     const isIosDevice = /iP(hone|ad|od)/i.test(navigator.userAgent || '')
       || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
     let iosNativeFs = false; // 当前是否处于 iOS 原生视频全屏
@@ -2360,7 +2360,9 @@
       const wrapEl = $('#videoWrap');
       if (!wrapEl || !wrapEl.classList.contains('fake-fs')) return;
       const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
-      if (inApk) {
+      // Android App 壳: 原生 setRequestedOrientation 不受系统旋转锁定影响, 总能真横屏, 无需 CSS 旋转;
+      // iOS(App壳/Safari/WebClip): 竖排方向锁定下原生强制横屏无效, 必须用 CSS 旋转90°铺满(B站/西瓜同款)
+      if (inApk && !isIosDevice) {
         wrapEl.classList.remove('fs-rotated');
         wrapEl.style.width = '';
         wrapEl.style.height = '';
@@ -2407,20 +2409,11 @@
       const wrapEl = $('#videoWrap');
       if (!wrapEl || wrapEl.classList.contains('fake-fs')) return;
       const inApk = !!(window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function');
-      // iOS 分两种环境:
-      // A) iOS App 壳(XIAOLIN-TV-IOS, 有原生桥): 走 CSS 假全屏 + 原生层强制横屏。
-      //    原生层程序性强制旋转可突破系统旋转锁定(优酷/腾讯视频同款),
-      //    且假全屏容器不做 transform 旋转(syncRotatedFs 的 inApk 分支不加 fs-rotated),
-      //    因此不会触发 iOS≤14 硬件解码视频层黑屏, 自定义控制条/手势/退出键全部可用;
-      // B) iOS Safari / WebClip(描述文件, 无原生桥): 仍走系统原生视频全屏兜底。
-      if (isIosDevice && !inApk && video && video.webkitEnterFullscreen) {
-        try {
-          iosNativeFs = true;
-          video.webkitEnterFullscreen();
-          syncPpBtn();
-          return;
-        } catch (e) { iosNativeFs = false; }
-      }
+      // iOS 全平台(App壳/Safari/WebClip)统一走 CSS 假全屏(B站/西瓜播放器同款方案):
+      // 开发者实测结论 —— 系统开启"竖排方向锁定"后, 原生程序性强制旋转(setValue orientation)
+      // 与原生全屏(webkitEnterFullscreen)都无法横屏, 这是 iOS 的硬限制, 与是否安装 App 无关;
+      // 唯一可靠方案是 CSS 假全屏 + 容器旋转90°(fs-rotated), 自定义控制条/进度/音量/亮度手势全部保留。
+      // (未锁定旋转时 App 壳仍会同时请求原生强制横屏, 真横屏成功后 syncRotatedFs 会自动摘掉旋转变换)
       // 记录进入前的页面方向, 退出全屏时原样恢复(原来竖屏回竖屏, 横屏回横屏)
       prevOrientPortrait = window.innerHeight >= window.innerWidth;
       wrapEl.classList.add('fake-fs');
@@ -2430,6 +2423,9 @@
       const wantPortrait = isPortraitVideo(); // 竖屏短剧→竖屏全屏; 电影/剧集→横屏全屏
       if (inApk) {
         try { window.AndroidBridge.setOrientation(wantPortrait ? 'portrait' : 'landscape'); } catch (e) {}
+        // iOS 壳关键: 锁定旋转时原生强制横屏无效, 必须立即套 CSS 旋转铺满;
+        // 若未锁定, 原生真横屏成功后 resize 会触发 syncRotatedFs 自动摘掉旋转变换(闪烁可忽略)
+        syncRotatedFs();
       } else {
         // 手机浏览器: 先尝试系统级全屏 API (自动隐藏地址栏/状态栏)
         const tryNativeFs = () => {
@@ -2449,7 +2445,8 @@
         // 同时保留 CSS rotate 方案作为 fallback（系统全屏 API 不可用时保证体验）
         try { screen.orientation && screen.orientation.lock && screen.orientation.lock(wantPortrait ? 'portrait' : 'landscape'); } catch (e) {}
         syncRotatedFs();
-        tryNativeFs();
+        // iOS 不支持元素级全屏 API, 且原生视频全屏在旋转锁定下只能竖屏+吞掉自定义控制条, 直接走 CSS 旋转铺满
+        if (!isIosDevice) tryNativeFs();
       }
 
       // 仅在纯移动端浏览器中压入一层历史(APK由原生 onBackPressed 拦截, 不压入以防历史污染导致返回死循环)
