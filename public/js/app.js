@@ -6438,84 +6438,93 @@
 
           const modal = document.createElement('div');
           modal.id = 'ipDetailModalBackdrop';
-          modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px)';
+          modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(4px)';
           modal.innerHTML = `
-            <div class="modal-card" style="max-width:920px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--card-bg,#121826);border:1px solid var(--card-br,rgba(255,255,255,0.12));border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,0.7);overflow:hidden;animation:popIn .2s ease-out">
-              <!-- 弹窗顶栏 -->
-              <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--card-br,rgba(255,255,255,0.08));background:rgba(255,255,255,0.02)">
+            <div class="modal-card" style="max-width:1120px;width:min(96vw,1120px);max-height:92vh;display:flex;flex-direction:column;background:#ffffff;color:#1e293b;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 25px 65px rgba(0,0,0,0.35);overflow:hidden;animation:popIn .2s ease-out">
+              <!-- 弹窗顶栏 (亮色白底) -->
+              <div style="padding:16px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;background:#f8fafc">
                 <div>
-                  <div style="font-size:16px;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <div style="font-size:17px;font-weight:700;display:flex;align-items:center;gap:10px;color:#0f172a;flex-wrap:wrap">
                     <span>🌐 访客 IP 访问轨迹深钻</span>
-                    <code style="background:rgba(91,140,255,0.18);color:#5b8cff;padding:3px 10px;border-radius:6px;font-size:14px;font-family:monospace">${esc(item.ip)}</code>
+                    <code style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;padding:3px 12px;border-radius:6px;font-size:15px;font-family:monospace;font-weight:700">${esc(item.ip)}</code>
                   </div>
-                  <div style="font-size:12px;color:var(--dim);margin-top:4px">
-                    📍 <b>IP归属地：</b>${esc(item.geo || '未知地区')} · <b>最近活跃：</b>${fmtDateTime(item.lastTs)}
+                  <div style="font-size:13px;color:#64748b;margin-top:5px;line-height:1.5">
+                    📍 <b style="color:#334155">IP归属地：</b>${esc(item.geo || '未知地区')} &nbsp;·&nbsp; 🕒 <b style="color:#334155">最近活跃：</b>${fmtDateTime(item.lastTs)}
                   </div>
                 </div>
-                <button type="button" class="btn ghost small" id="closeIpModalBtn" style="padding:4px 10px;font-size:16px;line-height:1;border-radius:6px">✕</button>
+                <button type="button" id="closeIpModalBtn" style="border:none;background:#e2e8f0;color:#475569;width:34px;height:34px;border-radius:8px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s" title="关闭窗口">✕</button>
               </div>
 
-              <!-- 弹窗主体内容 -->
-              <div style="padding:20px;overflow-y:auto;flex:1">
-                <!-- 访客概要卡片 -->
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
-                  <div style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--card-br,rgba(255,255,255,0.06))">
-                    <div style="font-size:12px;color:var(--dim)">访问用户身份</div>
-                    <div style="font-size:15px;font-weight:600;margin-top:4px">${item.u ? `<span class="badge ok">👤 ${esc(item.u)}</span>` : '<span class="badge dim">👤 游客 (未登录)</span>'}</div>
+              <!-- 弹窗主体内容 (白色背景) -->
+              <div style="padding:22px 24px;overflow-y:auto;flex:1;background:#ffffff">
+                <!-- 4个访客概要卡片 (纯白底，柔和浅灰边框，清晰黑字) -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:22px">
+                  <div style="padding:14px 16px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0">
+                    <div style="font-size:12px;color:#64748b;font-weight:500">访问用户身份</div>
+                    <div style="font-size:15px;font-weight:700;margin-top:6px;color:#0f172a">
+                      ${item.u ? `<span style="background:#e0f2fe;color:#0369a1;padding:3px 10px;border-radius:6px;font-size:13px">👤 ${esc(item.u)}</span>` : '<span style="background:#f1f5f9;color:#475569;padding:3px 10px;border-radius:6px;font-size:13px">👤 游客 (未登录)</span>'}
+                    </div>
                   </div>
-                  <div style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--card-br,rgba(255,255,255,0.06))">
-                    <div style="font-size:12px;color:var(--dim)">访问设备 / 系统</div>
-                    <div style="font-size:13.5px;font-weight:600;margin-top:4px;color:var(--txt)" title="${esc(item.ua || '')}">${esc(item.device || '标准浏览器')}</div>
+
+                  <div style="padding:14px 16px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0">
+                    <div style="font-size:12px;color:#64748b;font-weight:500">访问设备 / 操作系统</div>
+                    <div style="font-size:14px;font-weight:700;margin-top:6px;color:#0f172a;line-height:1.4" title="${esc(item.ua || '')}">
+                      ${esc(item.device || '标准浏览器')}
+                    </div>
                   </div>
-                  <div style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--card-br,rgba(255,255,255,0.06))">
-                    <div style="font-size:12px;color:var(--dim)">累计访问次数 (PV)</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--txt);margin-top:2px">${item.count} 次</div>
+
+                  <div style="padding:14px 16px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0">
+                    <div style="font-size:12px;color:#64748b;font-weight:500">累计访问次数 (PV)</div>
+                    <div style="font-size:22px;font-weight:800;color:#0f172a;margin-top:4px">
+                      ${item.count} <span style="font-size:13px;font-weight:normal;color:#64748b">次</span>
+                    </div>
                   </div>
-                  <div style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--card-br,rgba(255,255,255,0.06))">
-                    <div style="font-size:12px;color:var(--dim)">累计停留/观看时长</div>
-                    <div style="font-size:18px;font-weight:700;color:var(--theme-dot);margin-top:2px">${fmtWatchSec(item.duration)}</div>
+
+                  <div style="padding:14px 16px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0">
+                    <div style="font-size:12px;color:#64748b;font-weight:500">累计停留 / 观看时长</div>
+                    <div style="font-size:20px;font-weight:800;color:#2563eb;margin-top:4px">
+                      ${fmtWatchSec(item.duration)}
+                    </div>
                   </div>
                 </div>
 
                 <!-- 轨迹足迹列表 -->
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                  <h4 style="margin:0;font-size:14px;display:flex;align-items:center;gap:6px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                  <h4 style="margin:0;font-size:15px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:6px">
                     <span>👣 详细操作历史轨迹</span>
-                    <span style="font-size:12px;color:var(--dim);font-weight:normal">(共 ${item.actions.length} 条记录，按时间最新在前展示)</span>
+                    <span style="font-size:12.5px;color:#64748b;font-weight:normal">(共 ${item.actions.length} 条记录，按时间最新在前展示)</span>
                   </h4>
                 </div>
 
-                <div class="table-scroll" style="border:1px solid var(--card-br,rgba(255,255,255,0.08));border-radius:8px;max-height:420px">
-                  <table class="adm-table" style="font-size:12.5px;margin:0">
-                    <thead>
+                <div class="table-scroll" style="border:1px solid #e2e8f0;border-radius:10px;max-height:460px;background:#ffffff">
+                  <table style="width:100%;border-collapse:collapse;font-size:13px;color:#1e293b;text-align:left;min-width:860px">
+                    <thead style="background:#f1f5f9;color:#475569;border-bottom:2px solid #cbd5e1;position:sticky;top:0;z-index:10">
                       <tr>
-                        <th style="width:145px">访问时间</th>
-                        <th>看到什么内容 (浏览详情)</th>
-                        <th>打开什么页面 (路由地址)</th>
-                        <th style="width:105px">停留/观看时长</th>
-                        <th style="width:85px">用户名</th>
-                        <th style="width:115px">访问设备</th>
+                        <th style="padding:11px 14px;width:150px;white-space:nowrap;font-weight:600">访问时间</th>
+                        <th style="padding:11px 14px;min-width:180px;font-weight:600">看到什么内容 (浏览详情)</th>
+                        <th style="padding:11px 14px;min-width:170px;font-weight:600">打开什么页面 (路由地址)</th>
+                        <th style="padding:11px 14px;width:115px;white-space:nowrap;font-weight:600">停留/观看时长</th>
+                        <th style="padding:11px 14px;width:95px;white-space:nowrap;font-weight:600">用户名</th>
+                        <th style="padding:11px 14px;width:130px;font-weight:600">访问设备</th>
                       </tr>
                     </thead>
                     <tbody>
-                      ${(item.actions || []).map((act) => `
-                        <tr>
-                          <td style="white-space:nowrap;color:var(--dim)"><small>${fmtDateTime(act.ts)}</small></td>
-                          <td>
-                            <b style="color:var(--txt)">${esc(act.title || (act.kind === 'search' ? '🔍 搜索：' + (act.q || '') : (act.path || '页面访问')))}</b>
+                      ${(item.actions || []).map((act, idx) => `
+                        <tr style="border-bottom:1px solid #f1f5f9;background:${idx % 2 === 0 ? '#ffffff' : '#fafafa'};transition:background .15s" onmouseover="this.style.background='#f0f9ff'" onmouseout="this.style.background='${idx % 2 === 0 ? '#ffffff' : '#fafafa'}'">
+                          <td style="padding:10px 14px;white-space:nowrap;color:#64748b;font-size:12px;font-family:monospace">${fmtDateTime(act.ts)}</td>
+                          <td style="padding:10px 14px;line-height:1.5">
+                            <b style="color:#0f172a;font-size:13.5px">${esc(act.title || (act.kind === 'search' ? '🔍 搜索：' + (act.q || '') : (act.path || '页面访问')))}</b>
                           </td>
-                          <td>
-                            <a href="${esc(act.path || '#/')}" target="_blank" rel="noopener" style="color:var(--theme-dot);word-break:break-all"><small>${esc(act.path || '#/')}</small></a>
+                          <td style="padding:10px 14px;line-height:1.4">
+                            <a href="${esc(act.path || '#/')}" target="_blank" rel="noopener" style="color:#2563eb;word-break:break-all;text-decoration:none;font-size:12px" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${esc(act.path || '#/')}</a>
                           </td>
-                          <td>
-                            <span style="color:${act.duration > 0 ? 'var(--theme-dot)' : 'var(--dim)'};font-weight:600">${fmtWatchSec(act.duration)}</span>
+                          <td style="padding:10px 14px;white-space:nowrap">
+                            <span style="color:${act.duration > 0 ? '#0284c7' : '#94a3b8'};font-weight:700;font-size:13px">${fmtWatchSec(act.duration)}</span>
                           </td>
-                          <td>
-                            ${act.u ? `<span class="badge ok">${esc(act.u)}</span>` : '<span class="badge dim">游客</span>'}
+                          <td style="padding:10px 14px;white-space:nowrap">
+                            ${act.u ? `<span style="background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600">${esc(act.u)}</span>` : '<span style="background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:4px;font-size:12px">游客</span>'}
                           </td>
-                          <td>
-                            <small style="color:var(--dim)">${esc(act.device || item.device || '网页端')}</small>
-                          </td>
+                          <td style="padding:10px 14px;color:#475569;font-size:12px;line-height:1.4">${esc(act.device || item.device || '网页端')}</td>
                         </tr>`).join('')}
                     </tbody>
                   </table>
@@ -6523,8 +6532,8 @@
               </div>
 
               <!-- 弹窗底栏 -->
-              <div style="padding:12px 20px;border-top:1px solid var(--card-br,rgba(255,255,255,0.08));display:flex;justify-content:flex-end;background:rgba(255,255,255,0.02)">
-                <button type="button" class="btn ghost small" id="closeIpModalBtnBottom">关闭窗口</button>
+              <div style="padding:14px 24px;border-top:1px solid #e2e8f0;display:flex;justify-content:flex-end;align-items:center;gap:12px;background:#f8fafc">
+                <button type="button" id="closeIpModalBtnBottom" style="padding:7px 18px;border-radius:8px;border:1px solid #cbd5e1;background:#ffffff;color:#334155;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.05)">关闭窗口</button>
               </div>
             </div>`;
 
@@ -6563,32 +6572,32 @@
 
           const rowsHtml = curSlice.map((it) => `
             <tr class="adm-ip-row" data-ip="${esc(it.ip)}" style="cursor:pointer" title="点击查看该 IP 详细访问轨迹">
-              <td><b style="font-family:monospace;color:var(--txt)">${esc(it.ip)}</b></td>
-              <td>${esc(it.geo || '未知地区')}</td>
-              <td>${it.u ? `<span class="badge ok">👤 ${esc(it.u)}</span>` : '<span class="badge dim">游客</span>'}</td>
-              <td><small style="color:var(--dim)">${esc(it.device || '标准浏览器')}</small></td>
-              <td><b>${it.count}</b> 次</td>
-              <td><span style="color:var(--theme-dot);font-weight:600">${fmtWatchSec(it.duration)}</span></td>
-              <td class="ulog-title" title="${esc(it.latestTitle || it.latestPath || '—')}">${esc(it.latestTitle || it.latestPath || '—')}</td>
-              <td><small style="color:var(--dim)">${fmtDateTime(it.lastTs)}</small></td>
-              <td>
-                <button type="button" class="btn primary small view-ip-btn" data-ip="${esc(it.ip)}" style="padding:3px 8px;font-size:12px">🔍 查看完整轨迹</button>
+              <td style="white-space:nowrap"><b style="font-family:monospace;color:var(--txt);font-size:13px">${esc(it.ip)}</b></td>
+              <td><div style="white-space:normal;line-height:1.45;word-break:break-word">${esc(it.geo || '未知地区')}</div></td>
+              <td style="white-space:nowrap">${it.u ? `<span class="badge ok">👤 ${esc(it.u)}</span>` : '<span class="badge dim">游客</span>'}</td>
+              <td><div style="white-space:normal;line-height:1.4;color:var(--dim);word-break:break-word"><small>${esc(it.device || '标准浏览器')}</small></div></td>
+              <td style="text-align:center;white-space:nowrap"><b>${it.count}</b> 次</td>
+              <td style="text-align:center;white-space:nowrap"><span style="color:var(--theme-dot);font-weight:700">${fmtWatchSec(it.duration)}</span></td>
+              <td><div style="white-space:normal;line-height:1.45;word-break:break-word" title="${esc(it.latestTitle || it.latestPath || '—')}">${esc(it.latestTitle || it.latestPath || '—')}</div></td>
+              <td style="white-space:nowrap"><small style="color:var(--dim);font-family:monospace">${fmtDateTime(it.lastTs)}</small></td>
+              <td style="text-align:center;white-space:nowrap">
+                <button type="button" class="btn primary small view-ip-btn" data-ip="${esc(it.ip)}" style="padding:4px 10px;font-size:12px;white-space:nowrap">🔍 查看轨迹</button>
               </td>
             </tr>`).join('');
 
           wrap.innerHTML = `
-            <table class="adm-table">
+            <table class="adm-table" style="width:100%;table-layout:auto">
               <thead>
                 <tr>
-                  <th>访客 IP</th>
-                  <th>IP归属地 / 运营商</th>
-                  <th>用户名</th>
-                  <th>访问设备</th>
-                  <th>访问次数</th>
-                  <th>累计停留时长</th>
-                  <th>最近浏览内容</th>
-                  <th>最近访问时间</th>
-                  <th>操作</th>
+                  <th style="width:130px;white-space:nowrap">访客 IP</th>
+                  <th style="min-width:180px;max-width:280px">IP归属地 / 运营商</th>
+                  <th style="width:95px;white-space:nowrap">用户名</th>
+                  <th style="min-width:120px;max-width:180px">访问设备</th>
+                  <th style="width:80px;text-align:center;white-space:nowrap">访问次数</th>
+                  <th style="width:105px;text-align:center;white-space:nowrap">累计停留时长</th>
+                  <th style="min-width:160px;max-width:260px">最近浏览内容</th>
+                  <th style="width:140px;white-space:nowrap">最近访问时间</th>
+                  <th style="width:115px;text-align:center;white-space:nowrap">操作</th>
                 </tr>
               </thead>
               <tbody>${rowsHtml}</tbody>
