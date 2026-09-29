@@ -35,7 +35,7 @@ img { display: block; }
   height: 62px; display: flex; align-items: center; gap: 18px;
 }
 .brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.brand-logo { width: 32px; height: 32px; filter: drop-shadow(var(--glow)); }
+.brand-logo { width: 32px; height: 32px; border-radius: 7px; object-fit: cover; filter: drop-shadow(var(--glow)); }
 .brand-name {
   font-size: 19px; font-weight: 800; letter-spacing: .5px;
   color: var(--acc); /* 无 background-clip 时的可读兜底, 避免透明字变成「乱码/空白」 */
@@ -1231,7 +1231,7 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
 /* 登录 */
 .login-box { max-width: 400px; margin: 60px auto; }
 .login-logo { text-align: center; margin-bottom: 22px; }
-.login-logo svg { width: 58px; height: 58px; filter: drop-shadow(var(--glow)); }
+.login-logo svg, .login-logo img { width: 58px; height: 58px; border-radius: 14px; object-fit: cover; filter: drop-shadow(var(--glow)); }
 
 /* ---------------- 骨架屏 ---------------- */
 .skl { border-radius: 13px; background: linear-gradient(100deg, var(--card) 40%, var(--card-hover) 50%, var(--card) 60%); background-size: 200% 100%; animation: shine 1.3s infinite; }
@@ -1584,7 +1584,7 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
   .topbar-inner { flex-wrap: wrap; height: auto; padding: 8px 10px; gap: 0; }
   .topbar-right { display: contents; }
   .brand-name { display: inline-block; max-width: 30vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; }
-  .brand-logo { width: 26px; height: 26px; flex-shrink: 0; }
+  .brand-logo { width: 26px; height: 26px; flex-shrink: 0; border-radius: 6px; }
   .brand { margin-right: auto; min-width: 0; } /* 站名占左, 右侧按钮贴右 */
   /* 内联搜索框隐藏, 改为放大镜按钮 → 弹窗搜索 */
   .searchbox { display: none !important; }

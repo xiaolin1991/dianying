@@ -3211,7 +3211,7 @@
         <div class="container auth-wrap">
           <div class="login-box admin-card">
             <div class="login-logo">
-              <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="none" stroke="var(--acc)" stroke-width="3"/><path d="M19 15.5v17l14-8.5z" fill="var(--acc)"/></svg>
+              <img src="./icons/icon-192.png" alt="晓林影视">
             </div>
             <h3 style="text-align:center;margin-bottom:6px">${forced ? '登录后继续观看' : '欢迎回来'}</h3>
             ${forced ? '<p class="hint" style="text-align:center;margin-bottom:10px">本站已开启登录观看，请先登录或注册账号</p>' : ''}
@@ -5684,7 +5684,7 @@
       v.innerHTML = `<div class="adm-login-wrap">
         <div class="login-box admin-card adm-login-card">
           <div class="login-logo">
-            <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="none" stroke="var(--acc)" stroke-width="3"/><path d="M19 15.5v17l14-8.5z" fill="var(--acc)"/></svg>
+            <img src="./icons/icon-192.png" alt="晓林影视">
           </div>
           <h3 class="adm-login-title">管理员登录</h3>
           <p class="hint adm-login-sub">输入管理密码进入后台控制台</p>

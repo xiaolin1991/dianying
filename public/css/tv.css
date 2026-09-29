@@ -13,6 +13,7 @@ body.tv {
 /* ---------- 顶栏 = 频道栏 ---------- */
 body.tv .topbar { background: linear-gradient(180deg, rgba(10,15,30,.96), rgba(10,15,30,.82)); border-bottom: 1px solid rgba(255,255,255,.06); }
 body.tv .topbar-inner { padding: 16px 34px; }
+body.tv .brand-logo { width: 38px; height: 38px; border-radius: 9px; }
 body.tv .brand-name, body.tv #brandName { font-size: 27px; letter-spacing: 1px; }
 body.tv .nav { gap: 14px; }
 body.tv .nav a {
