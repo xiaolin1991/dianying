@@ -38,7 +38,8 @@ const DEFAULT_SETTINGS = {
   siteName: '晓林影视 XIAOLIN-TV',
   siteSlogan: '海量高清 · 聚合秒播 · 极简私人影院',
   adultEnabled: false,
-  adultBottomNav: false, // 手机端底部导航私密福利开关: false=隐藏(显示电视直播), true=仅登录且解锁会员可见
+  adultBottomNav: false, // 手机端底部导航私密福利开关: false=隐藏(显示电视直播), true=允许显示
+  adultGuestVisible: false, // 未登录游客是否显示福利入口: false=未登录严格隐藏(显示电视直播), true=未登录也显示入口(引导登录)
   defaultTheme: 'midnight',
   announcement: '',
   liveSources: DEFAULT_LIVE_SOURCES,
@@ -995,6 +996,7 @@ async function saveSettings(env, patch) {
   if (typeof patch.siteSlogan === 'string') next.siteSlogan = patch.siteSlogan.trim().slice(0, 100);
   if (typeof patch.adultEnabled === 'boolean') next.adultEnabled = patch.adultEnabled;
   if (typeof patch.adultBottomNav === 'boolean') next.adultBottomNav = patch.adultBottomNav;
+  if (typeof patch.adultGuestVisible === 'boolean') next.adultGuestVisible = patch.adultGuestVisible;
   if (typeof patch.defaultTheme === 'string' && THEMES.includes(patch.defaultTheme)) next.defaultTheme = patch.defaultTheme;
   if (typeof patch.announcement === 'string') next.announcement = patch.announcement.slice(0, 300);
   if (Array.isArray(patch.liveSources)) {
@@ -1913,6 +1915,7 @@ export default {
           wmDuration: Math.min(60, Math.max(1, Number(s.wmDuration == null ? 2 : s.wmDuration) || 2)),
           adultEnabled: Boolean(s.adultEnabled),
           adultBottomNav: Boolean(s.adultBottomNav),
+          adultGuestVisible: Boolean(s.adultGuestVisible),
           adultPayDesc: s.adultPayDesc || '',
           adultPayQr: s.adultPayQr || '',
         });
@@ -2646,6 +2649,7 @@ export default {
             wmDuration: Math.min(60, Math.max(1, Number(s.wmDuration == null ? 2 : s.wmDuration) || 2)),
             adultEnabled: Boolean(s.adultEnabled),
             adultBottomNav: Boolean(s.adultBottomNav),
+            adultGuestVisible: Boolean(s.adultGuestVisible),
             adultUnlockCode: s.adultUnlockCode || 'VIP888',
             adultPayDesc: s.adultPayDesc || '',
             adultPayQr: s.adultPayQr || '',

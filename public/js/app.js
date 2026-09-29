@@ -551,15 +551,24 @@
     const p0 = parts[0] || 'home';
     const isHome = p0 === 'home';
     const isFilm = ['browse', 'sources', 'source', 'search', 'detail', 'play'].includes(p0);
-    // 手机端私密福利: 未登录绝对隐藏；且必须后台开启全局福利+开启手机端底部入口+已登录正式会员+已激活特权
-    const hasAdult = Boolean(
-      State.settings &&
-      State.settings.adultEnabled &&
-      State.settings.adultBottomNav &&
+    // 手机端私密福利入口条件:
+    // 1. 全局福利开关开启 (State.settings.adultEnabled)
+    // 2. 手机底部导航开关开启 (State.settings.adultBottomNav)
+    // 3. 并且满足以下之一:
+    //    a) 已登录正式会员且账号已解锁 (State.me && State.me !== '管理员' && State.config && State.config.adultUnlocked)
+    //    b) 后台开启了「允许未登录访客可见」引导开关 (State.settings.adultGuestVisible)
+    const isMemberUnlocked = Boolean(
       State.me &&
       State.me !== '管理员' &&
       State.config &&
       State.config.adultUnlocked
+    );
+    const allowGuest = Boolean(State.settings && State.settings.adultGuestVisible);
+    const hasAdult = Boolean(
+      State.settings &&
+      State.settings.adultEnabled &&
+      State.settings.adultBottomNav &&
+      (isMemberUnlocked || allowGuest)
     );
     const isAdult = p0 === 'adult';
     const isLive = p0 === 'live';
@@ -6649,12 +6658,21 @@
             </div>
             <div id="adultExtraFields" style="${s.adultEnabled ? '' : 'display:none;'};margin-top:14px;border-top:1px dashed var(--card-br);padding-top:14px">
               <!-- 📱 手机端底部导航私密福利开关 -->
-              <div class="admin-row" style="margin-bottom:14px;padding:12px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid var(--card-br)">
+              <div class="admin-row" style="margin-bottom:12px;padding:12px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid var(--card-br)">
                 <div class="admin-label">📱 手机端底部导航栏私密福利入口
-                  <small>开启后，仅<b>已登录且解锁特权</b>的正式会员在手机底部导航栏可见「私密福利」；关闭时，手机底部始终显示「电视直播」，未登录访客绝对不可见。当前状态：
-                    <b id="adultBottomNavState" style="color:${s.adultBottomNav ? 'var(--danger)' : 'var(--dim)'}">${s.adultBottomNav ? '已开启显示' : '已关闭隐藏'}</b></small>
+                  <small>开启后，手机底部第3项将显示「私密福利」；关闭时，手机底部始终显示标准的「电视直播」。当前状态：
+                    <b id="adultBottomNavState" style="color:${s.adultBottomNav ? 'var(--danger)' : 'var(--dim)'}">${s.adultBottomNav ? '已开启' : '已关闭'}</b></small>
                 </div>
                 <label class="switch"><input type="checkbox" id="adultBottomNavSwitch" ${s.adultBottomNav ? 'checked' : ''}><span class="track"></span></label>
+              </div>
+
+              <!-- 👤 未登录游客可见性开关 -->
+              <div class="admin-row" style="margin-bottom:14px;padding:12px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid var(--card-br)">
+                <div class="admin-label">👤 允许未登录访客/无痕模式显示入口
+                  <small><b>开启</b>：无痕或未登录访客在手机端也能看到「私密福利」入口，点击展示特权介绍并引导注册登录；<b>关闭（严格隐蔽）</b>：未登录游客绝对隐藏。当前：
+                    <b id="adultGuestState" style="color:${s.adultGuestVisible ? 'var(--danger)' : 'var(--ok)'}">${s.adultGuestVisible ? '允许游客可见（引导注册）' : '未登录严格隐藏（完全隐蔽）'}</b></small>
+                </div>
+                <label class="switch"><input type="checkbox" id="adultGuestSwitch" ${s.adultGuestVisible ? 'checked' : ''}><span class="track"></span></label>
               </div>
               <label class="field-label">私密福利激活码 / 卡密（支持多个，逗号分隔，如：VIP888, VIP999）</label>
               <input class="field-input" id="adultUnlockCodeInput" value="${esc(s.adultUnlockCode || 'VIP888')}" placeholder="VIP888">
@@ -6733,10 +6751,26 @@
             if (lastSettings) lastSettings.adultBottomNav = on;
             if (State.settings) State.settings.adultBottomNav = on;
             if (res.settings) State.settings = { ...State.settings, adultBottomNav: !!res.settings.adultBottomNav };
-            $('#adultBottomNavState').textContent = on ? '已开启显示' : '已关闭隐藏';
+            $('#adultBottomNavState').textContent = on ? '已开启' : '已关闭';
             $('#adultBottomNavState').style.color = on ? 'var(--danger)' : 'var(--dim)';
             renderBottomNav();
-            toast(on ? '📱 手机端底部导航福利入口已开启（仅已登录特权会员可见）' : '✅ 手机端底部导航已恢复为「电视直播」并隐藏福利入口', on ? 'warn' : 'ok');
+            toast(on ? '📱 手机端底部导航福利入口已开启' : '✅ 手机端底部导航已恢复为「电视直播」', on ? 'warn' : 'ok');
+          } catch (err) {
+            e.target.checked = !on;
+            toast('保存失败：' + err.message, 'err');
+          }
+        });
+        $('#adultGuestSwitch') && $('#adultGuestSwitch').addEventListener('change', async (e) => {
+          const on = e.target.checked;
+          try {
+            const res = await API.adminSaveSettings({ adultGuestVisible: on });
+            if (lastSettings) lastSettings.adultGuestVisible = on;
+            if (State.settings) State.settings.adultGuestVisible = on;
+            if (res.settings) State.settings = { ...State.settings, adultGuestVisible: !!res.settings.adultGuestVisible };
+            $('#adultGuestState').textContent = on ? '允许游客可见（引导注册）' : '未登录严格隐藏（完全隐蔽）';
+            $('#adultGuestState').style.color = on ? 'var(--danger)' : 'var(--ok)';
+            renderBottomNav();
+            toast(on ? '👤 已开启访客可见（未登录访客在手机端也将显示入口并引导注册）' : '✅ 已开启严格隐蔽（未登录访客绝对隐藏入口）', on ? 'warn' : 'ok');
           } catch (err) {
             e.target.checked = !on;
             toast('保存失败：' + err.message, 'err');
