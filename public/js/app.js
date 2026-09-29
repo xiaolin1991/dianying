@@ -98,9 +98,11 @@
   }
   function fmtWatchSec(sec) {
     sec = Math.floor(sec || 0);
+    if (sec <= 0) return '瞬时';
     if (sec < 60) return sec + ' 秒';
     const m = Math.floor(sec / 60);
-    if (m < 60) return m + ' 分钟';
+    const remSec = sec % 60;
+    if (m < 60) return m + ' 分' + (remSec > 0 ? (' ' + remSec + ' 秒') : '');
     return Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分';
   }
 
@@ -261,20 +263,86 @@
       ? `<a class="user-chip" href="#/user" title="${esc(State.me)} · 个人中心"><span class="u-ava">${esc(State.me.slice(0, 1).toUpperCase())}</span><span class="u-name">${esc(State.me)}</span></a>`
       : `<a class="btn ghost small login-short" href="#/login">登录</a>`;
   }
+  /* ---- 访问与停留时长统计埋点 ---- */
+  let _currentTrack = {
+    path: '',
+    title: '',
+    startTime: 0,
+    sentDuration: 0,
+  };
+
+  function sendVisitBeacon(path, title, duration) {
+    if (!path) return;
+    try {
+      const payload = JSON.stringify({
+        path: String(path),
+        title: String(title || ''),
+        duration: Math.max(0, Math.floor(Number(duration) || 0)),
+        u: State.me || '',
+      });
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/stats/visit', new Blob([payload], { type: 'application/json' }));
+      } else {
+        fetch('/api/stats/visit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  }
+
+  function flushCurrentTrackDuration() {
+    if (!_currentTrack.path || !_currentTrack.startTime) return;
+    const now = Date.now();
+    const totalSec = Math.floor((now - _currentTrack.startTime) / 1000);
+    const delta = totalSec - (_currentTrack.sentDuration || 0);
+    if (delta >= 3) {
+      sendVisitBeacon(_currentTrack.path, _currentTrack.title, delta);
+      _currentTrack.sentDuration = totalSec;
+    }
+  }
+
+  function trackVisit(path, title) {
+    // 离开前一页面时，上报已停留/观看的时长
+    flushCurrentTrackDuration();
+
+    const now = Date.now();
+    const curPath = path || (location.hash || '#/');
+    const curTitle = title || document.title || '';
+    _currentTrack = {
+      path: curPath,
+      title: curTitle,
+      startTime: now,
+      sentDuration: 0,
+    };
+    sendVisitBeacon(curPath, curTitle, 0);
+  }
+
+  function updateTrackTitle(newTitle) {
+    if (!newTitle) return;
+    _currentTrack.title = String(newTitle).trim();
+  }
+
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushCurrentTrackDuration();
+  });
+  window.addEventListener('beforeunload', () => {
+    flushCurrentTrackDuration();
+  });
+  setInterval(() => {
+    flushCurrentTrackDuration();
+  }, 45000);
+
   function logSearch(q) {
     if (!q) return;
     if (State.me) API.userLogSearch(q); // 用户维度记录
+    updateTrackTitle('🔍 搜索：' + q);
     try { // 全站统计(含未登录)
-      const payload = JSON.stringify({ q });
+      const payload = JSON.stringify({ q, title: '🔍 搜索：' + q, u: State.me || '' });
       if (navigator.sendBeacon) navigator.sendBeacon('/api/stats/search', new Blob([payload], { type: 'application/json' }));
       else fetch('/api/stats/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(() => {});
-    } catch (e) {}
-  }
-  function trackVisit(path) {
-    try {
-      const payload = JSON.stringify({ path });
-      if (navigator.sendBeacon) navigator.sendBeacon('/api/stats/visit', new Blob([payload], { type: 'application/json' }));
-      else fetch('/api/stats/visit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(() => {});
     } catch (e) {}
   }
   function pushSearchHist(q) {
@@ -657,10 +725,24 @@
       return viewLogin(alive, true);
     }
 
+    let routeTitle = '首页';
+    if (parts[0] === 'browse') routeTitle = '分类浏览: ' + (dec(parts[1]) || '电影');
+    else if (parts[0] === 'search') routeTitle = '搜索: ' + (query.q ? dec(query.q) : '');
+    else if (parts[0] === 'detail') routeTitle = '影视详情';
+    else if (parts[0] === 'play') routeTitle = '视频播放';
+    else if (parts[0] === 'sources' || parts[0] === 'source') routeTitle = '影视源大全';
+    else if (parts[0] === 'login') routeTitle = '用户登录/注册';
+    else if (parts[0] === 'user') routeTitle = '会员中心';
+    else if (parts[0] === 'adult') routeTitle = '🔞 私密福利专区';
+    else if (parts[0] === 'messages') routeTitle = '站内公告';
+    else if (parts[0] === 'live') routeTitle = '📺 电视直播';
+    else if (parts[0] === 'download' || parts[0] === 'dl-android-guide' || parts[0] === 'dl-ios-guide') routeTitle = '客户端下载';
+    else if (parts[0] === 'xiaolin1991' || parts[0] === 'admin') routeTitle = '后台管理系统';
+
     // 返回搜索/影视源/分类页: 恢复离开前的列表与滚动位置(不重新加载)
     if (routeKey && isListRoute(parts) && restoreListPageCache(routeKey, alive)) {
       route._prev = { parts, query, key: routeKey };
-      if (State.config) trackVisit('#/' + parts.join('/'));
+      if (State.config) trackVisit('#/' + parts.join('/'), routeTitle);
       if (document.body.classList.contains('tv')) {
         setTimeout(() => {
           const el = $('#mainNav a.active') || $('#mainNav a');
@@ -689,7 +771,7 @@
       const g = setInterval(() => { window.scrollTo(0, 0); if (++n >= 15) clearInterval(g); }, 100);
     }
     route._prev = { parts, query, key: routeKey };
-    if (State.config) trackVisit('#/' + parts.join('/')); // 页面访问统计
+    if (State.config) trackVisit('#/' + parts.join('/'), routeTitle); // 页面访问统计
     maybeAppUpdate(); // 每次路由切换时检查是否有新版本或强制更新
     try {
       if (parts[0] === 'browse') await viewBrowse(dec(parts[1]) || '电影', query, alive);
@@ -1410,6 +1492,7 @@
     if (!alive()) return;
     const vod = r.list && r.list[0];
     if (!vod) throw new Error('影片不存在或接口失效');
+    updateTrackTitle('详情：《' + vod.vod_name + '》');
 
     const groups = parsePlayGroups(vod);
     const desc = stripTags(vod.vod_content || '暂无简介');
@@ -1624,6 +1707,8 @@
     let gi = Number(query.group || 0);
     if (!groups[gi]) gi = 0;
     let ei = Math.min(Number(query.ep || 0), groups[gi].eps.length - 1);
+    const epName = (groups[gi] && groups[gi].eps && groups[gi].eps[ei]) ? groups[gi].eps[ei].name : '';
+    updateTrackTitle('播放：《' + vod.vod_name + '》' + (epName ? ' ' + epName : ''));
 
     const progKey = `prog:${key}:${vod.vod_id}`;
     const allProg = store.get(progKey, {});
@@ -2360,6 +2445,7 @@
       if (fsEpName && groups[gi] && groups[gi].eps[ei]) {
         fsEpName.textContent = groups[gi].eps[ei].name;
       }
+      updateTrackTitle('播放：《' + vod.vod_name + '》 ' + (groups[gi] && groups[gi].eps && groups[gi].eps[ei] ? groups[gi].eps[ei].name : ''));
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -3861,6 +3947,7 @@
      视图：私密福利专区 (独立顶级页面 #/adult)
      ============================================================ */
   async function viewAdult(alive) {
+    updateTrackTitle('🔞 私密福利专区');
     const life = { ok: alive };
     const v = $('#view');
 
@@ -5867,6 +5954,7 @@
       const lineText = `[线路 ${curLineIndex + 1}/${curPlayingLines.length}]`;
       $('#nowName').innerHTML = `📺 正在播放：<b>${esc(name)}</b> <span style="font-size:12px;color:var(--dim);margin-left:6px">${lineText}</span>` +
         (cur.tag === 'official' ? ' <span class="badge ok" style="font-size:10px">⚡官方1080p</span>' : (isProxied ? ' <span class="badge dim" style="font-size:10px">🛡️代理</span>' : ''));
+      updateTrackTitle('电视直播：' + name);
 
       Player.play($('#videoEl'), targetPlayUrl, $('#videoTip'), {
         optimize: !!(State.settings && State.settings.playerOptimize),
@@ -6285,56 +6373,273 @@
 
       /* ---------------- 📊 流量统计 ---------------- */
       if (admTab === 'stats') {
+        const defaultHours = Number(s && s.statsRetentionHours !== undefined ? s.statsRetentionHours : (lastSettings && lastSettings.statsRetentionHours !== undefined ? lastSettings.statsRetentionHours : 24));
         main.innerHTML = `
           <div class="admin-card">
-            <h3>📊 流量统计</h3>
-            <div class="stat-chips">
-              <span class="stat-chip">今日访问 <b id="stPvToday">—</b></span>
-              <span class="stat-chip">总访问 <b id="stPvTotal">—</b></span>
-              <span class="stat-chip">独立IP <b id="stUniq">—</b></span>
-              <span class="stat-chip">搜索次数 <b id="stSearch">—</b></span>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
+              <div>
+                <h3 style="margin-bottom:4px">📊 流量与访客足迹统计 (按独立 IP 分类归纳)</h3>
+                <p class="hint" style="margin:0 0 10px">自动按访客独立 IP 归并，杜绝混杂。点击任意 IP 即可深钻查看其打开的页面、观看的影片、停留时长、用户名与设备详情。</p>
+              </div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="font-size:12.5px;color:var(--dim);white-space:nowrap">保留统计周期:</span>
+                  <select id="statsHoursSel" class="adm-select" style="padding:4px 8px;font-size:12.5px;border-radius:6px;background:rgba(255,255,255,0.06);color:var(--txt);border:1px solid var(--card-br)">
+                    <option value="1">最近 1 小时</option>
+                    <option value="6">最近 6 小时</option>
+                    <option value="12">最近 12 小时</option>
+                    <option value="24">最近 24 小时 (1天)</option>
+                    <option value="72">最近 3 天</option>
+                    <option value="168">最近 7 天</option>
+                    <option value="0">全部历史记录</option>
+                  </select>
+                </div>
+                <button class="btn ghost small" id="saveRetentionBtn" title="将当前选中的时间窗口保存为后台自动清理周期">💾 设为默认保留周期</button>
+                <button class="btn ghost small" id="refreshStatsBtn">🔄 刷新</button>
+                <button class="btn danger small" id="clearStatsBtn">🗑 清空全部数据</button>
+              </div>
             </div>
-            <div class="stat-paths" id="statPaths"></div>
-            <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
-              <button class="btn ghost small" id="refreshStatsBtn">🔄 刷新</button>
-              <button class="btn danger small" id="clearStatsBtn">🗑 清空统计数据</button>
+
+            <div class="stat-chips" style="margin-top:12px">
+              <span class="stat-chip">今日访问PV <b id="stPvToday">—</b></span>
+              <span class="stat-chip">总访问量PV <b id="stPvTotal">—</b></span>
+              <span class="stat-chip">独立 IP 数 <b id="stUniq">—</b></span>
+              <span class="stat-chip">搜索总次数 <b id="stSearch">—</b></span>
+              <span class="stat-chip">统计行数 <b id="stTotalLogs">—</b></span>
             </div>
-            <div id="statRecent" class="table-scroll" style="margin-top:14px"></div>
+
+            <div style="margin-top:14px">
+              <div style="font-size:13px;font-weight:600;margin-bottom:6px;color:var(--txt)">🔥 热门访问排行</div>
+              <div class="stat-paths" id="statPaths"></div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:20px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <input type="text" id="ipFilterInput" class="adm-input" placeholder="🔍 快速搜索 IP、归属地、用户、设备、内容..." style="width:280px;padding:6px 10px;font-size:12.5px;border-radius:6px">
+                <span id="ipStatsCount" style="font-size:12px;color:var(--dim)"></span>
+              </div>
+              <span style="font-size:12px;color:var(--dim)">💡 点击任一行或「🔍 查看完整轨迹」按钮，可深钻查看访客访问足迹</span>
+            </div>
+
+            <div id="statIpTableWrap" class="table-scroll" style="margin-top:10px"></div>
           </div>`;
-        let statRows = [], statPg = 0;
-        const STAT_PER = 10;
-        function renderStatPage() {
-          const box = $('#statRecent');
-          if (!box) return;
-          const pages = Math.max(1, Math.ceil(statRows.length / STAT_PER));
-          if (statPg > pages - 1) statPg = pages - 1;
-          const rowsHtml = statRows.slice(statPg * STAT_PER, (statPg + 1) * STAT_PER).map((it) => `
-            <tr>
-              <td>${fmtDateTime(it.ts)}</td>
-              <td>${it.kind === 'search' ? '🔍' : '📄'}</td>
-              <td class="ulog-title" title="${esc(it.kind === 'search' ? it.q : it.path)}">${esc(it.kind === 'search' ? it.q : it.path)}</td>
-              <td>${esc(it.u || '—')}</td>
-              <td>${esc(it.ip)}${it.geo ? '<br><small style="color:var(--dim)">' + esc(it.geo) + '</small>' : ''}</td>
-            </tr>`).join('');
-          box.innerHTML = rowsHtml
-            ? `<table class="adm-table"><thead><tr><th>时间</th><th>类型</th><th>内容</th><th>用户</th><th>IP / 归属地</th></tr></thead><tbody>${rowsHtml}</tbody></table>
-               ${statRows.length > STAT_PER ? `
-                 <div class="pager" style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px">
-                   <button class="btn ghost small" id="stPrev" ${statPg <= 0 ? 'disabled' : ''}>‹ 上一页</button>
-                   <span style="color:var(--dim);font-size:12px">第 ${statPg + 1} / ${pages} 页 · 共 ${statRows.length} 条</span>
-                   <button class="btn ghost small" id="stNext" ${statPg >= pages - 1 ? 'disabled' : ''}>下一页 ›</button>
-                 </div>` : ''}`
-            : '<p class="hint" style="margin-top:8px">暂无明细（访客进入站点后开始累计）</p>';
-          $('#stPrev') && $('#stPrev').addEventListener('click', () => { statPg--; renderStatPage(); });
-          $('#stNext') && $('#stNext').addEventListener('click', () => { statPg++; renderStatPage(); });
+
+        const sel = $('#statsHoursSel');
+        if (sel) sel.value = String(defaultHours);
+
+        let rawIpList = [];
+        let filteredIpList = [];
+        let ipPg = 0;
+        const IP_PER = 10;
+
+        function showIpDetailModal(item) {
+          const oldModal = $('#ipDetailModalBackdrop');
+          if (oldModal) oldModal.remove();
+
+          const modal = document.createElement('div');
+          modal.id = 'ipDetailModalBackdrop';
+          modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px)';
+          modal.innerHTML = `
+            <div class="modal-card" style="max-width:920px;width:100%;max-height:92vh;display:flex;flex-direction:column;background:var(--card-bg,#121826);border:1px solid var(--card-br,rgba(255,255,255,0.12));border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,0.7);overflow:hidden;animation:popIn .2s ease-out">
+              <!-- 弹窗顶栏 -->
+              <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--card-br,rgba(255,255,255,0.08));background:rgba(255,255,255,0.02)">
+                <div>
+                  <div style="font-size:16px;font-weight:700;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                    <span>🌐 访客 IP 访问轨迹深钻</span>
+                    <code style="background:rgba(91,140,255,0.18);color:#5b8cff;padding:3px 10px;border-radius:6px;font-size:14px;font-family:monospace">${esc(item.ip)}</code>
+                  </div>
+                  <div style="font-size:12px;color:var(--dim);margin-top:4px">
+                    📍 <b>IP归属地：</b>${esc(item.geo || '未知地区')} · <b>最近活跃：</b>${fmtDateTime(item.lastTs)}
+                  </div>
+                </div>
+                <button type="button" class="btn ghost small" id="closeIpModalBtn" style="padding:4px 10px;font-size:16px;line-height:1;border-radius:6px">✕</button>
+              </div>
+
+              <!-- 弹窗主体内容 -->
+              <div style="padding:20px;overflow-y:auto;flex:1">
+                <!-- 访客概要卡片 -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+                  <div style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--card-br,rgba(255,255,255,0.06))">
+                    <div style="font-size:12px;color:var(--dim)">访问用户身份</div>
+                    <div style="font-size:15px;font-weight:600;margin-top:4px">${item.u ? `<span class="badge ok">👤 ${esc(item.u)}</span>` : '<span class="badge dim">👤 游客 (未登录)</span>'}</div>
+                  </div>
+                  <div style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--card-br,rgba(255,255,255,0.06))">
+                    <div style="font-size:12px;color:var(--dim)">访问设备 / 系统</div>
+                    <div style="font-size:13.5px;font-weight:600;margin-top:4px;color:var(--txt)" title="${esc(item.ua || '')}">${esc(item.device || '标准浏览器')}</div>
+                  </div>
+                  <div style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--card-br,rgba(255,255,255,0.06))">
+                    <div style="font-size:12px;color:var(--dim)">累计访问次数 (PV)</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--txt);margin-top:2px">${item.count} 次</div>
+                  </div>
+                  <div style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid var(--card-br,rgba(255,255,255,0.06))">
+                    <div style="font-size:12px;color:var(--dim)">累计停留/观看时长</div>
+                    <div style="font-size:18px;font-weight:700;color:var(--theme-dot);margin-top:2px">${fmtWatchSec(item.duration)}</div>
+                  </div>
+                </div>
+
+                <!-- 轨迹足迹列表 -->
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                  <h4 style="margin:0;font-size:14px;display:flex;align-items:center;gap:6px">
+                    <span>👣 详细操作历史轨迹</span>
+                    <span style="font-size:12px;color:var(--dim);font-weight:normal">(共 ${item.actions.length} 条记录，按时间最新在前展示)</span>
+                  </h4>
+                </div>
+
+                <div class="table-scroll" style="border:1px solid var(--card-br,rgba(255,255,255,0.08));border-radius:8px;max-height:420px">
+                  <table class="adm-table" style="font-size:12.5px;margin:0">
+                    <thead>
+                      <tr>
+                        <th style="width:145px">访问时间</th>
+                        <th>看到什么内容 (浏览详情)</th>
+                        <th>打开什么页面 (路由地址)</th>
+                        <th style="width:105px">停留/观看时长</th>
+                        <th style="width:85px">用户名</th>
+                        <th style="width:115px">访问设备</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${(item.actions || []).map((act) => `
+                        <tr>
+                          <td style="white-space:nowrap;color:var(--dim)"><small>${fmtDateTime(act.ts)}</small></td>
+                          <td>
+                            <b style="color:var(--txt)">${esc(act.title || (act.kind === 'search' ? '🔍 搜索：' + (act.q || '') : (act.path || '页面访问')))}</b>
+                          </td>
+                          <td>
+                            <a href="${esc(act.path || '#/')}" target="_blank" rel="noopener" style="color:var(--theme-dot);word-break:break-all"><small>${esc(act.path || '#/')}</small></a>
+                          </td>
+                          <td>
+                            <span style="color:${act.duration > 0 ? 'var(--theme-dot)' : 'var(--dim)'};font-weight:600">${fmtWatchSec(act.duration)}</span>
+                          </td>
+                          <td>
+                            ${act.u ? `<span class="badge ok">${esc(act.u)}</span>` : '<span class="badge dim">游客</span>'}
+                          </td>
+                          <td>
+                            <small style="color:var(--dim)">${esc(act.device || item.device || '网页端')}</small>
+                          </td>
+                        </tr>`).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- 弹窗底栏 -->
+              <div style="padding:12px 20px;border-top:1px solid var(--card-br,rgba(255,255,255,0.08));display:flex;justify-content:flex-end;background:rgba(255,255,255,0.02)">
+                <button type="button" class="btn ghost small" id="closeIpModalBtnBottom">关闭窗口</button>
+              </div>
+            </div>`;
+
+          document.body.appendChild(modal);
+
+          const closeModal = () => modal.remove();
+          modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+          $('#closeIpModalBtn') && $('#closeIpModalBtn').addEventListener('click', closeModal);
+          $('#closeIpModalBtnBottom') && $('#closeIpModalBtnBottom').addEventListener('click', closeModal);
+
+          const onKeyDown = (e) => {
+            if (e.key === 'Escape') {
+              closeModal();
+              window.removeEventListener('keydown', onKeyDown);
+            }
+          };
+          window.addEventListener('keydown', onKeyDown);
         }
-        async function loadStats() {
+
+        function renderIpTablePage() {
+          const wrap = $('#statIpTableWrap');
+          if (!wrap) return;
+
+          const total = filteredIpList.length;
+          const pages = Math.max(1, Math.ceil(total / IP_PER));
+          if (ipPg > pages - 1) ipPg = pages - 1;
+          if (ipPg < 0) ipPg = 0;
+
+          const curSlice = filteredIpList.slice(ipPg * IP_PER, (ipPg + 1) * IP_PER);
+          $('#ipStatsCount').textContent = `共 ${total} 个独立 IP${rawIpList.length !== total ? ' (从 ' + rawIpList.length + ' 个过滤)' : ''}`;
+
+          if (!curSlice.length) {
+            wrap.innerHTML = '<p class="hint" style="padding:24px 0;text-align:center">暂无匹配的 IP 记录</p>';
+            return;
+          }
+
+          const rowsHtml = curSlice.map((it) => `
+            <tr class="adm-ip-row" data-ip="${esc(it.ip)}" style="cursor:pointer" title="点击查看该 IP 详细访问轨迹">
+              <td><b style="font-family:monospace;color:var(--txt)">${esc(it.ip)}</b></td>
+              <td>${esc(it.geo || '未知地区')}</td>
+              <td>${it.u ? `<span class="badge ok">👤 ${esc(it.u)}</span>` : '<span class="badge dim">游客</span>'}</td>
+              <td><small style="color:var(--dim)">${esc(it.device || '标准浏览器')}</small></td>
+              <td><b>${it.count}</b> 次</td>
+              <td><span style="color:var(--theme-dot);font-weight:600">${fmtWatchSec(it.duration)}</span></td>
+              <td class="ulog-title" title="${esc(it.latestTitle || it.latestPath || '—')}">${esc(it.latestTitle || it.latestPath || '—')}</td>
+              <td><small style="color:var(--dim)">${fmtDateTime(it.lastTs)}</small></td>
+              <td>
+                <button type="button" class="btn primary small view-ip-btn" data-ip="${esc(it.ip)}" style="padding:3px 8px;font-size:12px">🔍 查看完整轨迹</button>
+              </td>
+            </tr>`).join('');
+
+          wrap.innerHTML = `
+            <table class="adm-table">
+              <thead>
+                <tr>
+                  <th>访客 IP</th>
+                  <th>IP归属地 / 运营商</th>
+                  <th>用户名</th>
+                  <th>访问设备</th>
+                  <th>访问次数</th>
+                  <th>累计停留时长</th>
+                  <th>最近浏览内容</th>
+                  <th>最近访问时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+            ${total > IP_PER ? `
+              <div class="pager" style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:14px">
+                <button class="btn ghost small" id="stIpPrev" ${ipPg <= 0 ? 'disabled' : ''}>‹ 上一页</button>
+                <span style="color:var(--dim);font-size:12.5px">第 ${ipPg + 1} / ${pages} 页 · 共 ${total} 个独立 IP</span>
+                <button class="btn ghost small" id="stIpNext" ${ipPg >= pages - 1 ? 'disabled' : ''}>下一页 ›</button>
+              </div>` : ''}`;
+
+          $('#stIpPrev') && $('#stIpPrev').addEventListener('click', () => { ipPg--; renderIpTablePage(); });
+          $('#stIpNext') && $('#stIpNext').addEventListener('click', () => { ipPg++; renderIpTablePage(); });
+
+          // 绑定点击事件，打开深钻弹窗
+          $$('.adm-ip-row', wrap).forEach((tr) => {
+            tr.addEventListener('click', (e) => {
+              const ip = tr.dataset.ip;
+              const found = rawIpList.find((x) => x.ip === ip);
+              if (found) showIpDetailModal(found);
+            });
+          });
+        }
+
+        function applyIpFilter() {
+          const filterVal = String($('#ipFilterInput') ? $('#ipFilterInput').value : '').trim().toLowerCase();
+          if (!filterVal) {
+            filteredIpList = rawIpList.slice();
+          } else {
+            filteredIpList = rawIpList.filter((it) => {
+              const str = [it.ip, it.geo, it.u, it.device, it.latestTitle, it.latestPath].join(' ').toLowerCase();
+              return str.includes(filterVal);
+            });
+          }
+          ipPg = 0;
+          renderIpTablePage();
+        }
+
+        async function loadStats(hoursOverride) {
+          const h = (hoursOverride !== undefined && hoursOverride !== null)
+            ? Number(hoursOverride)
+            : Number($('#statsHoursSel') ? $('#statsHoursSel').value : defaultHours);
+
           try {
-            const d = await API.adminStats();
-            $('#stPvToday').textContent = d.pvToday;
-            $('#stPvTotal').textContent = d.pvTotal;
-            $('#stUniq').textContent = d.uniqIp;
-            $('#stSearch').textContent = d.searches;
+            const d = await API.adminStats(h);
+            $('#stPvToday').textContent = d.pvToday || 0;
+            $('#stPvTotal').textContent = d.pvTotal || 0;
+            $('#stUniq').textContent = d.uniqIp || 0;
+            $('#stSearch').textContent = d.searches || 0;
+            $('#stTotalLogs').textContent = d.totalLogs || 0;
+
             const maxN = Math.max(1, ...(d.byPath || []).map((x) => x.n));
             $('#statPaths').innerHTML = (d.byPath || []).map((p) => `
               <div class="stat-path-row">
@@ -6342,18 +6647,46 @@
                 <div class="sp-bar"><i style="width:${Math.round((p.n / maxN) * 100)}%"></i></div>
                 <b>${p.n}</b>
               </div>`).join('') || '<p class="hint" style="margin-top:8px">暂无页面访问数据</p>';
-            statRows = d.recent || [];
-            renderStatPage();
-          } catch (e) { /* ignore */ }
+
+            rawIpList = d.ipList || [];
+            applyIpFilter();
+          } catch (e) {
+            toast('获取统计数据失败: ' + e.message, 'err');
+          }
         }
-        $('#refreshStatsBtn').addEventListener('click', loadStats);
+
+        $('#statsHoursSel').addEventListener('change', () => {
+          loadStats(Number($('#statsHoursSel').value));
+        });
+
+        $('#saveRetentionBtn').addEventListener('click', async () => {
+          const h = Number($('#statsHoursSel').value);
+          try {
+            await API.adminSaveSettings({ statsRetentionHours: h });
+            if (lastSettings) lastSettings.statsRetentionHours = h;
+            s.statsRetentionHours = h;
+            State.settings = { ...State.settings, statsRetentionHours: h };
+            const label = h === 0 ? '全部历史记录' : (h >= 24 ? (h / 24 + ' 天') : (h + ' 小时'));
+            toast('已将数据保留周期设为【' + label + '】，系统将按此周期自动清理过期记录', 'ok');
+          } catch (e) {
+            toast('保存失败: ' + e.message, 'err');
+          }
+        });
+
+        $('#ipFilterInput').addEventListener('input', applyIpFilter);
+        $('#refreshStatsBtn').addEventListener('click', () => loadStats());
         $('#clearStatsBtn').addEventListener('click', async () => {
           if (!confirm('确定清空全部统计数据？不可恢复。')) return;
-          await API.adminClearStats();
-          toast('统计数据已清空', 'ok');
-          loadStats();
+          try {
+            await API.adminClearStats();
+            toast('统计数据已清空', 'ok');
+            loadStats();
+          } catch (e) {
+            toast('清空失败: ' + e.message, 'err');
+          }
         });
-        loadStats();
+
+        loadStats(defaultHours);
       }
 
       /* ---------------- 👥 用户管理 ---------------- */

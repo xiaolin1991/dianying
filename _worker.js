@@ -106,6 +106,7 @@ const DEFAULT_SETTINGS = {
   githubBranch: 'main',       // 分支名称
   githubPrefix: 'data',       // 存储文件夹目录前缀
   githubSyncEnabled: false,   // 是否激活 GitHub 仓库同步驱动
+  statsRetentionHours: 24,    // 流量统计记录保留时间(小时), 默认24小时, 后台可自定义
 };
 
 const THEMES = ['midnight', 'emerald', 'sunset', 'sakura', 'ocean', 'royal'];
@@ -1021,6 +1022,11 @@ async function saveSettings(env, patch) {
     if (!isFinite(n) || n < 0 || n > 2880) throw new Error('私密福利试看时长需为 0-2880 分钟');
     next.adultTrialMinutes = n;
   }
+  if (patch.statsRetentionHours !== undefined) {
+    const h = Math.round(Number(patch.statsRetentionHours));
+    if (!isFinite(h) || h < 1 || h > 720) throw new Error('流量统计保留时间需为 1-720 小时');
+    next.statsRetentionHours = h;
+  }
   if (patch.mobileWebLimitMinutes !== undefined) {
     const m = Math.round(Number(patch.mobileWebLimitMinutes));
     if (!isFinite(m) || m < -1 || m > 2880) throw new Error('手机网页端观看时限需为 -1 到 2880 分钟');
@@ -1535,8 +1541,31 @@ function geoOf(req) {
     const cf = req.cf;
     if (!cf || !cf.country) return '';
     const country = COUNTRY_NAMES[cf.country] || cf.country;
-    return [country, cf.region || cf.province || '', cf.city || ''].filter(Boolean).join(' ');
+    const parts = [country, cf.region || cf.province || '', cf.city || '', cf.asOrganization || ''].filter(Boolean);
+    return parts.join(' ');
   } catch (e) { return ''; }
+}
+
+function parseDeviceUa(ua) {
+  ua = String(ua || '');
+  let os = '电脑';
+  if (/iPhone/i.test(ua)) os = 'iPhone';
+  else if (/iPad/i.test(ua)) os = 'iPad';
+  else if (/Android/i.test(ua)) os = 'Android';
+  else if (/Windows NT 10/i.test(ua)) os = 'Win 10/11';
+  else if (/Windows/i.test(ua)) os = 'Windows';
+  else if (/Macintosh|Mac OS X/i.test(ua)) os = 'macOS';
+  else if (/Linux/i.test(ua)) os = 'Linux';
+
+  let br = '网页';
+  if (/MicroMessenger/i.test(ua)) br = '微信';
+  else if (/XiaoLin|dianyingapp/i.test(ua)) br = '客户端App';
+  else if (/Edg/i.test(ua)) br = 'Edge';
+  else if (/Chrome/i.test(ua)) br = 'Chrome';
+  else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) br = 'Safari';
+  else if (/Firefox/i.test(ua)) br = 'Firefox';
+
+  return `${os} · ${br}`;
 }
 
 async function getUserRecord(env, username) {
@@ -1652,13 +1681,44 @@ async function statRecord(env, entry) {
   entry.ts = Date.now();
   entry.geo = entry.geo || '';
   entry.u = entry.u || '';
+  entry.title = entry.title || '';
+  entry.duration = Number(entry.duration) || 0;
+  entry.device = entry.device || '';
+  entry.path = entry.path || '';
+  const isHeartbeat = Number(entry.duration) > 0;
   try {
+    const settings = await getSettings(env);
+    const retentionHours = Number(settings && settings.statsRetentionHours != null ? settings.statsRetentionHours : 24);
+    const cutoff = retentionHours > 0 ? (Date.now() - retentionHours * 3600 * 1000) : 0;
     const raw = await storageGet(env, STATS_LOG_KEY);
     let arr = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(arr)) arr = [];
-    arr.unshift(entry);
-    await storagePut(env, STATS_LOG_KEY, JSON.stringify(arr.slice(0, 600)));
+
+    // 如果是停留时长增量上报，尝试合并至该 IP 最近一条同路径的访问记录中
+    let merged = false;
+    if (isHeartbeat && arr.length) {
+      for (let i = 0; i < Math.min(arr.length, 12); i++) {
+        const item = arr[i];
+        if (item && item.ip === entry.ip && (item.path === entry.path || !entry.path)) {
+          item.duration = (Number(item.duration) || 0) + Number(entry.duration);
+          if (entry.title) item.title = entry.title;
+          if (entry.u && !item.u) item.u = entry.u;
+          item.ts = Date.now();
+          merged = true;
+          break;
+        }
+      }
+    }
+    if (!merged) {
+      arr.unshift(entry);
+    }
+    // 依据后台自定义保留时间自动清理过期记录，并保留最多 3000 条明细
+    if (cutoff > 0) {
+      arr = arr.filter((x) => x && x.ts >= cutoff);
+    }
+    await storagePut(env, STATS_LOG_KEY, JSON.stringify(arr.slice(0, 3000)));
   } catch (e) { /* ignore */ }
+  if (isHeartbeat) return;
   try {
     const raw = await storageGet(env, STATS_AGG_KEY);
     const agg = raw ? JSON.parse(raw) : {};
@@ -1669,16 +1729,16 @@ async function statRecord(env, entry) {
     const dks = Object.keys(agg.days).sort();
     while (dks.length > 30) delete agg.days[dks.shift()];
     if (entry.kind === 'search') agg.searches = (agg.searches || 0) + 1;
-    const pKey = entry.kind === 'search' ? '🔍 ' + String(entry.q || '').slice(0, 30) : String(entry.path || '/').slice(0, 40);
+    const pKey = entry.title ? String(entry.title).slice(0, 40) : (entry.kind === 'search' ? '🔍 ' + String(entry.q || '').slice(0, 30) : String(entry.path || '/').slice(0, 40));
     agg.paths = agg.paths || {};
     agg.paths[pKey] = (agg.paths[pKey] || 0) + 1;
     agg.ips = agg.ips || {};
     const curIp = agg.ips[entry.ip] || { c: 0, ts: 0 };
     agg.ips[entry.ip] = { c: curIp.c + 1, ts: Date.now() };
     const ipKeys = Object.keys(agg.ips);
-    if (ipKeys.length > 800) {
+    if (ipKeys.length > 1000) {
       ipKeys.sort((a, b) => agg.ips[a].ts - agg.ips[b].ts);
-      while (ipKeys.length > 400) delete agg.ips[ipKeys.shift()];
+      while (ipKeys.length > 500) delete agg.ips[ipKeys.shift()];
     }
     await storagePut(env, STATS_AGG_KEY, JSON.stringify(agg));
   } catch (e) { /* ignore */ }
@@ -2226,10 +2286,16 @@ export default {
       if (path === '/api/stats/visit' && request.method === 'POST') {
         let body = {};
         try { body = await request.json(); } catch (e) { /* ignore */ }
-        const u = await currentUser(request, env, url);
+        const u = (await currentUser(request, env, url)) || String(body.u || '').slice(0, 30);
+        const ua = request.headers.get('User-Agent') || '';
+        const device = String(body.device || '').slice(0, 50) || parseDeviceUa(ua);
         await statRecord(env, {
-          kind: 'page',
-          path: String(body.path || '/').slice(0, 60),
+          kind: body.kind || 'page',
+          path: String(body.path || '/').slice(0, 80),
+          title: String(body.title || '').slice(0, 100),
+          duration: Math.max(0, Math.min(86400, Number(body.duration) || 0)),
+          device,
+          ua: ua.slice(0, 200),
           ip: clientIp(request),
           geo: geoOf(request),
           u,
@@ -2241,8 +2307,21 @@ export default {
         try { body = await request.json(); } catch (e) { /* ignore */ }
         const q = String(body.q || '').trim().slice(0, 60);
         if (q) {
-          const u = await currentUser(request, env, url);
-          await statRecord(env, { kind: 'search', q, ip: clientIp(request), geo: geoOf(request), u });
+          const u = (await currentUser(request, env, url)) || String(body.u || '').slice(0, 30);
+          const ua = request.headers.get('User-Agent') || '';
+          const device = String(body.device || '').slice(0, 50) || parseDeviceUa(ua);
+          await statRecord(env, {
+            kind: 'search',
+            q,
+            path: '#/search',
+            title: '🔍 搜索：' + q,
+            duration: 0,
+            device,
+            ua: ua.slice(0, 200),
+            ip: clientIp(request),
+            geo: geoOf(request),
+            u,
+          });
         }
         return json({ ok: true });
       }
@@ -2672,6 +2751,7 @@ export default {
             adultUnlockCode: s.adultUnlockCode || 'VIP888',
             adultPayDesc: s.adultPayDesc || '',
             adultPayQr: s.adultPayQr || '',
+            statsRetentionHours: Number(s.statsRetentionHours === undefined ? 24 : s.statsRetentionHours),
             // GitHub 数据中心与双向持久化配置
             hasGithubToken: Boolean(getGithubConfig(env, s).token),
             githubTokenMasked: maskToken(getGithubConfig(env, s).token),
@@ -3116,27 +3196,92 @@ export default {
         }
         /* ---- 流量统计 ---- */
         if (path === '/api/admin/stats' && request.method === 'GET') {
+          const settings = await getSettings(env);
+          const defaultHours = Number(settings.statsRetentionHours === undefined ? 24 : settings.statsRetentionHours);
+          const qHours = url.searchParams.get('hours');
+          const hours = (qHours != null && qHours !== '' && isFinite(Number(qHours))) ? Number(qHours) : defaultHours;
+
           let log = [];
           let agg = {};
           try { log = JSON.parse((await storageGet(env, STATS_LOG_KEY)) || '[]'); } catch (e) { /* ignore */ }
           try { agg = JSON.parse((await storageGet(env, STATS_AGG_KEY)) || '{}'); } catch (e) { /* ignore */ }
           if (!Array.isArray(log)) log = [];
+
+          const now = Date.now();
+          const cutoff = hours > 0 ? now - hours * 3600 * 1000 : 0;
+          const filteredLog = cutoff > 0 ? log.filter((it) => it && it.ts >= cutoff) : log;
+
+          // 按 IP 进行分组聚合
+          const ipMap = new Map();
+          for (const it of filteredLog) {
+            const ip = String(it.ip || '未知IP');
+            let item = ipMap.get(ip);
+            if (!item) {
+              item = {
+                ip,
+                geo: it.geo || '未知地区',
+                u: it.u || '',
+                device: it.device || '',
+                ua: it.ua || '',
+                count: 0,
+                duration: 0,
+                firstTs: it.ts,
+                lastTs: it.ts,
+                latestPath: it.path || '',
+                latestTitle: it.title || '',
+                actions: [],
+              };
+              ipMap.set(ip, item);
+            }
+            item.count++;
+            item.duration += (Number(it.duration) || 0);
+            if (!item.u && it.u) item.u = it.u;
+            if (item.geo === '未知地区' && it.geo) item.geo = it.geo;
+            if (it.device && (!item.device || item.device === '电脑 · 网页')) item.device = it.device;
+            if (it.ts > item.lastTs) {
+              item.lastTs = it.ts;
+              item.latestPath = it.path || '';
+              item.latestTitle = it.title || '';
+            }
+            if (it.ts < item.firstTs) item.firstTs = it.ts;
+            item.actions.push({
+              ts: it.ts,
+              kind: it.kind || 'page',
+              path: it.path || '',
+              title: it.title || (it.kind === 'search' ? '🔍 搜索：' + (it.q || '') : (it.path || '访问页面')),
+              q: it.q || '',
+              u: it.u || '',
+              duration: Number(it.duration) || 0,
+              device: it.device || '',
+              ua: it.ua || '',
+              geo: it.geo || '',
+            });
+          }
+
+          // 将每个 IP 的 actions 按时间倒序排序
+          for (const it of ipMap.values()) {
+            it.actions.sort((a, b) => b.ts - a.ts);
+          }
+
+          const ipList = Array.from(ipMap.values()).sort((a, b) => b.lastTs - a.lastTs);
+
           const today = new Date().toISOString().slice(0, 10);
           const byPath = Object.entries(agg.paths || {})
             .map(([k, n]) => ({ k, n }))
             .sort((a, b) => b.n - a.n)
             .slice(0, 10);
+
           return json({
             pvToday: (agg.days || {})[today] || 0,
             pvTotal: agg.pvTotal || 0,
-            uniqIp: Object.keys(agg.ips || {}).length,
+            uniqIp: ipList.length,
             searches: agg.searches || 0,
+            statsRetentionHours: defaultHours,
+            currentHours: hours,
             days: agg.days || {},
             byPath,
-            recent: log.slice(0, 80).map((it) => ({
-              kind: it.kind, path: it.path || '', q: it.q || '',
-              ts: it.ts, ip: it.ip || '', geo: it.geo || '', u: it.u || '',
-            })),
+            ipList,
+            totalLogs: filteredLog.length,
           });
         }
         if (path === '/api/admin/stats/clear' && request.method === 'POST') {
