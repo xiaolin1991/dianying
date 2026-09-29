@@ -551,7 +551,16 @@
     const p0 = parts[0] || 'home';
     const isHome = p0 === 'home';
     const isFilm = ['browse', 'sources', 'source', 'search', 'detail', 'play'].includes(p0);
-    const hasAdult = Boolean(State.me && State.config && State.config.adultUnlocked);
+    // 手机端私密福利: 未登录绝对隐藏；且必须后台开启全局福利+开启手机端底部入口+已登录正式会员+已激活特权
+    const hasAdult = Boolean(
+      State.settings &&
+      State.settings.adultEnabled &&
+      State.settings.adultBottomNav &&
+      State.me &&
+      State.me !== '管理员' &&
+      State.config &&
+      State.config.adultUnlocked
+    );
     const isAdult = p0 === 'adult';
     const isLive = p0 === 'live';
     const isMsg = p0 === 'messages';
@@ -6632,13 +6641,21 @@
           ${buildStorageCardHtml(s)}
           <div class="admin-card adult-toggle-card ${s.adultEnabled ? 'on' : ''}" id="adultCard">
             <div class="admin-row">
-              <div class="admin-label">🔞 成人内容 / 私密福利专区
-                <small>开启后，私密福利源仅在登录会员中心可见（常规主站完全隔离纯净）。当前状态：
+              <div class="admin-label">🔞 全局私密福利专区
+                <small>开启后，私密福利仅在登录且解锁特权的会员专区可见（常规主站完全隔离纯净）。当前状态：
                   <b id="adultState" style="color:${s.adultEnabled ? 'var(--danger)' : 'var(--ok)'}">${s.adultEnabled ? '已开启' : '已关闭'}</b></small>
               </div>
               <label class="switch red"><input type="checkbox" id="adultSwitch" ${s.adultEnabled ? 'checked' : ''}><span class="track"></span></label>
             </div>
             <div id="adultExtraFields" style="${s.adultEnabled ? '' : 'display:none;'};margin-top:14px;border-top:1px dashed var(--card-br);padding-top:14px">
+              <!-- 📱 手机端底部导航私密福利开关 -->
+              <div class="admin-row" style="margin-bottom:14px;padding:12px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid var(--card-br)">
+                <div class="admin-label">📱 手机端底部导航栏私密福利入口
+                  <small>开启后，仅<b>已登录且解锁特权</b>的正式会员在手机底部导航栏可见「私密福利」；关闭时，手机底部始终显示「电视直播」，未登录访客绝对不可见。当前状态：
+                    <b id="adultBottomNavState" style="color:${s.adultBottomNav ? 'var(--danger)' : 'var(--dim)'}">${s.adultBottomNav ? '已开启显示' : '已关闭隐藏'}</b></small>
+                </div>
+                <label class="switch"><input type="checkbox" id="adultBottomNavSwitch" ${s.adultBottomNav ? 'checked' : ''}><span class="track"></span></label>
+              </div>
               <label class="field-label">私密福利激活码 / 卡密（支持多个，逗号分隔，如：VIP888, VIP999）</label>
               <input class="field-input" id="adultUnlockCodeInput" value="${esc(s.adultUnlockCode || 'VIP888')}" placeholder="VIP888">
               <label class="field-label" style="margin-top:10px">付费解锁 / 赞助客服说明文案</label>
@@ -6647,7 +6664,7 @@
               <input class="field-input" id="adultPayQrInput" value="${esc(s.adultPayQr || '')}" placeholder="https://example.com/pay-qr.png">
               <button class="btn primary small" id="saveAdultConfigBtn" style="margin-top:12px">保存私密福利配置</button>
             </div>
-            <p class="hint" style="margin-top:10px">⚠️ 网站常规页面（首页、分类、搜索、源列表）不会出现任何 18+ 源；仅登录会员可在会员中心查看私密福利，未解锁仅支持图片预览。</p>
+            <p class="hint" style="margin-top:10px">⚠️ 网站常规页面（首页、分类、搜索、源列表）不会出现任何 18+ 源；未登录访客无论手机端或电脑端均绝无入口和内容泄露。</p>
           </div>
           <div class="admin-card">
             <h3>🎨 站点设置</h3>
@@ -6709,18 +6726,36 @@
             toast('私密福利配置已保存', 'ok');
           } catch (e) { toast('保存失败：' + e.message, 'err'); }
         });
+        $('#adultBottomNavSwitch') && $('#adultBottomNavSwitch').addEventListener('change', async (e) => {
+          const on = e.target.checked;
+          try {
+            const res = await API.adminSaveSettings({ adultBottomNav: on });
+            if (lastSettings) lastSettings.adultBottomNav = on;
+            if (State.settings) State.settings.adultBottomNav = on;
+            if (res.settings) State.settings = { ...State.settings, adultBottomNav: !!res.settings.adultBottomNav };
+            $('#adultBottomNavState').textContent = on ? '已开启显示' : '已关闭隐藏';
+            $('#adultBottomNavState').style.color = on ? 'var(--danger)' : 'var(--dim)';
+            renderBottomNav();
+            toast(on ? '📱 手机端底部导航福利入口已开启（仅已登录特权会员可见）' : '✅ 手机端底部导航已恢复为「电视直播」并隐藏福利入口', on ? 'warn' : 'ok');
+          } catch (err) {
+            e.target.checked = !on;
+            toast('保存失败：' + err.message, 'err');
+          }
+        });
         $('#adultSwitch').addEventListener('change', async (e) => {
           const on = e.target.checked;
           try {
             const res = await API.adminSaveSettings({ adultEnabled: on });
             State.config = await API.getConfig();
             if (lastSettings) lastSettings.adultEnabled = on;
+            if (State.settings) State.settings.adultEnabled = on;
             $('#adultState').textContent = on ? '已开启' : '已关闭';
             $('#adultState').style.color = on ? 'var(--danger)' : 'var(--ok)';
             $('#adultCard').classList.toggle('on', on);
             const extra = $('#adultExtraFields');
             if (extra) extra.style.display = on ? '' : 'none';
-            toast(on ? '⚠️ 私密福利已开启（仅会员中心可见）' : '✅ 成人内容已全站关闭', on ? 'err' : 'ok');
+            renderBottomNav();
+            toast(on ? '⚠️ 私密福利专区已全局开启' : '✅ 成人内容已全站关闭', on ? 'err' : 'ok');
           } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
         });
         $('#saveSiteBtn').addEventListener('click', async () => {
