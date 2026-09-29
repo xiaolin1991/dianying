@@ -1749,9 +1749,46 @@ body.tv .dl-hero-cta .btn.ghost { display: none; }
   background: rgba(225, 29, 72, .92);
   color: #fff;
 }
+.card-lock-badge.trial {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+}
 .card-lock-badge.unlocked {
   background: rgba(22, 163, 74, .92);
   color: #fff;
+}
+.vip-status-pill.trial {
+  background: rgba(245, 158, 11, .15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, .35);
+}
+.user-vip-tag.trial {
+  background: rgba(245, 158, 11, .15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, .35);
+}
+.adult-trial-player-barrier {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 16, 32, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 20px;
+  text-align: center;
+  animation: fadeIn 0.25s ease;
+}
+.adult-trial-player-barrier .atp-inner {
+  max-width: 420px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(225, 29, 72, 0.4);
+  border-radius: 14px;
+  padding: 24px 20px;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
 }
 .pic-preview-modal-box {
   background: var(--bg);

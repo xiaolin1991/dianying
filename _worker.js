@@ -40,6 +40,7 @@ const DEFAULT_SETTINGS = {
   adultEnabled: false,
   adultBottomNav: false, // 手机端底部导航私密福利开关: false=隐藏(显示电视直播), true=允许显示
   adultGuestVisible: false, // 未登录游客是否显示福利入口: false=未登录严格隐藏(显示电视直播), true=未登录也显示入口(引导登录)
+  adultTrialMinutes: 10, // 游客在私密福利专区免费试看时长(分钟), 默认10分钟, 后台可自定义; 0=不可试看(必须登录)
   defaultTheme: 'midnight',
   announcement: '',
   liveSources: DEFAULT_LIVE_SOURCES,
@@ -1015,6 +1016,11 @@ async function saveSettings(env, patch) {
     if (!isFinite(n) || n < 0 || n > 2880) throw new Error('试看时长需为 0-2880 分钟');
     next.trialMinutes = n;
   }
+  if (patch.adultTrialMinutes !== undefined) {
+    const n = Math.round(Number(patch.adultTrialMinutes));
+    if (!isFinite(n) || n < 0 || n > 2880) throw new Error('私密福利试看时长需为 0-2880 分钟');
+    next.adultTrialMinutes = n;
+  }
   if (patch.mobileWebLimitMinutes !== undefined) {
     const m = Math.round(Number(patch.mobileWebLimitMinutes));
     if (!isFinite(m) || m < -1 || m > 2880) throw new Error('手机网页端观看时限需为 -1 到 2880 分钟');
@@ -1916,6 +1922,7 @@ export default {
           adultEnabled: Boolean(s.adultEnabled),
           adultBottomNav: Boolean(s.adultBottomNav),
           adultGuestVisible: Boolean(s.adultGuestVisible),
+          adultTrialMinutes: Number(s.adultTrialMinutes === undefined ? 10 : s.adultTrialMinutes),
           adultPayDesc: s.adultPayDesc || '',
           adultPayQr: s.adultPayQr || '',
         });
@@ -1927,7 +1934,7 @@ export default {
         return json({ ok: p === (s.adminPath || 'xiaolin1991') });
       }
 
-      /* ---- 源列表(网站常规页面仅保留正常源；成人源独立归入 adultSources 仅登录会员可见) ---- */
+      /* ---- 源列表(网站常规页面仅保留正常源；成人源独立归入 adultSources 仅登录会员或允许试看访客可见) ---- */
       if (path === '/api/config' && request.method === 'GET') {
         const settings = await getSettings(env);
         const { sources: remote } = await loadSources(env, ctx, settings);
@@ -1936,6 +1943,8 @@ export default {
         let adultUnlocked = false;
         let adultForYou = false;
         let adultSources = [];
+        const adultTrialMin = Number(settings.adultTrialMinutes === undefined ? 10 : settings.adultTrialMinutes);
+        const allowGuestAdult = Boolean(settings.adultGuestVisible || adultTrialMin > 0);
 
         if (settings.adultEnabled) {
           const isAdmin = await verifyToken(env, readToken(request, url));
@@ -1949,8 +1958,8 @@ export default {
             // 需明确付费/激活码解锁或管理员开通或赠送期内(支持到期检查)
             adultUnlocked = isUserAdultAllowed(rec);
           }
-          // 仅已登录用户或管理员可获取私密福利源元数据(游客完全不可见)
-          if (adultForYou) {
+          // 登录用户、管理员或开启试看/访客可见时提供私密福利源元数据
+          if (adultForYou || allowGuestAdult) {
             adultSources = all.filter((s) => !s.disabled && s.adult).map(({ key, name, api, detail, adult }) => ({
               key, name, api, detail, adult: true,
             }));
@@ -1962,7 +1971,9 @@ export default {
         return json({
           adultEnabled: Boolean(settings.adultEnabled),
           adultBottomNav: Boolean(settings.adultBottomNav),
-          adultForYou,
+          adultGuestVisible: Boolean(settings.adultGuestVisible),
+          adultTrialMinutes: adultTrialMin,
+          adultForYou: Boolean(adultForYou || allowGuestAdult),
           adultUnlocked,
           total: all.length,
           count: normalSources.length,
@@ -2017,11 +2028,15 @@ export default {
         const isAdmin = await verifyToken(env, readToken(request, url));
 
         let g1 = { ok: true };
+        const adultTrialMin = Number(settings2.adultTrialMinutes === undefined ? 10 : settings2.adultTrialMinutes);
         if (isAdultSrc) {
-          // 策略 1: 私密福利(18+)内容严禁游客试看, 必须已登录会员访问
+          // 策略 1: 私密福利(18+)内容权限
           if (!settings2.adultEnabled) return json({ error: '私密福利内容已关闭' }, 403);
           if (!uname && !isAdmin) {
-            return json({ error: '私密福利影片仅限会员访问，游客试看仅限正常影视', code: 'adult_login_required' }, 401);
+            // 游客试看：若未开启试看(adultTrialMin <= 0)，禁止游客访问
+            if (adultTrialMin <= 0) {
+              return json({ error: '私密福利影片仅限会员访问，请先登录或注册账号', code: 'adult_login_required' }, 401);
+            }
           }
         } else {
           // 正常影片: 走正常游客试看逻辑
@@ -2067,23 +2082,26 @@ export default {
           });
         }
 
-        // 策略 2: 若访问成人源但未付费解锁(只能预览图片, 不能播放)
-        // 从源头剥离播放地址 vod_play_url, 仅保留图片、片名、简介等元数据供图片预览
+        // 策略 2: 若访问成人源但未付费解锁
+        // 若开启了游客/非会员试看(adultTrialMin > 0)，保留播放串供前端播放器限时试看；
+        // 仅当 adultTrialMin <= 0 时彻底剥离 vod_play_url，仅支持图片预览
         if (isAdultSrc && !adultUnlocked) {
-          try {
-            const raw = await upstream.text();
-            const data = JSON.parse(raw);
-            if (data && Array.isArray(data.list)) {
-              for (const it of data.list) {
-                it.vod_play_url = ''; // 剥离播放串，彻底禁止未解锁播放
-                it.vod_play_from = '需解锁播放';
-                it.vod_play_note = '未付费解锁，仅提供图片预览';
-                it.locked = true;
+          if (adultTrialMin <= 0) {
+            try {
+              const raw = await upstream.text();
+              const data = JSON.parse(raw);
+              if (data && Array.isArray(data.list)) {
+                for (const it of data.list) {
+                  it.vod_play_url = ''; // 剥离播放串，彻底禁止未解锁播放
+                  it.vod_play_from = '需解锁播放';
+                  it.vod_play_note = '未付费解锁，仅提供图片预览';
+                  it.locked = true;
+                }
               }
+              return json(data, upstream.status, headers);
+            } catch (e) {
+              return json({ error: '未解锁私密福利播放权限，仅支持图片预览', code: 'adult_locked' }, 403);
             }
-            return json(data, upstream.status, headers);
-          } catch (e) {
-            return json({ error: '未解锁私密福利播放权限，仅支持图片预览', code: 'adult_locked' }, 403);
           }
         }
 
@@ -2650,6 +2668,7 @@ export default {
             adultEnabled: Boolean(s.adultEnabled),
             adultBottomNav: Boolean(s.adultBottomNav),
             adultGuestVisible: Boolean(s.adultGuestVisible),
+            adultTrialMinutes: Number(s.adultTrialMinutes === undefined ? 10 : s.adultTrialMinutes),
             adultUnlockCode: s.adultUnlockCode || 'VIP888',
             adultPayDesc: s.adultPayDesc || '',
             adultPayQr: s.adultPayQr || '',

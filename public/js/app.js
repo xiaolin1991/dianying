@@ -556,14 +556,15 @@
     // 2. 手机底部导航开关开启 (State.settings.adultBottomNav)
     // 3. 并且满足以下之一:
     //    a) 已登录正式会员且账号已解锁 (State.me && State.me !== '管理员' && State.config && State.config.adultUnlocked)
-    //    b) 后台开启了「允许未登录访客可见」引导开关 (State.settings.adultGuestVisible)
+    //    b) 后台开启了「允许未登录访客可见」或配置了游客试看时长 > 0
+    const adultTrialMin = Number(State.config && State.config.adultTrialMinutes !== undefined ? State.config.adultTrialMinutes : (State.settings && State.settings.adultTrialMinutes !== undefined ? State.settings.adultTrialMinutes : 10));
     const isMemberUnlocked = Boolean(
       State.me &&
       State.me !== '管理员' &&
       State.config &&
       State.config.adultUnlocked
     );
-    const allowGuest = Boolean(State.settings && State.settings.adultGuestVisible);
+    const allowGuest = Boolean(State.settings && State.settings.adultGuestVisible) || adultTrialMin > 0;
     const hasAdult = Boolean(
       State.settings &&
       State.settings.adultEnabled &&
@@ -1392,13 +1393,14 @@
     if (!src) { v.innerHTML = '<div class="container empty">数据源不存在或已被后台关闭</div>'; return; }
 
     // 私密福利访问权限拦截
+    const adultTrialMin = Number(State.config && State.config.adultTrialMinutes !== undefined ? State.config.adultTrialMinutes : (State.settings && State.settings.adultTrialMinutes !== undefined ? State.settings.adultTrialMinutes : 10));
     if (src.adult) {
-      if (!State.me) {
+      if (!State.me && adultTrialMin <= 0) {
         v.innerHTML = `<div class="container page-wrap"><div class="empty" style="padding:48px 20px"><div class="big">🔒</div><h3>私密福利影片仅限登录会员访问</h3><p style="color:var(--dim);margin:8px 0 16px">游客试看仅限正常影视内容，请先登录或注册账号。</p><a class="btn primary" href="#/login">立即登录</a></div></div>`;
         return;
       }
     }
-    const isAdultLocked = Boolean(src.adult && (!State.config || !State.config.adultUnlocked));
+    const isAdultLocked = Boolean(src.adult && (!State.config || !State.config.adultUnlocked) && adultTrialMin <= 0);
 
     v.innerHTML = `<div class="container page-wrap"><div class="grid"></div><div class="empty"><div class="big">📡</div>正在加载详情…</div></div>`;
 
@@ -1554,13 +1556,19 @@
     const src = findSourceByKey(key);
     if (!src) { v.innerHTML = '<div class="container empty">数据源不存在</div>'; return; }
 
-    // 私密福利访问权限拦截
-    if (src.adult) {
-      if (!State.me) {
-        v.innerHTML = `<div class="container page-wrap"><div class="empty" style="padding:48px 20px"><div class="big">🔒</div><h3>私密福利影片仅限登录会员访问</h3><p style="color:var(--dim);margin:8px 0 16px">游客试看仅限正常影视内容，请先登录或注册账号。</p><a class="btn primary" href="#/login">立即登录</a></div></div>`;
+    // 私密福利访问权限拦截与试看判定
+    const isAdultVideo = Boolean(src && src.adult);
+    const adultTrialMin = Number(State.config && State.config.adultTrialMinutes !== undefined ? State.config.adultTrialMinutes : (State.settings && State.settings.adultTrialMinutes !== undefined ? State.settings.adultTrialMinutes : 10));
+    let isAdultUnlocked = Boolean(State.config && State.config.adultUnlocked);
+    let isAdultTrial = Boolean(isAdultVideo && !isAdultUnlocked && adultTrialMin > 0);
+    const maxAdultTrialSec = adultTrialMin * 60;
+
+    if (isAdultVideo) {
+      if (!State.me && !isAdultTrial) {
+        v.innerHTML = `<div class="container page-wrap"><div class="empty" style="padding:48px 20px"><div class="big">🔒</div><h3>私密福利影片仅限登录会员访问</h3><p style="color:var(--dim);margin:8px 0 16px">游客试看功能未开启，请先登录或注册账号以获取播放特权。</p><a class="btn primary" href="#/login">立即登录</a></div></div>`;
         return;
       }
-      if (!State.config || !State.config.adultUnlocked) {
+      if (State.me && !isAdultUnlocked && !isAdultTrial) {
         v.innerHTML = `
           <div class="container page-wrap">
             <div class="empty" style="padding:48px 20px">
@@ -1850,8 +1858,66 @@
         }
       });
     }
+    let adultBarrierEl = null;
+    const resumeAdultPlayback = () => {
+      if (adultBarrierEl) adultBarrierEl.classList.add('hidden');
+      isAdultUnlocked = true;
+      isAdultTrial = false;
+      video.play().catch(() => {});
+    };
+
+    const showAdultTrialNotice = () => {
+      video.pause();
+      if (!wrap) return;
+      if (!adultBarrierEl) {
+        adultBarrierEl = document.createElement('div');
+        adultBarrierEl.className = 'adult-trial-player-barrier';
+        adultBarrierEl.innerHTML = `
+          <div class="atp-inner">
+            <div style="font-size:38px;margin-bottom:8px">🔞</div>
+            <div style="font-size:17px;font-weight:700;margin-bottom:6px;color:#fff">私密福利 · 免费试看已结束</div>
+            <div style="font-size:13px;color:rgba(255,255,255,.8);margin-bottom:16px;line-height:1.5">
+              您已免费试看 ${adultTrialMin} 分钟。<br>注册账号即可获赠 VIP 会员特权，畅享完整无删减高清影片！
+            </div>
+            <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+              <button class="btn primary small" id="atpGoBtn" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700;padding:8px 18px">
+                🎁 立即免费注册 / 登录
+              </button>
+              <button class="btn ghost small" id="atpCardBtn" style="color:#fff;border-color:rgba(255,255,255,.3);padding:8px 14px">
+                🔑 输入卡密
+              </button>
+            </div>
+          </div>`;
+        wrap.appendChild(adultBarrierEl);
+        $('#atpGoBtn', adultBarrierEl).addEventListener('click', () => {
+          showAdultTrialModal(adultTrialMin, resumeAdultPlayback);
+        });
+        $('#atpCardBtn', adultBarrierEl).addEventListener('click', () => {
+          openUnlockModal(resumeAdultPlayback);
+        });
+      }
+      adultBarrierEl.classList.remove('hidden');
+      showAdultTrialModal(adultTrialMin, resumeAdultPlayback);
+    };
+
+    const checkAdultLimit = () => {
+      if (!isAdultTrial || isAdultUnlocked) return false;
+      if (video.currentTime >= maxAdultTrialSec) {
+        video.currentTime = maxAdultTrialSec;
+        video.pause();
+        showAdultTrialNotice();
+        return true;
+      }
+      return false;
+    };
+
+    if (isAdultTrial) {
+      toast(`⏱️ 游客免费试看中（限时 ${adultTrialMin} 分钟，注册即送 VIP 特权）`, 'warn');
+    }
+
     const togglePlay = () => {
       if (video.paused) {
+        if (checkAdultLimit()) return;
         const p = video.play();
         if (p && typeof p.catch === 'function') {
           p.catch((err) => {
@@ -1867,7 +1933,11 @@
     syncPpBtn();
     ['loadedmetadata', 'canplay', 'playing', 'pause', 'play', 'timeupdate', 'durationchange'].forEach((ev) => {
       video.addEventListener(ev, () => {
-        if (ev === 'timeupdate' || ev === 'durationchange') { syncMSeek(); return; }
+        if (ev === 'timeupdate' || ev === 'durationchange') {
+          checkAdultLimit();
+          syncMSeek();
+          return;
+        }
         applyPlayerPrefs();
         syncPpBtn();
         syncMSeek();
@@ -1906,7 +1976,17 @@
       });
       const endSeek = () => {
         if (!video.duration) { mSeeking = false; return; }
-        try { video.currentTime = (Number(mSeek.value) / 1000) * video.duration; } catch (e) {}
+        let target = (Number(mSeek.value) / 1000) * video.duration;
+        if (isAdultTrial && !isAdultUnlocked && target >= maxAdultTrialSec) {
+          target = maxAdultTrialSec;
+          try { video.currentTime = maxAdultTrialSec; } catch (e) {}
+          video.pause();
+          showAdultTrialNotice();
+          mSeeking = false;
+          bumpMCtrl();
+          return;
+        }
+        try { video.currentTime = target; } catch (e) {}
         mSeeking = false;
         bumpMCtrl();
       };
@@ -2798,8 +2878,15 @@
           if (e.target.closest('.fs-top-bar, .m-ctrl, .failover-box, a, button, input, select')) return;
           if (touchMode === 'seek') {
             if (seekTarget >= 0 && video.duration) {
-              try { video.currentTime = seekTarget; } catch (err) {}
-              showTextHud(`⏱ 已跳到 ${fmtClock(video.currentTime)}`, 800);
+              if (isAdultTrial && !isAdultUnlocked && seekTarget >= maxAdultTrialSec) {
+                seekTarget = maxAdultTrialSec;
+                try { video.currentTime = maxAdultTrialSec; } catch (err) {}
+                video.pause();
+                showAdultTrialNotice();
+              } else {
+                try { video.currentTime = seekTarget; } catch (err) {}
+                showTextHud(`⏱ 已跳到 ${fmtClock(video.currentTime)}`, 800);
+              }
             }
             touchMode = '';
             seekTarget = -1;
@@ -3369,6 +3456,139 @@
     setTimeout(() => { const i = $('.t-user', box); i && i.focus(); }, 80);
   }
 
+  /* ---------------- 私密福利专区：游客试看到期 → 专属注册/登录/卡密弹窗 ---------------- */
+  let adultTrialModalShown = false;
+  function showAdultTrialModal(adultTrialMin, onContinue) {
+    if (State.me || adultTrialModalShown) return;
+    adultTrialModalShown = true;
+    let mode = 'reg'; // 'reg' | 'login' | 'card'
+    const box = document.createElement('div');
+    box.className = 'modal-mask trial-mask adult-trial-mask';
+    box.innerHTML = `
+      <div class="modal-box trial-box adult-trial-box" style="border:1px solid rgba(225,29,72,.45);box-shadow:0 20px 60px rgba(225,29,72,.25);width:min(92vw,440px)">
+        <button type="button" class="modal-close t-close" aria-label="关闭">×</button>
+        <div class="trial-hero" style="background:linear-gradient(180deg,rgba(225,29,72,.18),transparent)">
+          <div class="t-ico">🔞</div>
+          <h3 class="t-title" style="color:#ff4d6d">私密福利 · 免费试看已结束</h3>
+          <p class="t-sub">${adultTrialMin ? `已免费体验 ${adultTrialMin} 分钟` : '免费试看已结束'} · 免费注册账号即赠福利特权，畅享完整无删减高清影片</p>
+        </div>
+        <div class="trial-tabs">
+          <button type="button" class="t-tab on" data-m="reg">🎁 免费注册领特权</button>
+          <button type="button" class="t-tab" data-m="login">已有账号登录</button>
+          <button type="button" class="t-tab" data-m="card">🔑 卡密直接激活</button>
+        </div>
+        <div class="trial-form">
+          <div id="atfRegLogin">
+            <input class="field-input t-user" placeholder="用户名(2-20位中文/字母/数字)" autocomplete="username">
+            <input class="field-input t-pwd" type="password" placeholder="密码(至少6位)" autocomplete="current-password" style="margin-top:10px">
+            <input class="field-input t-pwd2" type="password" placeholder="确认密码" autocomplete="new-password" style="margin-top:10px">
+          </div>
+          <div id="atfCard" class="hidden">
+            <p class="hint" style="margin-bottom:10px;line-height:1.5">若您已有激活卡密或会员激活码，可直接输入兑换开通专属特权。</p>
+            <input class="field-input t-cardcode" placeholder="输入私密专区激活码（如：VIP888）">
+          </div>
+          <button type="button" class="btn primary t-go" style="background:linear-gradient(135deg,#e11d48,#be123c);margin-top:14px;font-weight:700">免费注册并继续播放完整版</button>
+          <p class="hint t-hint" style="margin-top:10px">注册完全免费 · 自动赠送私密特权 · 随时跨设备同步</p>
+        </div>
+      </div>`;
+
+    const close = () => {
+      box.remove();
+      adultTrialModalShown = false;
+    };
+    box.addEventListener('click', (ev) => {
+      if (ev.target === box) close();
+    });
+    $('.t-close', box).addEventListener('click', close);
+
+    const syncMode = () => {
+      $$('.t-tab', box).forEach((b) => b.classList.toggle('on', b.dataset.m === mode));
+      const regLogin = $('#atfRegLogin', box);
+      const cardBox = $('#atfCard', box);
+      const pwd2 = $('.t-pwd2', box);
+      const btn = $('.t-go', box);
+      const title = $('.t-title', box);
+      const hint = $('.t-hint', box);
+
+      if (mode === 'card') {
+        regLogin.classList.add('hidden');
+        cardBox.classList.remove('hidden');
+        btn.textContent = '立即激活卡密并播放';
+        title.textContent = '私密福利 · 卡密特权解锁';
+        hint.textContent = '激活成功后将解除所有试看限制，解锁全区高清影视';
+      } else {
+        cardBox.classList.add('hidden');
+        regLogin.classList.remove('hidden');
+        pwd2.classList.toggle('hidden', mode === 'login');
+        btn.textContent = mode === 'reg' ? '免费注册并继续播放完整版' : '登 录 并继续播放完整版';
+        title.textContent = mode === 'reg' ? '私密福利 · 免费试看已结束' : '欢迎登录晓林影视';
+        hint.textContent = mode === 'reg' ? '注册完全免费 · 自动赠送私密特权 · 随时跨设备同步' : '登录成功后将自动识别会员特权状态';
+      }
+    };
+
+    $$('.t-tab', box).forEach((b) => b.addEventListener('click', () => { mode = b.dataset.m; syncMode(); }));
+
+    const submit = async () => {
+      try {
+        if (mode === 'card') {
+          const code = $('.t-cardcode', box).value.trim();
+          if (!code) return toast('请输入卡密激活码', 'err');
+          if (!State.me) {
+            toast('请先注册或登录账号，以便将激活码绑定至您的专属账号', 'warn');
+            mode = 'reg';
+            syncMode();
+            return;
+          }
+          await API.unlockAdult(code);
+          toast('🎉 卡密激活成功！私密福利特权已开通', 'ok');
+        } else {
+          const username = $('.t-user', box).value.trim();
+          const pwd = $('.t-pwd', box).value;
+          if (!USERNAME_OK(username)) return toast('用户名需 2-20 位中文/字母/数字/下划线', 'err');
+          if (pwd.length < 6) return toast('密码至少 6 位', 'err');
+          if (mode === 'reg') {
+            if (pwd !== $('.t-pwd2', box).value) return toast('两次输入的密码不一致', 'err');
+            await API.userRegister(username, pwd);
+          } else {
+            await API.userLogin(username, pwd);
+          }
+          State.me = username;
+          try {
+            const mm = await API.userMe();
+            if (mm && mm.me) {
+              State.meCreated = Number(mm.me.createdAt || 0);
+              State.adultAllowed = Boolean(mm.me.adultAllowed);
+              State.adultExpireAt = Number(mm.me.adultExpireAt || 0);
+              State.unreadMsgCount = Number(mm.me.unreadMsgCount || 0);
+            }
+          } catch (e) {}
+        }
+        try { State.config = await API.getConfig(); } catch (e) {}
+        updateUserBox();
+        renderBottomNav();
+        pullFavsMerge();
+        toast('🎉 登录成功，正在为您继续播放完整影片！', 'ok');
+        close();
+        if (typeof onContinue === 'function') onContinue();
+      } catch (e) {
+        toast(e.message || '操作失败', 'err');
+      }
+    };
+
+    $('.t-go', box).addEventListener('click', submit);
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submit();
+      }
+    });
+    document.body.appendChild(box);
+    setTimeout(() => {
+      const i = $('.t-user:not(.hidden)', box) || $('.t-cardcode', box);
+      i && i.focus();
+    }, 100);
+  }
+
   /* ------------------------------ 会员中心全量实时刷新 ------------------------------ */
   async function doGlobalUserRefresh(btnEl) {
     if (btnEl) {
@@ -3660,7 +3880,11 @@
       return;
     }
 
-    if (!State.me) {
+    const adultTrialMin = Number(State.config && State.config.adultTrialMinutes !== undefined ? State.config.adultTrialMinutes : (State.settings && State.settings.adultTrialMinutes !== undefined ? State.settings.adultTrialMinutes : 10));
+    const isGuest = !State.me;
+    const canTrialPlay = isGuest && adultTrialMin > 0;
+
+    if (isGuest && !canTrialPlay) {
       v.innerHTML = `
         <div class="container page-wrap">
           <div class="adult-feature-banner" style="margin-top:10px">
@@ -3746,18 +3970,24 @@
               <div>
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                   <span style="font-size:18px;font-weight:700">私密福利 VIP 尊享特权影院</span>
-                  <span class="user-vip-tag ${isUnlocked ? 'unlocked' : 'locked'}" style="font-size:11.5px">
-                    ${isUnlocked ? ('👑 VIP已解锁 · 全区畅播' + (State.adultExpireAt ? ` (至 ${fmtDateTime(State.adultExpireAt).slice(0, 10)})` : '')) : '🔒 注册会员 · 仅图片预览'}
+                  <span class="user-vip-tag ${isUnlocked ? 'unlocked' : (canTrialPlay ? 'trial' : 'locked')}" style="font-size:11.5px">
+                    ${isUnlocked ? ('👑 VIP已解锁 · 全区畅播' + (State.adultExpireAt ? ` (至 ${fmtDateTime(State.adultExpireAt).slice(0, 10)})` : '')) : (canTrialPlay ? `⏱️ 游客试看中 · 每部免费 ${adultTrialMin} 分钟` : '🔒 注册会员 · 仅图片预览')}
                   </span>
                 </div>
                 <div class="adult-banner-sub">全网精选福利聚合 · 4K超清极速线路 · 每日同步海量更新 · 严格隐私零痕迹</div>
               </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
-              ${!isUnlocked ? `
+              ${!isUnlocked ? (canTrialPlay ? `
+                <button class="btn primary small" id="adultHeroRegBtn" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700">
+                  🎁 注册领VIP
+                </button>
+                <button class="btn ghost small" id="adultHeroUnlockBtn" style="color:#fff;border-color:rgba(255,255,255,.3)">
+                  🔑 卡密
+                </button>` : `
                 <button class="btn primary small" id="adultHeroUnlockBtn" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700">
                   🔑 卡密解锁
-                </button>` : ''}
+                </button>`) : ''}
               <button class="adult-banner-toggle" id="adultBannerToggle" type="button">
                 <span id="adultToggleTxt">${store.get('adultDescFold', false) ? '展开说明 ▾' : '收起说明 ▴'}</span>
               </button>
@@ -3765,19 +3995,29 @@
           </div>
 
           <div id="adultBannerBody" class="${store.get('adultDescFold', false) ? 'hidden' : ''}">
-            <div class="adult-status-banner ${isUnlocked ? 'unlocked' : 'locked'}">
+            <div class="adult-status-banner ${isUnlocked ? 'unlocked' : (canTrialPlay ? 'trial' : 'locked')}">
               <div>
-                <b>${isUnlocked ? '👑 VIP 特权状态：已激活解锁' : '🔒 会员特权状态：未付费解锁（仅图片预览）'}</b>
+                <b>${isUnlocked ? '👑 VIP 特权状态：已激活解锁' : (canTrialPlay ? `⏱️ 游客免登录免费试看体验中（限时 ${adultTrialMin} 分钟）` : '🔒 会员特权状态：未付费解锁（仅图片预览）')}</b>
                 <div style="font-size:12.5px;opacity:.9;margin-top:2px">
                   ${isUnlocked
                     ? '您已享有专区全部影片无限制在线播放特权、多条超清CDN线路、智能瀑布流无限畅享！'
-                    : '当前为注册会员画册预览模式，视频流处于受限保护状态。输入卡密即可一秒升级为 VIP 尊享会员，解除全区视频在线播放！'}
+                    : (canTrialPlay
+                      ? `当前专区内所有影片均可免登录免费试看前 ${adultTrialMin} 分钟。免费注册账号即赠送 VIP 特权，解除试看限制，解锁全区高清影片！`
+                      : '当前为注册会员画册预览模式，视频流处于受限保护状态。输入卡密即可一秒升级为 VIP 尊享会员，解除全区视频在线播放！')}
                 </div>
               </div>
-              ${!isUnlocked ? `
+              ${!isUnlocked ? (canTrialPlay ? `
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <button class="btn primary small" id="adultRegTrialBtn" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700;white-space:nowrap">
+                    🎁 免费注册领VIP无限看
+                  </button>
+                  <button class="btn ghost small" id="uBannerUnlockBtn" style="color:#fff;border-color:rgba(255,255,255,.3);white-space:nowrap">
+                    🔑 卡密解锁
+                  </button>
+                </div>` : `
                 <button class="btn primary small" id="uBannerUnlockBtn" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700;white-space:nowrap">
                   🔑 立即输入卡密解锁
-                </button>` : ''}
+                </button>`) : ''}
             </div>
 
             <div class="adult-perk-grid">
@@ -3825,16 +4065,22 @@
               <div class="src-panel-head">
                 <div class="src-panel-title">
                   ${srcIconHtml(curSrc)} ${esc(cleanSrcName(curSrc))} <i class="adult-tag">私密专区</i>
-                  <span class="vip-status-pill ${isUnlocked ? 'unlocked' : 'locked'}">
-                    ${isUnlocked ? '👑 VIP已解锁播放' : '🔒 仅图片预览模式'}
+                  <span class="vip-status-pill ${isUnlocked ? 'unlocked' : (canTrialPlay ? 'trial' : 'locked')}">
+                    ${isUnlocked ? '👑 VIP已解锁播放' : (canTrialPlay ? `⏱️ 试看 ${adultTrialMin} 分钟` : '🔒 仅图片预览模式')}
                   </span>
                   <span class="src-panel-sub">${adultQuery ? '搜索「' + esc(adultQuery) + '」' : adultCat ? '分类筛选' : '最新影片'}</span>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                  ${!isUnlocked ? `
+                  ${!isUnlocked ? (canTrialPlay ? `
+                    <button class="btn primary small" id="uBtnReg" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700">
+                      🎁 注册领VIP
+                    </button>
+                    <button class="btn ghost small" id="uBtnUnlock" style="border-color:rgba(255,255,255,.3)">
+                      🔑 卡密
+                    </button>` : `
                     <button class="btn primary small" id="uBtnUnlock" style="background:linear-gradient(135deg,#e11d48,#be123c);font-weight:700">
                       🔑 立即输入卡密解锁
-                    </button>` : ''}
+                    </button>`) : ''}
                   <form class="src-page-search" id="adultSearchForm" style="margin:0" onsubmit="return false">
                     <input type="search" id="adultSearchInput" placeholder="在福利源中搜片..." value="${esc(adultQuery)}" autocomplete="off" />
                     <button class="btn primary small" id="adultSearchBtn" type="button">搜索</button>
@@ -3889,6 +4135,9 @@
       $('#adultHeroUnlockBtn') && $('#adultHeroUnlockBtn').addEventListener('click', doUnlock);
       $('#uBannerUnlockBtn') && $('#uBannerUnlockBtn').addEventListener('click', doUnlock);
       $('#uBtnUnlock') && $('#uBtnUnlock').addEventListener('click', doUnlock);
+      $('#adultHeroRegBtn') && $('#adultHeroRegBtn').addEventListener('click', () => showAdultTrialModal(adultTrialMin, () => viewAdult(life.ok)));
+      $('#adultRegTrialBtn') && $('#adultRegTrialBtn').addEventListener('click', () => showAdultTrialModal(adultTrialMin, () => viewAdult(life.ok)));
+      $('#uBtnReg') && $('#uBtnReg').addEventListener('click', () => showAdultTrialModal(adultTrialMin, () => viewAdult(life.ok)));
     }
 
     function bindSources() {
@@ -3990,7 +4239,8 @@
           const vod = loadedVods.find((x) => String(x.vod_id) === String(vidId));
           if (!vod) return;
 
-          if (!isUnlocked) {
+          const canPlay = isUnlocked || canTrialPlay;
+          if (!canPlay) {
             ev.preventDefault();
             openPicPreviewModal(vod, curSrc);
             return;
@@ -4135,16 +4385,17 @@
         const remarks = v.vod_remarks || '';
         const year = v.vod_year || '';
         const type = v.type_name || '';
+        const canPlay = isUnlocked || canTrialPlay;
         const playHref = `#/play/${encodeURIComponent(curSrc.key)}/${encodeURIComponent(v.vod_id)}?ep=0&group=0`;
-        const targetAttr = isUnlocked ? (isMobile ? '_self' : '_blank') : '_self';
+        const targetAttr = canPlay ? (isMobile ? '_self' : '_blank') : '_self';
         return `
-          <a class="card adult-vod-card" href="${isUnlocked ? playHref : 'javascript:;'}" target="${targetAttr}" data-id="${esc(v.vod_id)}" title="${esc(title)}">
+          <a class="card adult-vod-card" href="${canPlay ? playHref : 'javascript:;'}" target="${targetAttr}" data-id="${esc(v.vod_id)}" title="${esc(title)}">
             <div class="card-poster">
               <img loading="lazy" referrerpolicy="no-referrer" src="${esc(pic)}" alt="${esc(title)}"
                    onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>'">
               <span class="card-badge">${esc(remarks || year || '18+')}</span>
-              <span class="card-lock-badge ${isUnlocked ? 'unlocked' : 'locked'}">
-                ${isUnlocked ? '▶ 可播放' : '🔒 预览大图'}
+              <span class="card-lock-badge ${isUnlocked ? 'unlocked' : (canTrialPlay ? 'trial' : 'locked')}">
+                ${isUnlocked ? '▶ 可播放' : (canTrialPlay ? `⏱️ 试看${adultTrialMin}分钟` : '🔒 预览大图')}
               </span>
               <span class="card-play-ico"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>
             </div>
@@ -6674,6 +6925,15 @@
                 </div>
                 <label class="switch"><input type="checkbox" id="adultGuestSwitch" ${s.adultGuestVisible ? 'checked' : ''}><span class="track"></span></label>
               </div>
+
+              <!-- ⏱️ 游客试看时长（分钟） -->
+              <div class="admin-row" style="margin-bottom:14px;padding:12px;background:rgba(255,255,255,.03);border-radius:10px;border:1px solid var(--card-br)">
+                <div class="admin-label">⏱️ 游客免登录免费试看时长（分钟）
+                  <small>设置游客在私密福利专区免登录可试看时长（默认 <b>10</b> 分钟，填 <b>0</b> 表示禁止试看必须登录）。到期后视频将自动暂停并弹出注册/登录引导窗口。<br>当前：<b id="adultTrialHintMin" style="color:var(--ok)">${Number(s.adultTrialMinutes === undefined ? 10 : s.adultTrialMinutes)} 分钟</b></small>
+                </div>
+                <input class="field-input" id="adultTrialMinInput" type="number" min="0" max="1440" step="1" style="width:92px;text-align:center" value="${Number(s.adultTrialMinutes === undefined ? 10 : s.adultTrialMinutes)}">
+              </div>
+
               <label class="field-label">私密福利激活码 / 卡密（支持多个，逗号分隔，如：VIP888, VIP999）</label>
               <input class="field-input" id="adultUnlockCodeInput" value="${esc(s.adultUnlockCode || 'VIP888')}" placeholder="VIP888">
               <label class="field-label" style="margin-top:10px">付费解锁 / 赞助客服说明文案</label>
@@ -6735,14 +6995,27 @@
             <button class="btn primary" id="wmSaveBtn" style="margin-top:14px">保存水印设置</button>
           </div>`;
         $('#saveAdultConfigBtn') && $('#saveAdultConfigBtn').addEventListener('click', async () => {
+          const rawMin = Number($('#adultTrialMinInput') ? $('#adultTrialMinInput').value : 10);
+          const trialMin = (isFinite(rawMin) && rawMin >= 0) ? Math.round(rawMin) : 10;
           try {
             await API.adminSaveSettings({
               adultUnlockCode: $('#adultUnlockCodeInput').value.trim(),
               adultPayDesc: $('#adultPayDescInput').value.trim(),
               adultPayQr: $('#adultPayQrInput').value.trim(),
+              adultTrialMinutes: trialMin,
             });
-            toast('私密福利配置已保存', 'ok');
+            if (lastSettings) lastSettings.adultTrialMinutes = trialMin;
+            if (State.settings) State.settings.adultTrialMinutes = trialMin;
+            if ($('#adultTrialHintMin')) $('#adultTrialHintMin').textContent = trialMin + ' 分钟';
+            renderBottomNav();
+            toast('✅ 私密福利配置已保存（试看：' + (trialMin === 0 ? '禁止试看' : trialMin + '分钟') + '）', 'ok');
           } catch (e) { toast('保存失败：' + e.message, 'err'); }
+        });
+        $('#adultTrialMinInput') && $('#adultTrialMinInput').addEventListener('input', (e) => {
+          const val = Number(e.target.value);
+          if ($('#adultTrialHintMin')) {
+            $('#adultTrialHintMin').textContent = (isFinite(val) && val >= 0) ? (val === 0 ? '0 分钟（禁止试看）' : val + ' 分钟') : '--';
+          }
         });
         $('#adultBottomNavSwitch') && $('#adultBottomNavSwitch').addEventListener('change', async (e) => {
           const on = e.target.checked;
