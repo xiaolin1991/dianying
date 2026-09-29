@@ -4,34 +4,41 @@
 
   let current = null; // { hls }
 
-  /** 现状: 稳健偏保守 */
+  /**
+   * 基础稳健配置:
+   * 针对国内影视采集源切片不规则、插播广告小分片、时间戳(PTS)抖动与 44.1kHz AAC 音频重采样优化
+   */
   const HLS_DEFAULT = {
+    enableWorker: true,
     maxBufferLength: 30,
     maxMaxBufferLength: 60,
+    maxBufferSize: 60 * 1000 * 1000,
+    // 关键音频参数: 采集站与切片广告经常存在微小 PTS 抖动(>1 帧)，默认 1 会导致频繁丢音频帧/重同步导致变音变调或杂音失真
+    maxAudioFramesDrift: 4,
     manifestLoadingTimeOut: 15000,
     fragLoadingTimeOut: 20000,
-  };
-
-  /** 优化: 更快起播(低码率先出画) + 分片预取 + Worker 解码 */
-  const HLS_OPTIMIZE = {
-    enableWorker: true,
-    startFragPrefetch: true,
-    testBandwidth: true,
-    // -1=自动; 优化模式下先从较低档起播再升, 缩短黑屏等待
-    startLevel: 0,
-    abrEwmaDefaultEstimate: 300000,
-    maxBufferLength: 18,
-    maxMaxBufferLength: 48,
-    maxBufferSize: 40 * 1000 * 1000,
-    maxStarvationDelay: 2,
-    maxLoadingDelay: 2,
-    manifestLoadingTimeOut: 10000,
-    fragLoadingTimeOut: 15000,
-    fragLoadingMaxRetry: 4,
-    fragLoadingRetryDelay: 400,
     manifestLoadingMaxRetry: 3,
     levelLoadingMaxRetry: 3,
-    nudgeMaxRetry: 5,
+    fragLoadingMaxRetry: 4,
+    fragLoadingRetryDelay: 500,
+  };
+
+  /**
+   * 起播优化配置:
+   * 开启分片预取 + Worker 解码 + 合理缓冲，同时确保音频时间戳平滑不失真
+   */
+  const HLS_OPTIMIZE = {
+    ...HLS_DEFAULT,
+    startFragPrefetch: true,
+    testBandwidth: true,
+    startLevel: -1, // 自动档位，避免强设第0档与后续音轨不兼容导致声调切换异常
+    abrEwmaDefaultEstimate: 500000,
+    maxBufferLength: 30,
+    maxMaxBufferLength: 60,
+    maxBufferSize: 60 * 1000 * 1000,
+    maxStarvationDelay: 4, // 保持标准 4 秒，防止过早触发伪饥饿与微调(nudge)打乱音频时钟
+    maxLoadingDelay: 4,
+    nudgeMaxRetry: 3,
   };
 
   /**
@@ -56,6 +63,12 @@
 
     try {
       videoEl.preload = optimize ? 'auto' : (videoEl.preload || 'metadata');
+      // 保持原始音调，杜绝因速率或时钟微调导致的变调变音/娃娃音/失真
+      videoEl.preservesPitch = true;
+      if ('webkitPreservesPitch' in videoEl) videoEl.webkitPreservesPitch = true;
+      if ('mozPreservesPitch' in videoEl) videoEl.mozPreservesPitch = true;
+      videoEl.playbackRate = 1.0;
+      videoEl.defaultPlaybackRate = 1.0;
       // 增强移动端 / iOS 原生播放与画中画兼容属性
       videoEl.playsInline = true;
       videoEl.setAttribute('playsinline', '');
@@ -66,15 +79,12 @@
 
     if (isM3u8) {
       if (window.Hls && window.Hls.isSupported()) {
-        const hls = new Hls(optimize ? { ...HLS_OPTIMIZE } : { ...HLS_DEFAULT });
+        const hlsConfig = optimize ? { ...HLS_OPTIMIZE } : { ...HLS_DEFAULT };
+        const hls = new Hls(hlsConfig);
         hls.loadSource(url);
         hls.attachMedia(videoEl);
-        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
           showTip(tipEl, false);
-          // 优化模式: 清单就绪后若有多档, 从低档起播, 随后交给 ABR 升档
-          if (optimize && data && Array.isArray(data.levels) && data.levels.length > 1) {
-            try { hls.startLevel = 0; hls.currentLevel = 0; hls.nextLevel = -1; hls.loadLevel = -1; } catch (e) {}
-          }
           const p = videoEl.play();
           if (p && typeof p.catch === 'function') {
             p.catch((err) => {
