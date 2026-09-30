@@ -42,6 +42,8 @@ const DEFAULT_SETTINGS = {
   adultGuestVisible: false, // 未登录游客是否显示福利入口: false=未登录严格隐藏(显示电视直播), true=未登录也显示入口(引导登录)
   adultTrialMinutes: 10, // 游客在私密福利专区免费试看时长(分钟), 默认10分钟, 后台可自定义; 0=不可试看(必须登录)
   defaultTheme: 'midnight',
+  uiLayout: 'classic',   // 网站版式: classic=顶部导航(现有) | modern=左侧导航高档宽屏(新UI)
+  uiModernTheme: 'dark', // 现代UI配色: dark=深色黑 | light=浅色白
   announcement: '',
   liveSources: DEFAULT_LIVE_SOURCES,
   customSources: [],    // 后台手动添加的影视源 [{key,name,api,detail}]
@@ -1000,6 +1002,8 @@ async function saveSettings(env, patch) {
   if (typeof patch.adultBottomNav === 'boolean') next.adultBottomNav = patch.adultBottomNav;
   if (typeof patch.adultGuestVisible === 'boolean') next.adultGuestVisible = patch.adultGuestVisible;
   if (typeof patch.defaultTheme === 'string' && THEMES.includes(patch.defaultTheme)) next.defaultTheme = patch.defaultTheme;
+  if (patch.uiLayout === 'classic' || patch.uiLayout === 'modern') next.uiLayout = patch.uiLayout;
+  if (patch.uiModernTheme === 'dark' || patch.uiModernTheme === 'light') next.uiModernTheme = patch.uiModernTheme;
   if (typeof patch.announcement === 'string') next.announcement = patch.announcement.slice(0, 300);
   if (Array.isArray(patch.liveSources)) {
     const urls = patch.liveSources.filter((u) => typeof u === 'string' && /^https?:\/\//i.test(u.trim())).map((u) => u.trim());
@@ -1945,6 +1949,8 @@ export default {
           siteName: s.siteName,
           siteSlogan: s.siteSlogan || '海量高清 · 聚合秒播 · 极简私人影院',
           defaultTheme: s.defaultTheme,
+          uiLayout: s.uiLayout === 'modern' ? 'modern' : 'classic',
+          uiModernTheme: s.uiModernTheme === 'light' ? 'light' : 'dark',
           announcement: s.announcement,
           requireLogin: s.requireLogin !== false,
           trialMinutes: Number(s.trialMinutes === undefined ? 20 : s.trialMinutes),
@@ -2677,6 +2683,8 @@ export default {
             siteSlogan: s.siteSlogan || '海量高清 · 聚合秒播 · 极简私人影院',
             adultEnabled: s.adultEnabled,
             defaultTheme: s.defaultTheme,
+            uiLayout: s.uiLayout === 'modern' ? 'modern' : 'classic',
+            uiModernTheme: s.uiModernTheme === 'light' ? 'light' : 'dark',
             announcement: s.announcement,
             liveSources: s.liveSources,
             customSources: s.customSources || [],

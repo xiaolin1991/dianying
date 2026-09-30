@@ -498,6 +498,22 @@
     }));
   }
 
+  /* ---------------- 现代版式(左侧导航高档宽屏) ---------------- */
+  function applyUiLayout(layout) {
+    const on = layout === 'modern';
+    document.body.classList.toggle('ui-modern', on);
+    store.set('uiLayout', layout);
+  }
+  function applyModernTheme(mt) {
+    const m = mt === 'light' ? 'light' : 'dark';
+    document.body.setAttribute('data-mtheme', m);
+    store.set('uiModernTheme', m);
+  }
+  function applyUiMode(layout, mtheme) {
+    applyUiLayout(layout);
+    applyModernTheme(mtheme);
+  }
+
   /* ------------------------------ 全站页面与滚动记忆(搜索/影视源/分类/首页/会员中心) ------------------------------ */
   const LIST_PAGE_CACHE = new Map(); // routeKey -> { html, scrollY, state, rebind, ts }
   let activeListPage = null; // { key, getState, rebind }
@@ -7296,6 +7312,16 @@
             <select class="field-input" id="themeSelect">
               ${THEME_META.map((t) => `<option value="${t.id}" ${s.defaultTheme === t.id ? 'selected' : ''}>${t.name}</option>`).join('')}
             </select>
+            <label class="field-label" style="margin-top:12px">网站版式（UI）</label>
+            <select class="field-input" id="uiLayoutSelect">
+              <option value="classic" ${s.uiLayout !== 'modern' ? 'selected' : ''}>经典 · 顶部导航（现有界面）</option>
+              <option value="modern" ${s.uiLayout === 'modern' ? 'selected' : ''}>现代 · 左侧导航高档宽屏（新UI）</option>
+            </select>
+            <label class="field-label" style="margin-top:12px">现代版式配色（黑白皮肤）</label>
+            <select class="field-input" id="uiModernThemeSelect">
+              <option value="dark" ${s.uiModernTheme !== 'light' ? 'selected' : ''}>深色黑（影院质感）</option>
+              <option value="light" ${s.uiModernTheme === 'light' ? 'selected' : ''}>浅色白（清爽亮色）</option>
+            </select>
             <label class="field-label" style="margin-top:10px">全站公告（留空则不显示）</label>
             <textarea class="field-area" id="annInput" maxlength="300">${esc(s.announcement)}</textarea>
             <label class="field-label" style="margin-top:14px">🏠 首页默认加载的影视源（每行一个 key，按顺序，最多12个；留空 = 默认精选）<br>
@@ -7414,6 +7440,8 @@
               siteName: $('#siteNameInput').value,
               siteSlogan: $('#siteSloganInput').value,
               defaultTheme: $('#themeSelect').value,
+              uiLayout: $('#uiLayoutSelect').value,
+              uiModernTheme: $('#uiModernThemeSelect').value,
               announcement: $('#annInput').value,
               homeSources: homeLines,
             });
@@ -7423,6 +7451,8 @@
               siteSlogan: res.settings.siteSlogan,
               announcement: res.settings.announcement,
               homeSources: res.settings.homeSources || [],
+              uiLayout: res.settings.uiLayout,
+              uiModernTheme: res.settings.uiModernTheme,
             };
             store.set('cached_settings', State.settings);
             if (lastSettings) {
@@ -7431,7 +7461,10 @@
               lastSettings.announcement = res.settings.announcement;
               lastSettings.homeSources = res.settings.homeSources || [];
               lastSettings.defaultTheme = res.settings.defaultTheme;
+              lastSettings.uiLayout = res.settings.uiLayout;
+              lastSettings.uiModernTheme = res.settings.uiModernTheme;
             }
+            applyUiMode(res.settings.uiLayout || 'classic', res.settings.uiModernTheme || 'dark');
             $('#brandName').textContent = res.settings.siteName;
             document.title = res.settings.siteSlogan ? `${res.settings.siteName} - ${res.settings.siteSlogan}` : res.settings.siteName;
             applyAnnouncement(res.settings.announcement);
@@ -8680,6 +8713,9 @@
     buildThemePop();
     buildNav();
     applyTheme(store.get('theme', null) || 'midnight');
+    // 版式(现代/经典)按上次选择即时应用, 避免首屏闪跳; 稍后以服务端设置覆盖
+    applyUiLayout(store.get('uiLayout', 'classic'));
+    applyModernTheme(store.get('uiModernTheme', 'dark'));
 
     // file:// 直接打开 index.html 时, 前端无法访问 /api/* 后端
     if (location.protocol === 'file:') {
@@ -8729,6 +8765,8 @@
 
     // 应用服务端默认主题（用户本地无偏好时）
     if (!store.get('theme', null) && State.settings.defaultTheme) applyTheme(State.settings.defaultTheme);
+    // 应用服务端版式与黑白皮肤(后台可切换; 管理员全局设置优先于本地记忆)
+    applyUiMode(State.settings.uiLayout || 'classic', State.settings.uiModernTheme || 'dark');
     const sTitle = State.settings.siteName || '晓林影视';
     const sSlogan = State.settings.siteSlogan || '';
     $('#brandName').textContent = sTitle;
