@@ -1,4 +1,4 @@
-/* 晓林影视 XIAOLIN-TV — 后端 API 封装(同源 /api/*) */
+/* 晓林影视 XIAOLIN-TV — 后端 API 封装(同源 /api/* · 内置内存+会话双层极速缓存与并发去重) */
 (function () {
   'use strict';
 
@@ -11,6 +11,47 @@
       if (tok) sessionStorage.setItem(ADMIN_TOKEN_KEY, tok);
       else sessionStorage.removeItem(ADMIN_TOKEN_KEY);
     } catch (e) { /* ignore */ }
+  }
+
+  /* ---------------- 极速双层缓存引擎 (Memory LRU + sessionStorage + In-Flight 合并) ---------------- */
+  const MEM_CACHE = new Map(); // key -> { ts, ttl, data }
+  const IN_FLIGHT = new Map(); // key -> Promise
+  const MAX_MEM_ITEMS = 320;
+
+  function getCached(key) {
+    const now = Date.now();
+    const hit = MEM_CACHE.get(key);
+    if (hit) {
+      if (now - hit.ts <= hit.ttl) return hit.data;
+      MEM_CACHE.delete(key);
+    }
+    try {
+      const raw = sessionStorage.getItem('xlc:' + key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && now - parsed.ts <= parsed.ttl && parsed.data) {
+          MEM_CACHE.set(key, parsed);
+          return parsed.data;
+        }
+        sessionStorage.removeItem('xlc:' + key);
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function setCached(key, data, ttlMs, persistSession) {
+    if (!data || ttlMs <= 0) return;
+    const entry = { ts: Date.now(), ttl: ttlMs, data };
+    if (MEM_CACHE.size >= MAX_MEM_ITEMS) {
+      const firstKey = MEM_CACHE.keys().next().value;
+      if (firstKey) MEM_CACHE.delete(firstKey);
+    }
+    MEM_CACHE.set(key, entry);
+    if (persistSession) {
+      try {
+        sessionStorage.setItem('xlc:' + key, JSON.stringify(entry));
+      } catch (e) {}
+    }
   }
 
   async function jfetch(url, opt = {}, timeout = 20000) {
@@ -42,25 +83,50 @@
   }
 
   /** 通过后端代理请求苹果CMS接口。source={api}, params={ac,ids,wd,pg,...} */
-  async function proxyMacs(source, params, timeout = 22000) {
+  async function proxyMacs(source, params, timeout = 16000, cacheTtl = 180000, persistSession = false) {
+    if (!source || !source.api) throw new Error('invalid source');
     const qs = Object.entries(params)
       .filter(([, v]) => v !== undefined && v !== null && v !== '')
       .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
       .join('&');
     const sep = source.api.includes('?') ? '&' : '?';
     const target = source.api + sep + qs;
-    return jfetch('/api/proxy?url=' + encodeURIComponent(target), {}, timeout);
+    const proxyUrl = '/api/proxy?url=' + encodeURIComponent(target);
+
+    if (cacheTtl > 0) {
+      const cached = getCached(proxyUrl);
+      if (cached) return cached;
+    }
+    if (IN_FLIGHT.has(proxyUrl)) {
+      return IN_FLIGHT.get(proxyUrl);
+    }
+
+    const reqPromise = jfetch(proxyUrl, {}, timeout).then((data) => {
+      if (cacheTtl > 0 && data && Array.isArray(data.list) && data.list.length > 0) {
+        setCached(proxyUrl, data, cacheTtl, persistSession);
+      }
+      return data;
+    }).finally(() => {
+      IN_FLIGHT.delete(proxyUrl);
+    });
+
+    IN_FLIGHT.set(proxyUrl, reqPromise);
+    return reqPromise;
   }
 
   window.API = {
     getSettings: () => jfetch('/api/settings', {}, 8000),
-    getConfig: () => jfetch('/api/config'),
-    getLive: () => jfetch('/api/live', {}, 30000),
+    getConfig: () => jfetch('/api/config', {}, 12000),
+    getLive: () => jfetch('/api/live', {}, 25000),
 
-    search: (source, wd, pg = 1, timeout = 22000) => proxyMacs(source, { ac: 'videolist', wd, pg }, timeout),
-    list: (source, pg = 1, t = '', timeout = 22000) => proxyMacs(source, { ac: 'videolist', pg, t: t || undefined }, timeout),
-    categories: (source, timeout = 22000) => proxyMacs(source, { ac: 'list' }, timeout),
-    detail: (source, ids, timeout = 22000) => proxyMacs(source, { ac: 'videolist', ids }, timeout),
+    search: (source, wd, pg = 1, timeout = 15000) => proxyMacs(source, { ac: 'videolist', wd, pg }, timeout, 120000, false),
+    list: (source, pg = 1, t = '', timeout = 15000) => proxyMacs(source, { ac: 'videolist', pg, t: t || undefined }, timeout, 240000, pg === 1),
+    categories: (source, timeout = 15000) => proxyMacs(source, { ac: 'list' }, timeout, 300000, false),
+    detail: (source, ids, timeout = 15000) => proxyMacs(source, { ac: 'videolist', ids }, timeout, 300000, true),
+    prefetchDetail: (source, ids) => {
+      if (!source || !ids) return;
+      proxyMacs(source, { ac: 'videolist', ids }, 10000, 300000, true).catch(() => {});
+    },
 
     adminLogin: async (password) => {
       const data = await jfetch('/api/admin/login', {
@@ -76,7 +142,7 @@
       finally { setAdminToken(''); }
       return { ok: true };
     },
-    adminSession: () => jfetch('/api/admin/session', {}, 8000),
+    adminSession: () => jfetch('/api/admin/session', {}, 6000),
     adminGetSettings: () => jfetch('/api/admin/settings', {}, 8000),
     adminSaveSettings: (patch) =>
       jfetch('/api/admin/settings', {
@@ -137,7 +203,7 @@
         body: JSON.stringify({ username, password }),
       }, 10000),
     userLogout: () => jfetch('/api/user/logout', { method: 'POST' }, 8000),
-    userMe: () => jfetch('/api/user/me', {}, 8000),
+    userMe: () => jfetch('/api/user/me', {}, 6000),
     userFavs: () => jfetch('/api/user/favs', {}, 12000),
     userSaveFavs: (favs) =>
       jfetch('/api/user/favs', {

@@ -1,60 +1,49 @@
-/* 晓林影视 XIAOLIN-TV — HLS 播放器封装 */
+/* 晓林影视 XIAOLIN-TV — HLS 播放器封装 (默认开启首片预取与快速起播优化) */
 (function () {
   'use strict';
 
   let current = null; // { hls }
 
   /**
-   * 基础稳健配置:
-   * 针对国内影视采集源切片不规则、插播广告小分片、时间戳(PTS)抖动与 44.1kHz AAC 音频重采样优化
+   * 极速稳健默认配置:
+   * 默认开启 startFragPrefetch 首片预取 + Worker 异步解码，缩短连接超时以便死源快速切源，
+   * 同时保留 maxAudioFramesDrift=4 防止采集源切片时间戳抖动造成变音失真
    */
   const HLS_DEFAULT = {
     enableWorker: true,
+    startFragPrefetch: true,
     maxBufferLength: 30,
     maxMaxBufferLength: 60,
     maxBufferSize: 60 * 1000 * 1000,
-    // 关键音频参数: 采集站与切片广告经常存在微小 PTS 抖动(>1 帧)，默认 1 会导致频繁丢音频帧/重同步导致变音变调或杂音失真
     maxAudioFramesDrift: 4,
-    manifestLoadingTimeOut: 15000,
-    fragLoadingTimeOut: 20000,
-    manifestLoadingMaxRetry: 3,
-    levelLoadingMaxRetry: 3,
-    fragLoadingMaxRetry: 4,
-    fragLoadingRetryDelay: 500,
+    manifestLoadingTimeOut: 9500,
+    fragLoadingTimeOut: 14000,
+    manifestLoadingMaxRetry: 2,
+    levelLoadingMaxRetry: 2,
+    fragLoadingMaxRetry: 3,
+    fragLoadingRetryDelay: 350,
   };
 
-  /**
-   * 起播优化配置:
-   * 开启分片预取 + Worker 解码 + 合理缓冲，同时确保音频时间戳平滑不失真
-   */
   const HLS_OPTIMIZE = {
     ...HLS_DEFAULT,
     startFragPrefetch: true,
     testBandwidth: true,
-    startLevel: -1, // 自动档位，避免强设第0档与后续音轨不兼容导致声调切换异常
-    abrEwmaDefaultEstimate: 500000,
+    startLevel: -1,
+    abrEwmaDefaultEstimate: 800000,
     maxBufferLength: 30,
     maxMaxBufferLength: 60,
     maxBufferSize: 60 * 1000 * 1000,
-    maxStarvationDelay: 4, // 保持标准 4 秒，防止过早触发伪饥饿与微调(nudge)打乱音频时钟
-    maxLoadingDelay: 4,
+    maxStarvationDelay: 4,
+    maxLoadingDelay: 3,
     nudgeMaxRetry: 3,
   };
 
-  /**
-   * 播放 url 到 video 元素
-   * @param {HTMLVideoElement} videoEl
-   * @param {string} url
-   * @param {HTMLElement|null} tipEl
-   * @param {{ optimize?: boolean }} [opts]
-   * @returns {{destroy: Function}}
-   */
   function play(videoEl, url, tipEl, opts) {
     destroy();
     showTip(tipEl, false);
-    const optimize = !!(opts && opts.optimize);
+    const optimize = opts && opts.optimize !== undefined ? !!opts.optimize : true;
 
-    // 协议自动升级：当前站点为 HTTPS 且视频源为 http:// 时，自动升级为 https 避免 iOS Safari 混合内容策略拦截
+    // 协议自动升级：当前站点为 HTTPS 且视频源为 http:// 时，自动升级为 https 避免混合内容拦截
     if (typeof location !== 'undefined' && location.protocol === 'https:' && /^http:\/\//i.test(url)) {
       url = url.replace(/^http:\/\//i, 'https://');
     }
@@ -62,14 +51,12 @@
     const isM3u8 = /\.m3u8(\?|$)/i.test(url);
 
     try {
-      videoEl.preload = optimize ? 'auto' : (videoEl.preload || 'metadata');
-      // 保持原始音调，杜绝因速率或时钟微调导致的变调变音/娃娃音/失真
+      videoEl.preload = 'auto';
       videoEl.preservesPitch = true;
       if ('webkitPreservesPitch' in videoEl) videoEl.webkitPreservesPitch = true;
       if ('mozPreservesPitch' in videoEl) videoEl.mozPreservesPitch = true;
       videoEl.playbackRate = 1.0;
       videoEl.defaultPlaybackRate = 1.0;
-      // 增强移动端 / iOS 原生播放与画中画兼容属性
       videoEl.playsInline = true;
       videoEl.setAttribute('playsinline', '');
       videoEl.setAttribute('webkit-playsinline', '');
@@ -122,7 +109,6 @@
         return { destroy };
       }
 
-      // iOS Safari 原生 HLS (AVPlayer)
       if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
         videoEl.src = url;
         const hideLoading = () => showTip(tipEl, false);
@@ -137,7 +123,6 @@
         const p = videoEl.play();
         if (p && typeof p.catch === 'function') {
           p.catch((err) => {
-            // iOS 自动播放受阻: 隐藏加载文字，通知前台唤醒中央播放大按钮
             hideLoading();
             try { videoEl.dispatchEvent(new CustomEvent('player-autoplay-blocked', { detail: err })); } catch (e) {}
           });
@@ -153,7 +138,6 @@
       return { destroy };
     }
 
-    // mp4 / 其他原生格式
     videoEl.src = url;
     const hideLoading = () => showTip(tipEl, false);
     videoEl.addEventListener('loadedmetadata', hideLoading, { once: true });

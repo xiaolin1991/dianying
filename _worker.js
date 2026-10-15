@@ -42,8 +42,8 @@ const DEFAULT_SETTINGS = {
   adultGuestVisible: false, // 未登录游客是否显示福利入口: false=未登录严格隐藏(显示电视直播), true=未登录也显示入口(引导登录)
   adultTrialMinutes: 10, // 游客在私密福利专区免费试看时长(分钟), 默认10分钟, 后台可自定义; 0=不可试看(必须登录)
   defaultTheme: 'midnight',
-  uiLayout: 'classic',   // 网站版式: classic=顶部导航(现有) | modern=左侧导航高档宽屏(新UI)
-  uiModernTheme: 'dark', // 现代UI配色: dark=深色黑 | light=浅色白
+  uiLayout: 'modern',    // 网站版式: modern=流光旗舰版UI(默认) | classic=顶部导航(经典界面)
+  uiModernTheme: 'light', // 默认日夜模式: light=护眼日间模式(默认) | dark=沉浸夜间模式
   announcement: '',
   liveSources: DEFAULT_LIVE_SOURCES,
   customSources: [],    // 后台手动添加的影视源 [{key,name,api,detail}]
@@ -1949,8 +1949,8 @@ export default {
           siteName: s.siteName,
           siteSlogan: s.siteSlogan || '海量高清 · 聚合秒播 · 极简私人影院',
           defaultTheme: s.defaultTheme,
-          uiLayout: s.uiLayout === 'modern' ? 'modern' : 'classic',
-          uiModernTheme: s.uiModernTheme === 'light' ? 'light' : 'dark',
+          uiLayout: s.uiLayout === 'classic' ? 'classic' : 'modern',
+          uiModernTheme: s.uiModernTheme === 'dark' ? 'dark' : 'light',
           announcement: s.announcement,
           requireLogin: s.requireLogin !== false,
           trialMinutes: Number(s.trialMinutes === undefined ? 20 : s.trialMinutes),

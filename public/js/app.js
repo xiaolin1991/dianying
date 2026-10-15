@@ -518,24 +518,42 @@
     }));
   }
 
-  /* ---------------- 现代版式(左侧导航高档宽屏) ---------------- */
+  /* ---------------- 网站版式(流光旗舰版UI / 经典版UI) & 护眼日夜模式永久记忆 ---------------- */
+  function getEffectiveColorMode(serverDefault) {
+    const userSaved = store.get('userColorMode', null);
+    if (userSaved === 'light' || userSaved === 'dark') return userSaved;
+    if (serverDefault === 'dark') return 'dark';
+    return 'light'; // 默认开启护眼白天模式
+  }
   function applyUiLayout(layout) {
     if (isTvDevice()) {
       document.body.classList.remove('ui-modern');
       return;
     }
-    const on = layout === 'modern';
+    const norm = layout === 'classic' ? 'classic' : 'modern';
+    const on = norm === 'modern';
     document.body.classList.toggle('ui-modern', on);
-    store.set('uiLayout', layout);
+    store.set('uiLayout', norm);
   }
-  function applyModernTheme(mt) {
-    const m = mt === 'light' ? 'light' : 'dark';
+  function applyModernTheme(mt, isUserAction = false) {
+    const m = mt === 'dark' ? 'dark' : 'light';
     document.body.setAttribute('data-mtheme', m);
     store.set('uiModernTheme', m);
+    if (isUserAction) {
+      store.set('userColorMode', m);
+    }
+    const ico = $('#colorModeIco');
+    const txt = $('#colorModeTxt');
+    if (ico) ico.textContent = m === 'light' ? '☀️' : '🌙';
+    if (txt) txt.textContent = m === 'light' ? '护眼日间' : '沉浸夜间';
+    const themeColor = document.querySelector('meta[name="theme-color"]');
+    if (themeColor && !isTvDevice()) {
+      themeColor.setAttribute('content', m === 'light' ? '#f3f6fb' : '#090d16');
+    }
   }
-  function applyUiMode(layout, mtheme) {
+  function applyUiMode(layout, serverTheme) {
     applyUiLayout(layout);
-    applyModernTheme(mtheme);
+    applyModernTheme(getEffectiveColorMode(serverTheme), false);
   }
 
   /* ------------------------------ 全站页面与滚动记忆(搜索/影视源/分类/首页/会员中心) ------------------------------ */
@@ -860,24 +878,63 @@
   }
 
   /* ============================================================
-     视图：首页(网格布局 · 每类固定 14 个 · 数据不足自动补充)
+     视图：首页(支持流光旗舰版双栏巨幕+TOP10热榜 & 经典版 · 首波极速秒出)
      ============================================================ */
   const HOME_ROW_COUNT = 14;
   let heroTimer = null;
+
+  function top10CardHtml(item, rank) {
+    indexTitle(item);
+    const href = `#/play/${esc(item.sourceKey)}/${encodeURIComponent(item.id)}?ep=0&group=0`;
+    const blank = preferNewTab() ? ' target="_blank" rel="noopener"' : '';
+    const rCls = rank === 1 ? 'r1' : rank === 2 ? 'r2' : rank === 3 ? 'r3' : '';
+    return `
+      <a class="card fs-top10-card" href="${href}"${blank} data-src="${esc(item.sourceKey)}" data-vid="${esc(item.id)}">
+        <div class="card-poster">
+          <img loading="lazy" referrerpolicy="no-referrer" src="${esc(item.pic)}" alt=""
+               onerror="this.style.visibility='hidden'">
+          <span class="card-badge">${esc(item.remarks || item.year || '热播')}</span>
+          <span class="card-play-ico"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span>
+        </div>
+        <span class="fs-rank-badge ${rCls}">${rank}</span>
+        <div class="card-name" title="${esc(item.title)}">${esc(item.title)}</div>
+        <div class="card-sub">${esc(item.year || '')}${item.typeName ? ' · ' + esc(item.typeName) : ''}</div>
+      </a>`;
+  }
+
   async function viewHome(alive) {
     clearInterval(heroTimer);
     if (!alive()) return;
     const v = $('#view');
     v.innerHTML = `
       <div class="container page-wrap">
-        <div class="hero"><div class="hero-bg" id="heroBg"></div>
-          <div class="hero-content" id="heroContent"></div>
-          <div class="hero-dots" id="heroDots"></div>
+        <div class="hero fs-hero-stage">
+          <div class="fs-hero-main">
+            <div class="hero-bg" id="heroBg"></div>
+            <div class="hero-content" id="heroContent"></div>
+            <div class="hero-dots" id="heroDots"></div>
+          </div>
+          <div class="fs-hero-rail" id="heroSideRail"></div>
         </div>
+        <div class="fs-quick-bar" id="fsQuickBar">
+          <a class="fs-qpill primary" href="#/home">🔥 今日热播</a>
+          <a class="fs-qpill" href="#/browse/%E7%94%B5%E5%BD%B1">🎬 院线大片</a>
+          <a class="fs-qpill" href="#/browse/%E5%89%A7%E9%9B%86">📺 王牌剧集</a>
+          <a class="fs-qpill" href="#/browse/%E7%BB%BC%E8%89%BA">🎪 王牌综艺</a>
+          <a class="fs-qpill" href="#/browse/%E5%8A%A8%E6%BC%AB">🌸 热门动漫</a>
+          <a class="fs-qpill" href="#/sources">🧭 影视源</a>
+          <a class="fs-qpill" href="#/live">📡 电视直播</a>
+        </div>
+        <section class="row" id="fsTop10Row">
+          <div class="row-head">
+            <div class="row-title">🔥 TOP 10 热播风云榜</div>
+            <a class="row-more" href="#/browse/%E7%94%B5%E5%BD%B1">查看完整榜单 ›</a>
+          </div>
+          <div class="fs-top10-grid" id="fsTop10Grid">${skeletons(6)}</div>
+        </section>
         <div id="rows"></div>
       </div>`;
 
-    // 分类行骨架(网格, 不再横向滚动)
     const cats = [['电影', '热门电影'], ['剧集', '热播剧集'], ['综艺', '综艺精选'], ['动漫', '动漫天地']];
     const rowsEl = $('#rows');
     for (const [cat, label] of cats) {
@@ -890,14 +947,81 @@
       rowsEl.appendChild(sec);
     }
 
-    // 并行拉取精选源前 3 页, 统一归类去重入池
     const pool = { 电影: [], 剧集: [], 综艺: [], 动漫: [], general: [] };
     const seen = new Set();
-    const sources = featuredSources(6);
-    const jobs = [];
-    for (const s of sources) {
-      for (let pg = 1; pg <= 3; pg++) jobs.push(API.list(s, pg).then((r) => ({ s, r })).catch(() => null));
-    }
+    let heroMounted = false;
+    let top10Mounted = false;
+
+    const renderPoolToDom = (finalPass) => {
+      if (!alive()) return;
+      const grids = $$('#rows .row .grid.row-grid');
+      const allAvailable = pool.电影.concat(pool.剧集, pool.综艺, pool.动漫, pool.general).filter((it) => it && it.pic);
+
+      // 只要有任意 5 部带图影片到达，立即渲染双栏 Hero 与 TOP 10 热播榜(不等凑满14部)
+      if (!heroMounted && (allAvailable.length >= 5 || (finalPass && allAvailable.length > 0))) {
+        const heroPicks = (pool.电影.length >= 3 ? pool.电影.concat(pool.剧集) : allAvailable).filter((it) => it && it.pic).slice(0, 5);
+        if (heroPicks.length) {
+          setupHero(heroPicks, alive);
+          heroMounted = true;
+        }
+      }
+
+      if (!top10Mounted && (allAvailable.length >= 6 || (finalPass && allAvailable.length > 0))) {
+        const topPicks = [];
+        const topSeen = new Set();
+        const mix = pool.剧集.slice(0, 3).concat(pool.电影.slice(0, 4), allAvailable);
+        for (const it of mix) {
+          if (topPicks.length >= 6) break;
+          const tk = it.title + '|' + it.year;
+          if (!it.pic || topSeen.has(tk)) continue;
+          topSeen.add(tk);
+          topPicks.push(it);
+        }
+        if (topPicks.length) {
+          setHtml('#fsTop10Grid', topPicks.map((it, idx) => top10CardHtml(it, idx + 1)).join(''));
+          if (topPicks.length >= 6 || finalPass) top10Mounted = true;
+        }
+      }
+
+      cats.forEach(([cat], i) => {
+        const list = pool[cat];
+        if (list.length >= 6 || (finalPass && list.length)) {
+          const usedKeys = new Set(list.map((it) => it.title + '|' + it.year));
+          const extras = [];
+          if (list.length < HOME_ROW_COUNT && finalPass) {
+            const donors = pool.general.concat(...cats.map(([c]) => pool[c]));
+            for (const it of donors) {
+              if (list.length + extras.length >= HOME_ROW_COUNT) break;
+              const kk = it.title + '|' + it.year;
+              if (usedKeys.has(kk)) continue;
+              usedKeys.add(kk);
+              extras.push(it);
+            }
+          }
+          const full = list.concat(extras).slice(0, HOME_ROW_COUNT);
+          setHtml(grids[i], full.map(cardHtml).join(''));
+        } else if (finalPass && !list.length && allAvailable.length) {
+          setHtml(grids[i], allAvailable.slice(0, HOME_ROW_COUNT).map(cardHtml).join(''));
+        } else if (finalPass && !list.length) {
+          setHtml(grids[i], '<div class="empty" style="grid-column:1/-1;padding:26px;font-size:13px">该分类暂时没有数据</div>');
+        }
+      });
+    };
+
+    // 0ms 快照秒开: 若本地有最近缓存的首页池，立即渲染上屏，后台静默更新
+    try {
+      const cachedPool = store.get('home_pool_snapshot', null);
+      if (cachedPool && cachedPool.ts && Date.now() - cachedPool.ts < 30 * 60 * 1000 && cachedPool.pool) {
+        ['电影', '剧集', '综艺', '动漫', 'general'].forEach((k) => {
+          if (Array.isArray(cachedPool.pool[k])) {
+            pool[k] = cachedPool.pool[k].slice();
+            pool[k].forEach((it) => seen.add(it.title + '|' + (it.year || '')));
+          }
+        });
+        renderPoolToDom(true);
+      }
+    } catch (e) {}
+
     const consume = (job) => {
       if (!job || !job.r || !Array.isArray(job.r.list)) return;
       for (const vod of job.r.list) {
@@ -914,59 +1038,52 @@
         for (const [cat, re] of Object.entries(CAT_REGEX)) {
           if (re.test(item.typeName)) { pool[cat].push(item); matched = true; break; }
         }
-        if (!matched) pool.general.push(item); // 未匹配分类的影片, 用于补足 14 个
+        if (!matched) pool.general.push(item);
       }
     };
 
-    const filledCats = new Set();
-    const fillRows = (finalPass) => {
-      if (!alive()) return;
-      const grids = $$('#rows .row .grid.row-grid');
-      cats.forEach(([cat], i) => {
-        if (filledCats.has(cat)) return;
-        const list = pool[cat];
-        if (list.length >= HOME_ROW_COUNT || (finalPass && list.length)) {
-          // 数量不足时用通用池/其他分类补充
-          const usedKeys = new Set(list.map((it) => it.title + '|' + it.year));
-          const extras = [];
-          const donors = pool.general.concat(...cats.map(([c]) => pool[c])); // concat 展开替代 .flat()(老WebView兼容)
-          for (const it of donors) {
-            if (list.length + extras.length >= HOME_ROW_COUNT) break;
-            const kk = it.title + '|' + it.year;
-            if (usedKeys.has(kk)) continue;
-            usedKeys.add(kk);
-            extras.push(it);
-          }
-          const full = list.concat(extras).slice(0, HOME_ROW_COUNT);
-          setHtml(grids[i], full.map(cardHtml).join(''));
-          filledCats.add(cat);
-          if (cat === '电影') setupHero(full.filter((it) => it.pic).slice(0, 5), alive);
-        } else if (finalPass && !list.length) {
-          setHtml(grids[i], '<div class="empty" style="grid-column:1/-1;padding:26px;font-size:13px">该分类暂时没有数据</div>');
-          filledCats.add(cat);
-        }
-      });
-    };
-
-    let settled = 0;
-    for (const p of jobs) {
+    const sources = featuredSources(6);
+    // 第一波优先并发各源第 1 页(仅6个请求，不堵塞浏览器同源连接池，首个源返回即刻上屏)
+    const wave1 = sources.map((s) => API.list(s, 1).then((r) => ({ s, r })).catch(() => null));
+    for (const p of wave1) {
       p.then((j) => {
-        consume(j); settled++;
-        if (settled % 3 === 0) {
-          fillRows(false);
-          activeListPage = {
-            key: 'home',
-            getState: () => ({}),
-            rebind: (alive2) => {
-              if (!alive2()) return;
-              if (heroItems && heroItems.length) setupHero(heroItems, alive2);
-            },
-          };
-        }
+        if (!j) return;
+        consume(j);
+        renderPoolToDom(false);
       });
     }
-    await Promise.allSettled(jobs);
-    fillRows(true);
+    await Promise.allSettled(wave1);
+    renderPoolToDom(false);
+
+    // 第二波后台补充第 2、3 页丰富度
+    const wave2 = [];
+    for (const s of sources) {
+      for (let pg = 2; pg <= 3; pg++) {
+        wave2.push(API.list(s, pg).then((r) => ({ s, r })).catch(() => null));
+      }
+    }
+    let w2Count = 0;
+    for (const p of wave2) {
+      p.then((j) => {
+        if (!j) return;
+        consume(j);
+        if (++w2Count % 3 === 0) renderPoolToDom(false);
+      });
+    }
+    await Promise.allSettled(wave2);
+    renderPoolToDom(true);
+    try {
+      store.set('home_pool_snapshot', {
+        ts: Date.now(),
+        pool: {
+          电影: pool.电影.slice(0, 16),
+          剧集: pool.剧集.slice(0, 16),
+          综艺: pool.综艺.slice(0, 16),
+          动漫: pool.动漫.slice(0, 16),
+          general: pool.general.slice(0, 16),
+        },
+      });
+    } catch (e) {}
     loadHero(alive);
     activeListPage = {
       key: 'home',
@@ -978,15 +1095,40 @@
     };
   }
 
-  /* ---- Hero ---- */
+  /* ---- Hero (支持旗舰版右侧5片联动导视轨 + 经典版圆点) ---- */
   let heroItems = [], heroIdx = 0;
   function setupHero(items, alive) {
     if (!items.length || !alive()) return;
     heroItems = items; heroIdx = 0;
     const dots = $('#heroDots');
-    if (!dots) return;
-    dots.innerHTML = items.map((_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('');
-    $$('#heroDots i').forEach((d, i) => d.addEventListener('click', () => showHero(i)));
+    if (dots) {
+      dots.innerHTML = items.map((_, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('');
+      $$('#heroDots i').forEach((d, i) => d.addEventListener('click', () => showHero(i)));
+    }
+    const rail = $('#heroSideRail');
+    if (rail) {
+      rail.innerHTML = items.slice(0, 5).map((it, i) => `
+        <div class="fs-rail-item ${i === 0 ? 'active' : ''}" data-hidx="${i}">
+          <div class="fs-rail-thumb">
+            <img loading="lazy" referrerpolicy="no-referrer" src="${esc(it.pic)}" alt="" onerror="this.style.visibility='hidden'">
+          </div>
+          <div class="fs-rail-info">
+            <div class="fs-rail-title">${esc(it.title)}</div>
+            <div class="fs-rail-sub">${esc(it.remarks || it.year || '高清热播')}${it.typeName ? ' · ' + esc(it.typeName) : ''}</div>
+          </div>
+        </div>`).join('');
+      $$('#heroSideRail .fs-rail-item').forEach((el) => {
+        const idx = Number(el.dataset.hidx);
+        el.addEventListener('mouseenter', () => {
+          showHero(idx);
+          clearInterval(heroTimer);
+        });
+        el.addEventListener('click', () => {
+          const target = heroItems[idx];
+          if (target) location.hash = `#/play/${target.sourceKey}/${encodeURIComponent(target.id)}?ep=0&group=0`;
+        });
+      });
+    }
     showHero(0);
     clearInterval(heroTimer);
     heroTimer = setInterval(() => {
@@ -1003,26 +1145,49 @@
     bg.classList.remove('show');
     const img = new Image();
     img.onload = () => {
-      if (!bg.isConnected) return; // 页面已切换
+      if (!bg.isConnected) return;
       bg.style.backgroundImage = `url("${it.pic}")`; bg.classList.add('show');
     };
     img.onerror = () => {};
     img.referrerPolicy = 'no-referrer';
     img.src = it.pic;
+    const favList = store.get('favs', []);
+    const isFav = favList.some((f) => f.key === it.sourceKey && String(f.id) === String(it.id));
     ct.innerHTML = `
       <div class="hero-meta">
-        <span class="tag">${esc(it.typeName || '影视')}</span>
+        <span class="tag">4K HDR</span>
+        <span class="tag plain">${esc(it.typeName || '精选影视')}</span>
         ${it.year ? `<span class="tag plain">${esc(it.year)}</span>` : ''}
         ${it.remarks ? `<span class="tag plain">${esc(it.remarks)}</span>` : ''}
       </div>
-      <div class="hero-title">${esc(it.title)}</div>
-      <p class="hero-desc">${esc(stripTags(it.desc || ''))}</p>
-      <button class="btn primary" id="heroPlay">▶ 立即播放</button>`;
+      <div class="hero-title">《${esc(it.title)}》</div>
+      <p class="hero-desc">${esc(stripTags(it.desc || '高清正片聚合秒播，支持多线路无缝切换与跨端播放进度记忆。'))}</p>
+      <div class="hero-actions-row">
+        <button class="btn primary" id="heroPlay">▶ 立即播放</button>
+        <button class="btn ghost" id="heroFavBtn">${isFav ? '★ 已追剧' : '+ 追剧收藏'}</button>
+      </div>`;
     const playBtn = $('#heroPlay');
     playBtn && playBtn.addEventListener('click', () => {
-      location.hash = `#/detail/${it.sourceKey}/${encodeURIComponent(it.id)}`;
+      location.hash = `#/play/${it.sourceKey}/${encodeURIComponent(it.id)}?ep=0&group=0`;
+    });
+    const favBtn = $('#heroFavBtn');
+    favBtn && favBtn.addEventListener('click', () => {
+      const list = store.get('favs', []);
+      const fIdx = list.findIndex((f) => f.key === it.sourceKey && String(f.id) === String(it.id));
+      if (fIdx >= 0) {
+        list.splice(fIdx, 1);
+        favBtn.textContent = '+ 追剧收藏';
+        toast('已取消追剧收藏');
+      } else {
+        list.unshift({ key: it.sourceKey, id: String(it.id), title: it.title, pic: it.pic, remarks: it.remarks || '' });
+        favBtn.textContent = '★ 已追剧';
+        toast('已加入追剧收藏', 'ok');
+      }
+      store.set('favs', list.slice(0, 200));
+      pushFavsToServer();
     });
     $$('#heroDots i').forEach((d, di) => d.classList.toggle('on', di === i));
+    $$('#heroSideRail .fs-rail-item').forEach((el, ri) => el.classList.toggle('active', ri === i));
   }
   async function loadHero(alive) {
     // 轮询等待 Hero 就绪后, 拉取详情补充简介(尽力而为)
@@ -7346,16 +7511,26 @@
             <select class="field-input" id="themeSelect">
               ${THEME_META.map((t) => `<option value="${t.id}" ${s.defaultTheme === t.id ? 'selected' : ''}>${t.name}</option>`).join('')}
             </select>
-            <label class="field-label" style="margin-top:12px">网站版式（UI）</label>
+            <label class="field-label" style="margin-top:12px">网站版式（UI 皮肤切换 · 仅管理员可设）</label>
             <select class="field-input" id="uiLayoutSelect">
-              <option value="classic" ${s.uiLayout !== 'modern' ? 'selected' : ''}>经典 · 顶部导航（现有界面）</option>
-              <option value="modern" ${s.uiLayout === 'modern' ? 'selected' : ''}>现代 · 左侧导航高档宽屏（新UI）</option>
+              <option value="modern" ${s.uiLayout !== 'classic' ? 'selected' : ''}>✨ 流光旗舰版 UI（全新双栏巨幕 + TOP10热榜 · 推荐）</option>
+              <option value="classic" ${s.uiLayout === 'classic' ? 'selected' : ''}>🎨 经典版 UI（原有顶部导航界面）</option>
             </select>
-            <label class="field-label" style="margin-top:12px">现代版式配色（黑白皮肤）</label>
+            <label class="field-label" style="margin-top:12px">全站默认日夜模式（新访客首次进入时默认，用户前台切换后自动永久记忆）</label>
             <select class="field-input" id="uiModernThemeSelect">
-              <option value="dark" ${s.uiModernTheme !== 'light' ? 'selected' : ''}>深色黑（影院质感）</option>
-              <option value="light" ${s.uiModernTheme === 'light' ? 'selected' : ''}>浅色白（清爽亮色）</option>
+              <option value="light" ${s.uiModernTheme !== 'dark' ? 'selected' : ''}>☀️ 护眼白天模式（暖瓷白底 · 默认推荐）</option>
+              <option value="dark" ${s.uiModernTheme === 'dark' ? 'selected' : ''}>🌙 沉浸夜间模式（深色影院）</option>
             </select>
+            <div style="margin-top:12px;padding:12px 14px;background:var(--bg2);border:1px solid var(--card-br);border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div>
+                <div style="font-size:13.5px;font-weight:700">📺 TV 电视大屏终端版调试预览</div>
+                <div style="font-size:12px;color:var(--dim);margin-top:2px">前台已隐藏 TV 入口，管理员可在此直接预览腾讯TV极光大屏 UI（进入后点底部「退出TV模式」即可返回）</div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <a class="btn ghost small" href="?tv=1#/home" target="_blank" rel="noopener">📺 新窗口预览 TV 版</a>
+                <a class="btn primary small" href="?tv=1#/home">📺 当前窗口进入 TV 版</a>
+              </div>
+            </div>
             <label class="field-label" style="margin-top:10px">全站公告（留空则不显示）</label>
             <textarea class="field-area" id="annInput" maxlength="300">${esc(s.announcement)}</textarea>
             <label class="field-label" style="margin-top:14px">🏠 首页默认加载的影视源（每行一个 key，按顺序，最多12个；留空 = 默认精选）<br>
@@ -7498,7 +7673,8 @@
               lastSettings.uiLayout = res.settings.uiLayout;
               lastSettings.uiModernTheme = res.settings.uiModernTheme;
             }
-            applyUiMode(res.settings.uiLayout || 'classic', res.settings.uiModernTheme || 'dark');
+            LIST_PAGE_CACHE.delete('home');
+            applyUiMode(res.settings.uiLayout || 'modern', res.settings.uiModernTheme || 'light');
             $('#brandName').textContent = res.settings.siteName;
             document.title = res.settings.siteSlogan ? `${res.settings.siteName} - ${res.settings.siteSlogan}` : res.settings.siteName;
             applyAnnouncement(res.settings.announcement);
@@ -8540,17 +8716,39 @@
       document.body.classList.add('tv');
       document.documentElement.classList.add('tv-root');
     }
-    const tvModeBtn = $('#tvModeBtn');
-    if (tvModeBtn) {
-      tvModeBtn.addEventListener('click', (e) => {
+    // 顶栏「☀️ 护眼日间 / 🌙 沉浸夜间」一键切换与本地永久记忆
+    const colorModeBtn = $('#colorModeBtn');
+    if (colorModeBtn) {
+      colorModeBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        try { localStorage.setItem('ntv:tvMode', '1'); sessionStorage.setItem('ntv_tv_override', '1'); } catch (err) {}
-        const u = new URL(location.href);
-        u.searchParams.set('tv', '1');
-        location.href = u.pathname + u.search + (location.hash || '#/home');
+        const cur = document.body.getAttribute('data-mtheme') === 'dark' ? 'dark' : 'light';
+        const next = cur === 'light' ? 'dark' : 'light';
+        applyModernTheme(next, true);
+        toast(next === 'light' ? '☀️ 已切换为护眼日间模式（已为您自动记忆）' : '🌙 已切换为沉浸夜间模式（已为您自动记忆）', 'ok');
       });
     }
+
+    // 鼠标悬停预取 (Hover Prefetch): 电脑端鼠标悬停海报 100ms 自动后台预取详情与播放串，点击零等待秒开
+    let hoverPrefetchTimer = null;
+    document.addEventListener('pointerover', (e) => {
+      if (isMobileDevice()) return;
+      const card = e.target.closest('a.card');
+      if (!card) return;
+      clearTimeout(hoverPrefetchTimer);
+      hoverPrefetchTimer = setTimeout(() => {
+        const href = card.getAttribute('href') || '';
+        const m = href.match(/^#\/(?:play|detail)\/([^/?#]+)\/([^/?#]+)/);
+        if (m && API.prefetchDetail) {
+          try {
+            const sKey = decodeURIComponent(m[1]);
+            const vId = decodeURIComponent(m[2]);
+            const src = findSourceByKey(sKey);
+            if (src && !src.adult) API.prefetchDetail(src, vId);
+          } catch (err) {}
+        }
+      }, 100);
+    }, { passive: true });
     // 静态事件
     $('#themeBtn').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -8761,66 +8959,11 @@
     buildThemePop();
     buildNav();
     applyTheme(store.get('theme', null) || 'midnight');
-    // 版式(现代/经典)按上次选择即时应用, 避免首屏闪跳; 稍后以服务端设置覆盖
-    applyUiLayout(store.get('uiLayout', 'classic'));
-    applyModernTheme(store.get('uiModernTheme', 'dark'));
+    // 首屏即时应用: 优先读取用户本地记忆的日间/夜间模式(默认护眼白天模式 light)与版式(默认流光旗舰版 modern)
+    applyUiLayout(store.get('uiLayout', 'modern'));
+    applyModernTheme(getEffectiveColorMode(store.get('uiModernTheme', 'light')), false);
 
-    // file:// 直接打开 index.html 时, 前端无法访问 /api/* 后端
-    if (location.protocol === 'file:') {
-      $('#view').innerHTML = `<div class="container empty" style="padding-top:110px">
-        <div class="big">📂</div>
-        <p style="font-size:17px;font-weight:700">不能直接双击打开 index.html</p>
-        <p style="margin-top:12px;color:var(--dim);font-size:13.5px;line-height:2">
-          本站需要后端支持。请在项目文件夹打开终端运行:<br>
-          <code style="background:var(--card);padding:3px 10px;border-radius:7px">npm run dev</code><br>
-          然后浏览器访问 <b>http://127.0.0.1:8787</b></p></div>`;
-      return;
-    }
-
-    try {
-      const [settings, config] = await Promise.all([API.getSettings(), API.getConfig()]);
-      State.settings = settings;
-      State.config = config;
-      if (settings && settings.siteName) store.set('cached_settings', settings);
-    } catch (err) {
-      $('#view').innerHTML = `<div class="container empty" style="padding-top:120px">
-        <div class="big">🛠️</div><p style="font-weight:700">后端服务连接失败：${esc(err.message)}</p>
-        <p style="margin-top:10px;color:var(--dim);font-size:13px;line-height:2">
-          · 本地预览：项目文件夹运行 <code style="background:var(--card);padding:2px 8px;border-radius:6px">npm run dev</code>，再访问 http://127.0.0.1:8787<br>
-          · 线上部署：确认 _worker.js 与静态资源已一起部署（Workers 或 Pages 高级模式），详见 部署指南.md</p>
-        <p style="margin-top:14px"><button class="btn primary" onclick="location.reload()">重试</button></p></div>`;
-      return;
-    }
-
-    // 登录态(用户优先; 管理员会话也可浏览前台)
-    try {
-      const m = await API.userMe();
-      State.me = m.me ? m.me.username : null;
-      if (m.me) {
-        State.meCreated = Number(m.me.createdAt || 0);
-        State.adultAllowed = Boolean(m.me.adultAllowed);
-        State.adultExpireAt = Number(m.me.adultExpireAt || 0);
-        State.unreadMsgCount = Number(m.me.unreadMsgCount || 0);
-        pullFavsMerge();
-      }
-    }
-    catch (e) { State.me = null; }
-    if (!State.me) {
-      try { await API.adminSession(); State.me = '管理员'; } catch (e2) { /* 未登录管理员 */ }
-    }
-    updateUserBox();
-    renderBottomNav();
-
-    // 应用服务端默认主题（用户本地无偏好时）
-    if (!store.get('theme', null) && State.settings.defaultTheme) applyTheme(State.settings.defaultTheme);
-    // 应用服务端版式与黑白皮肤(后台可切换; 管理员全局设置优先于本地记忆)
-    applyUiMode(State.settings.uiLayout || 'classic', State.settings.uiModernTheme || 'dark');
-    const sTitle = State.settings.siteName || '晓林影视';
-    const sSlogan = State.settings.siteSlogan || '';
-    $('#brandName').textContent = sTitle;
-    document.title = sSlogan ? `${sTitle} - ${sSlogan}` : sTitle;
-    applyAnnouncement(State.settings.announcement);
-    // 向 TV 大屏终端层(tv.js)暴露全量数据与能力桥
+    // 向 TV 大屏终端层(tv.js)提前暴露能力桥
     window.XLTV = {
       ti: titleInitials,
       idx: TitleIdx,
@@ -8852,11 +8995,109 @@
       openUnlockModal,
       route,
     };
-    try { window.dispatchEvent(new CustomEvent('xl:ready')); } catch (e) {}
-    route();
+
+    // file:// 直接打开 index.html 时, 前端无法访问 /api/* 后端
+    if (location.protocol === 'file:') {
+      $('#view').innerHTML = `<div class="container empty" style="padding-top:110px">
+        <div class="big">📂</div>
+        <p style="font-size:17px;font-weight:700">不能直接双击打开 index.html</p>
+        <p style="margin-top:12px;color:var(--dim);font-size:13.5px;line-height:2">
+          本站需要后端支持。请在项目文件夹打开终端运行:<br>
+          <code style="background:var(--card);padding:3px 10px;border-radius:7px">npm run dev</code><br>
+          然后浏览器访问 <b>http://127.0.0.1:8787</b></p></div>`;
+      return;
+    }
+
+    // 0ms 瞬时冷热双轨启动 (SWR): 若本地已有上次缓存的 settings 与 config，0毫秒立即进 route() 渲染首屏！
+    let fastBooted = false;
+    const cachedSettings = store.get('cached_settings', null);
+    const cachedConfig = store.get('cached_config', null);
+    const cachedMe = store.get('cached_me', null);
+    if (cachedSettings && cachedConfig && Array.isArray(cachedConfig.sources) && cachedConfig.sources.length) {
+      State.settings = cachedSettings;
+      State.config = cachedConfig;
+      State.me = cachedMe;
+      applyUiMode(State.settings.uiLayout || 'modern', State.settings.uiModernTheme || 'light');
+      const sTitle0 = State.settings.siteName || '晓林影视';
+      const sSlogan0 = State.settings.siteSlogan || '';
+      $('#brandName').textContent = sTitle0;
+      document.title = sSlogan0 ? `${sTitle0} - ${sSlogan0}` : sTitle0;
+      applyAnnouncement(State.settings.announcement);
+      updateUserBox();
+      renderBottomNav();
+      fastBooted = true;
+      try { window.dispatchEvent(new CustomEvent('xl:ready')); } catch (e) {}
+      route();
+    }
+
+    // 并行拉取最新设置、源配置与登录态(不再串行阻塞)
+    const [setRes, cfgRes, meRes] = await Promise.allSettled([
+      API.getSettings(),
+      API.getConfig(),
+      API.userMe(),
+    ]);
+
+    if (setRes.status === 'fulfilled' && setRes.value && cfgRes.status === 'fulfilled' && cfgRes.value) {
+      const prevLayout = State.settings ? State.settings.uiLayout : null;
+      State.settings = setRes.value;
+      State.config = cfgRes.value;
+      store.set('cached_settings', State.settings);
+      store.set('cached_config', State.config);
+      if (fastBooted && prevLayout && prevLayout !== State.settings.uiLayout) {
+        LIST_PAGE_CACHE.delete('home');
+      }
+    } else if (!fastBooted) {
+      const errMsg = (setRes.reason && setRes.reason.message) || (cfgRes.reason && cfgRes.reason.message) || '网络异常';
+      $('#view').innerHTML = `<div class="container empty" style="padding-top:120px">
+        <div class="big">🛠️</div><p style="font-weight:700">后端服务连接失败：${esc(errMsg)}</p>
+        <p style="margin-top:10px;color:var(--dim);font-size:13px;line-height:2">
+          · 本地预览：项目文件夹运行 <code style="background:var(--card);padding:2px 8px;border-radius:6px">npm run dev</code>，再访问 http://127.0.0.1:8787<br>
+          · 线上部署：确认 _worker.js 与静态资源已一起部署（Workers 或 Pages 高级模式），详见 部署指南.md</p>
+        <p style="margin-top:14px"><button class="btn primary" onclick="location.reload()">重试</button></p></div>`;
+      return;
+    }
+
+    if (meRes.status === 'fulfilled' && meRes.value && meRes.value.me) {
+      const m = meRes.value;
+      State.me = m.me.username;
+      State.meCreated = Number(m.me.createdAt || 0);
+      State.adultAllowed = Boolean(m.me.adultAllowed);
+      State.adultExpireAt = Number(m.me.adultExpireAt || 0);
+      State.unreadMsgCount = Number(m.me.unreadMsgCount || 0);
+      store.set('cached_me', State.me);
+      pullFavsMerge();
+    } else {
+      State.me = null;
+      store.set('cached_me', null);
+      // 仅当存在管理员会话令牌或访问后台路由时才探测 adminSession，省去普通访客每次401往返
+      const hasAdmTok = Boolean(sessionStorage.getItem('ntv:adminToken')) || /ntv_auth=/.test(document.cookie || '');
+      const isAdmHash = /^#\/(xiaolin1991|admin)/i.test(location.hash || '');
+      if (hasAdmTok || isAdmHash) {
+        try {
+          await API.adminSession();
+          State.me = '管理员';
+          store.set('cached_me', '管理员');
+        } catch (e2) {}
+      }
+    }
+
+    updateUserBox();
+    renderBottomNav();
+
+    if (!store.get('theme', null) && State.settings.defaultTheme) applyTheme(State.settings.defaultTheme);
+    applyUiMode(State.settings.uiLayout || 'modern', State.settings.uiModernTheme || 'light');
+    const sTitle = State.settings.siteName || '晓林影视';
+    const sSlogan = State.settings.siteSlogan || '';
+    $('#brandName').textContent = sTitle;
+    document.title = sSlogan ? `${sTitle} - ${sSlogan}` : sTitle;
+    applyAnnouncement(State.settings.announcement);
+
+    if (!fastBooted) {
+      try { window.dispatchEvent(new CustomEvent('xl:ready')); } catch (e) {}
+      route();
+    }
     maybeAppPromo();  // 首屏就绪后判断是否弹下载引导
     maybeAppUpdate(); // App 内版本更新检查
-    // 游客试看: 拉取剩余时长; 试看到期由接口 401 事件触发注册框
     initGuest();
     window.addEventListener('xl:need-login', () => showTrialModal(true));
   }
