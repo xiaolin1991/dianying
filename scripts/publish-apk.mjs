@@ -3,12 +3,7 @@
  * 可选：调用站点后台 API 同步 downloadUrl / appVersionCode。
  *
  * 用法:
- *   node scripts/publish-apk.mjs --apk path/to.apk --code 62 --name 1.0.62
- *   node scripts/publish-apk.mjs --apk out/app.apk --code 62 --name 1.0.62 --changelog "修复若干问题"
- *
- * 环境变量(可选，用于同步后台版本号到 KV；即使不配也会写 manifest.json 供站点自动识别):
- *   SITE_URL          站点根地址，如 https://你的域名
- *   ADMIN_PASSWORD    后台管理密码
+ *   node scripts/publish-apk.mjs --apk path/to/phone.apk [--tv-apk path/to/tv.apk] --code 62 --name 1.0.62
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,11 +14,12 @@ const ROOT = path.resolve(__dirname, '..');
 const APP_DIR = path.join(ROOT, 'public', 'APP');
 
 function parseArgs(argv) {
-  const out = { apk: '', code: 0, name: '', changelog: '' };
+  const out = { apk: '', tvApk: '', code: 0, name: '', changelog: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => argv[++i] || '';
     if (a === '--apk') out.apk = next();
+    else if (a === '--tv-apk') out.tvApk = next();
     else if (a === '--code') out.code = Math.round(Number(next())) || 0;
     else if (a === '--name') out.name = String(next()).trim();
     else if (a === '--changelog') out.changelog = String(next());
@@ -49,7 +45,6 @@ function cleanOldVersioned(keepNames) {
   const keep = new Set(keepNames);
   for (const f of listApkFiles(APP_DIR)) {
     if (keep.has(f)) continue;
-    // 只清理本项目命名的旧版本包，避免误删用户其它文件
     if (/^xiaolintv-(phone|tv)-v.+\.apk$/i.test(f) || /^xiaolintv-(phone|tv)-latest\.apk$/i.test(f)) {
       fs.unlinkSync(path.join(APP_DIR, f));
       console.log('[publish-apk] removed', f);
@@ -73,7 +68,6 @@ async function syncAdminSettings({ siteUrl, password, code, name, changelog }) {
     throw new Error('admin login failed: ' + (loginData.error || loginRes.status));
   }
   const token = loginData.token;
-  // 下载地址由后台「固定最新包」模式决定；版本写入 KV（Cloudflare 未重建静态资源也能识别）
   const patch = {
     appVersionAuto: true,
     appVersionCode: code,
@@ -110,7 +104,7 @@ async function syncAdminSettings({ siteUrl, password, code, name, changelog }) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
-    console.log('Usage: node scripts/publish-apk.mjs --apk <file> --code <n> --name <verName> [--changelog "..."]');
+    console.log('Usage: node scripts/publish-apk.mjs --apk <phone.apk> [--tv-apk <tv.apk>] --code <n> --name <verName> [--changelog "..."]');
     process.exit(0);
   }
   if (!args.apk || !fs.existsSync(args.apk)) {
@@ -122,7 +116,6 @@ async function main() {
     process.exit(1);
   }
   const verName = args.name || String(args.code);
-  // 文件名安全：去掉路径分隔与空白
   const safeName = verName.replace(/[\\/:*?"<>|\s]+/g, '.');
 
   fs.mkdirSync(APP_DIR, { recursive: true });
@@ -133,10 +126,16 @@ async function main() {
   const tvVer = `xiaolintv-tv-v${safeName}.apk`;
   const keep = [phoneLatest, tvLatest, phoneVer, tvVer];
 
-  const src = path.resolve(args.apk);
-  for (const name of keep) {
-    fs.copyFileSync(src, path.join(APP_DIR, name));
-    console.log('[publish-apk] wrote', name);
+  const phoneSrc = path.resolve(args.apk);
+  const tvSrc = (args.tvApk && fs.existsSync(args.tvApk)) ? path.resolve(args.tvApk) : phoneSrc;
+
+  for (const name of [phoneLatest, phoneVer]) {
+    fs.copyFileSync(phoneSrc, path.join(APP_DIR, name));
+    console.log('[publish-apk] wrote phone:', name);
+  }
+  for (const name of [tvLatest, tvVer]) {
+    fs.copyFileSync(tvSrc, path.join(APP_DIR, name));
+    console.log('[publish-apk] wrote tv:', name);
   }
 
   cleanOldVersioned(keep);

@@ -2,8 +2,11 @@ package com.xiaolintv.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.UiModeManager;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
@@ -17,9 +20,10 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 /**
- * 晓林影视 安卓壳客户端
+ * 晓林影视 安卓壳客户端 (兼容手机端与智能电视/盒子 TV 端)
  * - 全屏 WebView 装载线上站点(地址来自 BuildConfig.START_URL)
- * - 返回键 = 网页后退(hash 路由), 退出全屏优先
+ * - TV 专版 APK (BuildConfig.IS_TV_APK) 或电视硬件自动锁定横屏并注入 XIAOLIN-TV-OS 标识
+ * - 返回键 = 优先收起 TV 浮层/软键盘，再退全屏或网页后退(hash 路由)
  * - target=_blank 链接留在 App 内打开
  * - 支持视频元素级全屏(播放页 ⛶ 按钮)
  */
@@ -28,6 +32,26 @@ public class MainActivity extends Activity {
     private WebView web;
     private View customView;                       // 视频全屏时的自定义视图
     private WebChromeClient.CustomViewCallback customCb;
+    private boolean isTvDevice = false;
+
+    private boolean detectTvEnvironment() {
+        if (BuildConfig.IS_TV_APK) return true;
+        try {
+            UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
+            if (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION) {
+                return true;
+            }
+            PackageManager pm = getPackageManager();
+            if (pm != null) {
+                if (pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                        || pm.hasSystemFeature("android.hardware.type.television")
+                        || !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -35,7 +59,16 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
 
+        isTvDevice = detectTvEnvironment();
+        if (isTvDevice) {
+            try {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+            } catch (Exception ignored) {}
+        }
+
         web = new WebView(this);
+        web.setFocusable(true);
+        web.setFocusableInTouchMode(true);
         setContentView(web);
 
         WebSettings s = web.getSettings();
@@ -50,20 +83,30 @@ public class MainActivity extends Activity {
         // 卡片是 target=_blank: 关闭多窗口后, 新窗口导航会落到当前 WebView, 不弹出外部浏览器
         s.setSupportMultipleWindows(false);
         // 专属 UA: 网站识别官方 App, 并读取版本做更新检查
-        // 格式: XIAOLIN-TV-APP/<versionName>/<versionCode>
-        s.setUserAgentString(
-                s.getUserAgentString()
-                        + " XIAOLIN-TV-APP/"
-                        + BuildConfig.VERSION_NAME
-                        + "/"
-                        + BuildConfig.VERSION_CODE);
+        // 格式: XIAOLIN-TV-APP/<versionName>/<versionCode> (TV版额外附加 XIAOLIN-TV-OS/1)
+        String uaSuffix = " XIAOLIN-TV-APP/"
+                + BuildConfig.VERSION_NAME
+                + "/"
+                + BuildConfig.VERSION_CODE
+                + (isTvDevice ? " XIAOLIN-TV-OS/1" : "");
+        s.setUserAgentString(s.getUserAgentString() + uaSuffix);
 
-        // 注册 JS 桥梁: 供网页播放器在全屏时通知 App 强制横屏/恢复竖屏(突破华为/安卓系统锁屏限制)
+        // 注册 JS 桥梁: 供网页播放器在全屏时通知 App 强制横屏/恢复竖屏 + 查询 TV 硬件态
         web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public boolean isTv() {
+                return isTvDevice;
+            }
+
             @JavascriptInterface
             public void setOrientation(String mode) {
                 runOnUiThread(() -> {
                     try {
+                        // TV 模式下始终保持横屏，忽略网页端的竖屏恢复请求
+                        if (isTvDevice) {
+                            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                            return;
+                        }
                         if ("landscape".equalsIgnoreCase(mode)) {
                             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
                             try {
@@ -150,13 +193,19 @@ public class MainActivity extends Activity {
             }
         });
 
-        web.loadUrl(BuildConfig.START_URL);
+        String startUrl = BuildConfig.START_URL;
+        if (isTvDevice && startUrl != null && !startUrl.contains("tv=")) {
+            startUrl = startUrl + (startUrl.contains("?") ? "&tv=1" : "?tv=1");
+        }
+        web.loadUrl(startUrl);
     }
 
     private void hideCustomView() {
         if (customView == null) return;
         try {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+            setRequestedOrientation(isTvDevice
+                    ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
         } catch (Exception ignored) {}
         ViewGroup decor = (ViewGroup) getWindow().getDecorView();
         decor.removeView(customView);
@@ -174,19 +223,24 @@ public class MainActivity extends Activity {
             hideCustomView();
             return;
         }
-        // 网页假全屏: 优先通知页面退出全屏(不离开播放页)
+        // 优先通知网页层处理返回键(TV 选集浮层收起 / 软键盘关闭 / 网页假全屏退出)
         if (web != null) {
             web.evaluateJavascript(
-                    "(function(){try{if(window.__ntvExitFs&&window.__ntvExitFs())return 1;return 0;}catch(e){return 0;}})()",
+                    "(function(){try{if(window.__xlTvBack&&window.__xlTvBack())return 2;if(window.__ntvExitFs&&window.__ntvExitFs())return 1;return 0;}catch(e){return 0;}})()",
                     value -> {
+                        if ("2".equals(value) || "\"2\"".equals(value)) {
+                            return;
+                        }
                         if ("1".equals(value) || "\"1\"".equals(value)) {
                             runOnUiThread(() -> {
                                 try {
-                                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-                                    getWindow().getDecorView().setSystemUiVisibility(
-                                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                                        | View.SYSTEM_UI_FLAG_VISIBLE
-                                    );
+                                    if (!isTvDevice) {
+                                        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                                        getWindow().getDecorView().setSystemUiVisibility(
+                                            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                            | View.SYSTEM_UI_FLAG_VISIBLE
+                                        );
+                                    }
                                 } catch (Exception ignored) {}
                             });
                             return;

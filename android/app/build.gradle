@@ -17,6 +17,9 @@ android {
         // 启动地址: 构建时可用 -PstartUrl=https://你的域名/ 覆盖
         def su = project.findProperty('startUrl') ?: 'https://your-worker.your-subdomain.workers.dev/'
         buildConfigField 'String', 'START_URL', "\"${su}\""
+        // TV 专用包标记: 构建 TV 版 APK 时传入 -PisTvApk=true, 强制启用腾讯TV极光大屏UI与横屏锁定
+        def tvApk = (project.findProperty('isTvApk') ?: 'false').toString().toBoolean()
+        buildConfigField 'boolean', 'IS_TV_APK', "${tvApk}"
     }
 
     buildFeatures {

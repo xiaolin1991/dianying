@@ -42,7 +42,25 @@
   /* ---------- 电视/盒子识别(WebView 无触摸屏) + 标题首字母索引 ---------- */
   function isTvDevice() {
     try {
+      const searchStr = (location.search || '') + '&' + ((location.hash || '').split('?')[1] || '');
+      if (/(?:^|[?&])tv=0(?:&|$)/i.test(searchStr)) {
+        try { localStorage.removeItem('ntv:tvMode'); sessionStorage.removeItem('ntv_tv_override'); } catch (e) {}
+        return false;
+      }
+      if (/(?:^|[?&])tv=1(?:&|$)/i.test(searchStr)) {
+        try { localStorage.setItem('ntv:tvMode', '1'); sessionStorage.setItem('ntv_tv_override', '1'); } catch (e) {}
+        return true;
+      }
+      try {
+        if (localStorage.getItem('ntv:tvMode') === '1' || sessionStorage.getItem('ntv_tv_override') === '1') return true;
+      } catch (e) {}
+      if (window.AndroidBridge && typeof window.AndroidBridge.isTv === 'function') {
+        try { if (window.AndroidBridge.isTv()) return true; } catch (e) {}
+      }
       const ua = navigator.userAgent || '';
+      if (/XIAOLIN-TV-OS|LargeScreen|SmartTV|GoogleTV|Android\s*TV|Leanback|AFTB|AFTM|AFTT|AFTS|AFTN|MiBOX|MiTV|Tizen|Web0S|BRAVIA|Changhong|Hisense|Konka|Skyworth|TCL|VIDAA|Himedia|Dangbei|Projector/i.test(ua)) {
+        return true;
+      }
       const noTouch = !('ontouchstart' in window) && (navigator.maxTouchPoints || 0) === 0;
       return /Android/i.test(ua) && noTouch;
     } catch (e) { return false; }
@@ -416,6 +434,7 @@
 
   /* ------------------------------ 卡片渲染 ------------------------------ */
   function isMobileDevice() {
+    if (isTvDevice()) return false;
     const ua = navigator.userAgent || '';
     if (/Windows NT|Macintosh|Linux x86_64|CrOS/i.test(ua) && !/Android|iPhone|iPod|Mobile/i.test(ua)) return false;
     if (/iPhone|iPod|Android.+Mobile|Mobile.+Android|xiaolin/i.test(ua)) return true;
@@ -426,6 +445,7 @@
   /** 桌面浏览器新标签打开; 手机/App 同页打开(便于返回后恢复滚动位置) */
   function preferNewTab() {
     try {
+      if (isTvDevice()) return false;
       if (typeof inApp === 'function' && inApp()) return false;
       if (isMobileDevice()) return false;
       return true;
@@ -500,6 +520,10 @@
 
   /* ---------------- 现代版式(左侧导航高档宽屏) ---------------- */
   function applyUiLayout(layout) {
+    if (isTvDevice()) {
+      document.body.classList.remove('ui-modern');
+      return;
+    }
     const on = layout === 'modern';
     document.body.classList.toggle('ui-modern', on);
     store.set('uiLayout', layout);
@@ -554,6 +578,7 @@
 
   function isListRoute(parts) {
     const p = (parts && parts[0]) || 'home';
+    if (p === 'search' && isTvDevice()) return false;
     return p === 'search' || p === 'sources' || p === 'source' || p === 'browse' || p === 'home' || p === 'user' || p === 'adult';
   }
 
@@ -724,7 +749,7 @@
     try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch (e) {}
     try {
       if (window.AndroidBridge && typeof window.AndroidBridge.setOrientation === 'function') {
-        window.AndroidBridge.setOrientation('portrait');
+        window.AndroidBridge.setOrientation(isTvDevice() ? 'landscape' : 'portrait');
       }
     } catch (e) {}
     markNav('#/' + (parts[0] || 'home'));
@@ -791,7 +816,13 @@
     maybeAppUpdate(); // 每次路由切换时检查是否有新版本或强制更新
     try {
       if (parts[0] === 'browse') await viewBrowse(dec(parts[1]) || '电影', query, alive);
-      else if (parts[0] === 'search') await viewSearch(query.q ? dec(query.q) : '', alive);
+      else if (parts[0] === 'search') {
+        if (isTvDevice() && typeof window.XLTV_MOUNT_SEARCH === 'function') {
+          await window.XLTV_MOUNT_SEARCH(query.q ? dec(query.q) : '', alive);
+        } else {
+          await viewSearch(query.q ? dec(query.q) : '', alive);
+        }
+      }
       else if (parts[0] === 'detail') await viewDetail(parts[1], dec(parts[2]), alive);
       else if (parts[0] === 'play') await viewPlay(parts[1], dec(parts[2]), query, alive);
       else if (parts[0] === 'sources') await viewSources(dec(parts[1]) || '', query, alive);
@@ -1812,6 +1843,7 @@
     let fakeFsHistPushed = false;
     // 仅真手机/平板/APK WebView 走假全屏与横屏自动全屏; 带触摸的笔记本不算手机
     const isMobilePlayer = (() => {
+      if (isTvDevice()) return false;
       const ua = navigator.userAgent || '';
       if (/Windows NT|Macintosh|Linux x86_64|CrOS/i.test(ua) && !/Android|iPhone|iPod|iPad|HarmonyOS|HUAWEI|Mobile/i.test(ua)) return false;
       if (/iPhone|iPod|iPad|Android|HarmonyOS|HUAWEI|xiaolin/i.test(ua)) return true;
@@ -3037,6 +3069,7 @@
           window.removeEventListener('keydown', onPlayerKeyDown, true);
           return;
         }
+        if (document.body.classList.contains('tv')) return;
         const target = e.target;
         if (target && target.tagName && /^(INPUT|TEXTAREA|SELECT)$/i.test(target.tagName)) return;
 
@@ -3088,6 +3121,7 @@
       };
       window.addEventListener('keydown', onPlayerKeyDown, true);
       video.addEventListener('keydown', (e) => {
+        if (document.body.classList.contains('tv')) return;
         if (e.key === ' ' || e.code === 'Space' || (e.key && e.key.startsWith('Arrow'))) {
           e.preventDefault();
           e.stopPropagation();
@@ -5540,7 +5574,7 @@
     if (!s) return true;
     return /^https?:\/\//i.test(s) || s.startsWith('/');
   }
-  function isMobileUA() { return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || ''); }
+  function isMobileUA() { if (isTvDevice()) return false; return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || ''); }
   function isStandalone() {
     return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
   }
@@ -8501,8 +8535,22 @@
 
   /* ------------------------------ 启动 ------------------------------ */
   async function boot() {
-    // 电视/盒子(无触摸屏): 启用 10-foot 大屏遥控器 UI
-    if (isTvDevice()) document.body.classList.add('tv');
+    // 电视/盒子/TV预览模式: 启用 10-foot 腾讯TV极光大屏 UI
+    if (isTvDevice()) {
+      document.body.classList.add('tv');
+      document.documentElement.classList.add('tv-root');
+    }
+    const tvModeBtn = $('#tvModeBtn');
+    if (tvModeBtn) {
+      tvModeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try { localStorage.setItem('ntv:tvMode', '1'); sessionStorage.setItem('ntv_tv_override', '1'); } catch (err) {}
+        const u = new URL(location.href);
+        u.searchParams.set('tv', '1');
+        location.href = u.pathname + u.search + (location.hash || '#/home');
+      });
+    }
     // 静态事件
     $('#themeBtn').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -8772,16 +8820,45 @@
     $('#brandName').textContent = sTitle;
     document.title = sSlogan ? `${sTitle} - ${sSlogan}` : sTitle;
     applyAnnouncement(State.settings.announcement);
+    // 向 TV 大屏终端层(tv.js)暴露全量数据与能力桥
+    window.XLTV = {
+      ti: titleInitials,
+      idx: TitleIdx,
+      isTv: isTvDevice,
+      setTvMode: (on) => {
+        try {
+          if (on) {
+            localStorage.setItem('ntv:tvMode', '1');
+            sessionStorage.setItem('ntv_tv_override', '1');
+          } else {
+            localStorage.removeItem('ntv:tvMode');
+            sessionStorage.removeItem('ntv_tv_override');
+          }
+        } catch (e) {}
+        const u = new URL(location.href);
+        if (on) u.searchParams.set('tv', '1');
+        else u.searchParams.delete('tv');
+        location.href = u.pathname + u.search + (location.hash || '#/home');
+      },
+      getState: () => State,
+      visibleSources,
+      featuredSources,
+      findSourceByKey,
+      cardHtml,
+      pushSearchHist,
+      logSearch,
+      store,
+      toast,
+      openUnlockModal,
+      route,
+    };
+    try { window.dispatchEvent(new CustomEvent('xl:ready')); } catch (e) {}
     route();
     maybeAppPromo();  // 首屏就绪后判断是否弹下载引导
     maybeAppUpdate(); // App 内版本更新检查
     // 游客试看: 拉取剩余时长; 试看到期由接口 401 事件触发注册框
     initGuest();
     window.addEventListener('xl:need-login', () => showTrialModal(true));
-    // TV 模式: 向独立皮肤层(tv.js)暴露本地首字母搜索引擎
-    if (document.body.classList.contains('tv')) {
-      window.XLTV = { ti: titleInitials, idx: TitleIdx };
-    }
   }
 
   boot();

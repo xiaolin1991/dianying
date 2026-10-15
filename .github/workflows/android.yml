@@ -69,7 +69,7 @@ jobs:
           convert "$SRC" -resize "320x180^" -gravity center -extent 320x180 "android/app/src/main/res/drawable/banner.png"
           echo "icons regenerated from $SRC"
 
-      - name: Build Debug APK
+      - name: Build Debug APK (Phone + Dedicated TV APK)
         env:
           START_URL: ${{ vars.START_URL }}
           RUN_NO: ${{ github.run_number }}
@@ -79,7 +79,16 @@ jobs:
             ARGS="$ARGS -PstartUrl=$START_URL"
           fi
           set -o pipefail
-          gradle -p android assembleDebug --no-daemon --stacktrace $ARGS 2>&1 | tee build-log.txt
+          mkdir -p out
+          # 1. 构建手机版 APK (isTvApk=false)
+          gradle -p android assembleDebug --no-daemon --stacktrace $ARGS -PisTvApk=false 2>&1 | tee build-log.txt
+          cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-phone-v1.0.${RUN_NO}.apk"
+          cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-phone-latest.apk"
+          # 2. 构建电视/盒子专用版 APK (isTvApk=true, 强制横屏 + 腾讯TV极光大屏UI)
+          gradle -p android assembleDebug --no-daemon --stacktrace $ARGS -PisTvApk=true 2>&1 | tee -a build-log.txt
+          cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-tv-v1.0.${RUN_NO}.apk"
+          cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-tv-latest.apk"
+          ls -la out
 
       - name: Upload build log (always)
         if: always()
@@ -88,15 +97,6 @@ jobs:
           name: android-build-log
           path: build-log.txt
           if-no-files-found: ignore
-
-      - name: Rename APK (phone + TV)
-        run: |
-          mkdir -p out
-          cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-phone-v1.0.${{ github.run_number }}.apk"
-          cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-tv-v1.0.${{ github.run_number }}.apk"
-          cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-phone-latest.apk"
-          cp "android/app/build/outputs/apk/debug/app-debug.apk" "out/xiaolintv-tv-latest.apk"
-          ls -la out
 
       - name: Publish APK to public/APP
         env:
@@ -121,7 +121,8 @@ jobs:
             NOTES="晓林影视 1.0.${RUN_NO}"$'\n'"${NOTES}"
           fi
           node scripts/publish-apk.mjs \
-            --apk "android/app/build/outputs/apk/debug/app-debug.apk" \
+            --apk "out/xiaolintv-phone-latest.apk" \
+            --tv-apk "out/xiaolintv-tv-latest.apk" \
             --code "$RUN_NO" \
             --name "1.0.$RUN_NO" \
             --changelog "$NOTES"

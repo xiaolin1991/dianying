@@ -15,11 +15,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="晓林影院">
 <meta name="theme-color" content="#0b1020">
-<link rel="stylesheet" href="./css/themes.css?v=20260829ad">
+<link rel="stylesheet" href="./css/themes.css?v=20261015tv1">
 <!-- 改动 js/css 后必须递增 v= 版本号, 否则手机浏览器/APK WebView 会一直用旧缓存 -->
-<link rel="stylesheet" href="./css/app.css?v=20260929v8">
-<link rel="stylesheet" href="./css/tv.css?v=20260929v8">
-<link rel="stylesheet" href="./css/modern.css?v=20260929v8">
+<link rel="stylesheet" href="./css/app.css?v=20261015tv1">
+<link rel="stylesheet" href="./css/tv.css?v=20261015tv1">
+<link rel="stylesheet" href="./css/modern.css?v=20261015tv1">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js"></script>
 </head>
 <body>
@@ -47,6 +47,10 @@
           <svg viewBox="0 0 24 24" class="ico"><path d="M10 2a8 8 0 105.3 14l4.4 4.4 1.4-1.4-4.4-4.4A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>
         </button>
         <div id="userBox" class="user-box"></div>
+        <button class="icon-btn tv-mode-switch-btn" id="tvModeBtn" title="切换 TV 大屏模式 (?tv=1)" aria-label="切换 TV 大屏模式" style="width:auto;padding:0 10px;gap:5px;font-size:12.5px;font-weight:700">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>
+          <span>TV版</span>
+        </button>
         <button class="icon-btn" id="themeBtn" title="配色主题">
           <svg viewBox="0 0 24 24" class="ico"><path d="M12 3a9 9 0 100 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01a1.5 1.5 0 011.13-2.49H16a5 5 0 005-5c0-4.42-4.03-8-9-8zm-5.5 9a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm3-4a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm5 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm3.5 4a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/></svg>
         </button>
@@ -76,9 +80,9 @@
   </svg>
 </button>
 
-<script src="./js/api.js?v=20260929v8"></script>
-<script src="./js/player.js?v=20260929v8"></script>
-<script src="./js/app.js?v=20260929v8"></script>
-<script src="./js/tv.js?v=20260929v8"></script>
+<script src="./js/api.js?v=20261015tv1"></script>
+<script src="./js/player.js?v=20261015tv1"></script>
+<script src="./js/app.js?v=20261015tv1"></script>
+<script src="./js/tv.js?v=20261015tv1"></script>
 </body>
 </html>
