@@ -1,15 +1,10 @@
-/* 晓林影视 XIAOLIN-TV — HLS 播放器封装 (默认开启首片预取与快速起播优化) */
+/* 晓林影视 XIAOLIN-TV — HLS 播放器封装 (兼容老旧机顶盒 WebView · 默认开启首片预取) */
 (function () {
   'use strict';
 
-  let current = null; // { hls }
+  var current = null;
 
-  /**
-   * 极速稳健默认配置:
-   * 默认开启 startFragPrefetch 首片预取 + Worker 异步解码，缩短连接超时以便死源快速切源，
-   * 同时保留 maxAudioFramesDrift=4 防止采集源切片时间戳抖动造成变音失真
-   */
-  const HLS_DEFAULT = {
+  var HLS_DEFAULT = {
     enableWorker: true,
     startFragPrefetch: true,
     maxBufferLength: 30,
@@ -21,11 +16,10 @@
     manifestLoadingMaxRetry: 2,
     levelLoadingMaxRetry: 2,
     fragLoadingMaxRetry: 3,
-    fragLoadingRetryDelay: 350,
+    fragLoadingRetryDelay: 350
   };
 
-  const HLS_OPTIMIZE = {
-    ...HLS_DEFAULT,
+  var HLS_OPTIMIZE = Object.assign({}, HLS_DEFAULT, {
     startFragPrefetch: true,
     testBandwidth: true,
     startLevel: -1,
@@ -35,20 +29,21 @@
     maxBufferSize: 60 * 1000 * 1000,
     maxStarvationDelay: 4,
     maxLoadingDelay: 3,
-    nudgeMaxRetry: 3,
-  };
+    nudgeMaxRetry: 3
+  });
 
   function play(videoEl, url, tipEl, opts) {
     destroy();
     showTip(tipEl, false);
-    const optimize = opts && opts.optimize !== undefined ? !!opts.optimize : true;
+    var optimize = opts && opts.optimize !== undefined ? !!opts.optimize : true;
 
-    // 协议自动升级：当前站点为 HTTPS 且视频源为 http:// 时，自动升级为 https 避免混合内容拦截
-    if (typeof location !== 'undefined' && location.protocol === 'https:' && /^http:\/\//i.test(url)) {
+    // 仅在非安卓壳(普通 HTTPS 浏览器)下将 http 视频流尝试升级或保持原样(安卓机顶盒壳已开启 MIXED_CONTENT_ALWAYS_ALLOW，直接播 http 流最稳)
+    var isApkWebView = /XIAOLIN-TV-APP/i.test(navigator.userAgent || '');
+    if (!isApkWebView && typeof location !== 'undefined' && location.protocol === 'https:' && /^http:\/\//i.test(url)) {
       url = url.replace(/^http:\/\//i, 'https://');
     }
 
-    const isM3u8 = /\.m3u8(\?|$)/i.test(url);
+    var isM3u8 = /\.m3u8(\?|$)/i.test(url);
 
     try {
       videoEl.preload = 'auto';
@@ -62,27 +57,27 @@
       videoEl.setAttribute('webkit-playsinline', '');
       videoEl.setAttribute('x5-playsinline', '');
       videoEl.setAttribute('x5-video-player-type', 'h5');
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
 
     if (isM3u8) {
       if (window.Hls && window.Hls.isSupported()) {
-        const hlsConfig = optimize ? { ...HLS_OPTIMIZE } : { ...HLS_DEFAULT };
-        const hls = new Hls(hlsConfig);
+        var hlsConfig = Object.assign({}, optimize ? HLS_OPTIMIZE : HLS_DEFAULT);
+        var hls = new Hls(hlsConfig);
         hls.loadSource(url);
         hls.attachMedia(videoEl);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hls.on(Hls.Events.MANIFEST_PARSED, function () {
           showTip(tipEl, false);
-          const p = videoEl.play();
+          var p = videoEl.play();
           if (p && typeof p.catch === 'function') {
-            p.catch((err) => {
+            p.catch(function (err) {
               showTip(tipEl, false);
               try { videoEl.dispatchEvent(new CustomEvent('player-autoplay-blocked', { detail: err })); } catch (e) {}
             });
           }
         });
-        let netRetries = 0;
-        const MAX_NET_RETRIES = 1;
-        hls.on(Hls.Events.ERROR, (_, data) => {
+        var netRetries = 0;
+        var MAX_NET_RETRIES = 1;
+        hls.on(Hls.Events.ERROR, function (_, data) {
           if (!data.fatal) return;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             if (netRetries < MAX_NET_RETRIES) {
@@ -105,57 +100,57 @@
             destroy();
           }
         });
-        current = { hls };
-        return { destroy };
+        current = { hls: hls };
+        return { destroy: destroy };
       }
 
-      if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+      if (videoEl.canPlayType('application/vnd.apple.mpegurl') || isApkWebView) {
         videoEl.src = url;
-        const hideLoading = () => showTip(tipEl, false);
+        var hideLoading = function () { showTip(tipEl, false); };
         videoEl.addEventListener('loadedmetadata', hideLoading, { once: true });
         videoEl.addEventListener('canplay', hideLoading, { once: true });
         videoEl.addEventListener('loadeddata', hideLoading, { once: true });
         videoEl.addEventListener('playing', hideLoading);
         videoEl.addEventListener('play', hideLoading);
-        videoEl.addEventListener('timeupdate', () => {
+        videoEl.addEventListener('timeupdate', function () {
           if (videoEl.currentTime > 0) hideLoading();
         });
-        const p = videoEl.play();
+        var p = videoEl.play();
         if (p && typeof p.catch === 'function') {
-          p.catch((err) => {
+          p.catch(function (err) {
             hideLoading();
             try { videoEl.dispatchEvent(new CustomEvent('player-autoplay-blocked', { detail: err })); } catch (e) {}
           });
         }
-        videoEl.onerror = (e) => {
+        videoEl.onerror = function (e) {
           showTip(tipEl, true, '播放失败，源可能已失效');
           if (opts && typeof opts.onError === 'function') opts.onError(e);
           try { videoEl.dispatchEvent(new CustomEvent('player-error', { detail: e })); } catch (err) {}
         };
-        return { destroy };
+        return { destroy: destroy };
       }
       showTip(tipEl, true, '当前浏览器不支持 HLS 播放');
-      return { destroy };
+      return { destroy: destroy };
     }
 
     videoEl.src = url;
-    const hideLoading = () => showTip(tipEl, false);
-    videoEl.addEventListener('loadedmetadata', hideLoading, { once: true });
-    videoEl.addEventListener('canplay', hideLoading, { once: true });
-    videoEl.addEventListener('playing', hideLoading);
-    const p = videoEl.play();
-    if (p && typeof p.catch === 'function') {
-      p.catch((err) => {
-        hideLoading();
+    var hideLoading2 = function () { showTip(tipEl, false); };
+    videoEl.addEventListener('loadedmetadata', hideLoading2, { once: true });
+    videoEl.addEventListener('canplay', hideLoading2, { once: true });
+    videoEl.addEventListener('playing', hideLoading2);
+    var p2 = videoEl.play();
+    if (p2 && typeof p2.catch === 'function') {
+      p2.catch(function (err) {
+        hideLoading2();
         try { videoEl.dispatchEvent(new CustomEvent('player-autoplay-blocked', { detail: err })); } catch (e) {}
       });
     }
-    videoEl.onerror = (e) => {
+    videoEl.onerror = function (e) {
       showTip(tipEl, true, '播放失败，源可能已失效');
       if (opts && typeof opts.onError === 'function') opts.onError(e);
       try { videoEl.dispatchEvent(new CustomEvent('player-error', { detail: e })); } catch (err) {}
     };
-    return { destroy };
+    return { destroy: destroy };
   }
 
   function showTip(tipEl, show, text) {
@@ -166,12 +161,12 @@
 
   function destroy() {
     if (current) {
-      try { if (current.hls) current.hls.destroy(); } catch (e) { /* ignore */ }
+      try { if (current.hls) current.hls.destroy(); } catch (e) {}
       current = null;
     }
-    const v = document.getElementById('videoEl');
+    var v = document.getElementById('videoEl');
     if (v) { try { v.pause(); } catch (e) {} v.removeAttribute('src'); v.load && v.load(); }
   }
 
-  window.Player = { play, destroy };
+  window.Player = { play: play, destroy: destroy };
 })();

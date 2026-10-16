@@ -42,7 +42,11 @@
   /* ---------- 电视/盒子识别(WebView 无触摸屏) + 标题首字母索引 ---------- */
   function isTvDevice() {
     try {
-      const searchStr = (location.search || '') + '&' + ((location.hash || '').split('?')[1] || '');
+      const hashStr = location.hash || '';
+      const searchStr = (location.search || '') + '&' + (hashStr.split('?')[1] || '');
+      if (/^#\/tv-remote/i.test(hashStr) || /(?:^|[?&])tv_sid=/i.test(searchStr)) {
+        return false;
+      }
       if (/(?:^|[?&])tv=0(?:&|$)/i.test(searchStr)) {
         try { localStorage.removeItem('ntv:tvMode'); sessionStorage.removeItem('ntv_tv_override'); } catch (e) {}
         return false;
@@ -75,9 +79,13 @@
   } catch (e) { pyCmp = null; }
   function pyInitial(ch) {
     if (!ch) return '';
-    if (/[a-zA-Z]/.test(ch)) return ch.toUpperCase();
-    const cmp = (a, b) => (pyCmp ? pyCmp.compare(a, b) : (a < b ? -1 : a > b ? 1 : 0));
-    // 找到最后一个 <= ch 的边界字
+    if (/[a-zA-Z0-9]/.test(ch)) return ch.toUpperCase();
+    if (typeof window.__xlPyInitials === 'function') {
+      const r = window.__xlPyInitials(ch);
+      if (r) return r.slice(0, 1);
+    }
+    if (!pyCmp) return '';
+    const cmp = (a, b) => pyCmp.compare(a, b);
     let lo = 0, hi = PY_BOUNDS.length - 1, ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
@@ -87,11 +95,15 @@
     return ans >= 0 ? PY_LETTERS[ans] : '';
   }
   function titleInitials(name) {
+    if (typeof window.__xlPyInitials === 'function') {
+      const full = window.__xlPyInitials(String(name || ''));
+      if (full) return full.slice(0, 12);
+    }
     let out = '';
     for (const ch of String(name || '')) {
       const c = pyInitial(ch);
       if (c) out += c;
-      if (out.length >= 8) break;
+      if (out.length >= 12) break;
     }
     return out;
   }
@@ -775,8 +787,17 @@
     const alive = makeAlive();
     const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
 
+    // 手机扫码电视同步搜索页: 支持 ?tv_sid=xxx 或 #/tv-remote?sid=xxx 直接进入
+    const urlTvSid = (new URLSearchParams(location.search || '')).get('tv_sid') || '';
+    if (parts[0] === 'tv-remote' || (urlTvSid && (!parts[0] || parts[0] === 'home'))) {
+      markNav('');
+      activeListPage = null;
+      route._prev = { parts: ['tv-remote'], query, key: '' };
+      return viewTvRemote(query.sid || urlTvSid, alive);
+    }
+
     // 强制登录: 未登录只允许登录页与后台
-    if (loginRequired() && !['login', 'admin', 'xiaolin1991'].includes(parts[0])) {
+    if (loginRequired() && !['login', 'admin', 'xiaolin1991', 'tv-remote'].includes(parts[0])) {
       markNav('');
       if (location.hash && location.hash !== '#/login') store.set('afterLogin', location.hash);
       activeListPage = null;
@@ -1384,21 +1405,48 @@
         <div class="scroll-sentinel hidden" id="srSentinel"><span class="spin"></span></div>
         <div class="empty hidden" id="srEmpty"><div class="big">🙈</div><p>没有找到相关内容</p></div>
       </div>`;
-    // 🔤 纯字母关键词 → 本地首字母快搜(浏览/收藏过的片名, 秒出结果)
-    if (/^[a-zA-Z]{1,8}$/.test(q)) {
+    // 🔤 纯字母关键词 → 本地 + 云端拼音首字母智能模糊快搜 (如 JM 匹配 九门、老九门)
+    let pyExpandedKeywords = [q];
+    if (/^[a-zA-Z]{1,10}$/.test(q)) {
       try {
         store.get('favs', []).forEach((f) => indexTitle({ title: f.title, pic: f.pic, remarks: f.remarks, sourceKey: f.key, id: f.id }));
       } catch (e) { /* ignore */ }
       const want = q.toUpperCase();
       const hits = [...TitleIdx.values()]
-        .filter((it) => { const ini = titleInitials(it.title); return ini === want || ini.startsWith(want); })
+        .filter((it) => {
+          const ini = titleInitials(it.title);
+          return ini === want || ini.startsWith(want) || (want.length >= 2 && ini.indexOf(want) !== -1);
+        })
         .slice(0, 24);
       const localBox = $('#srLocal');
-      if (localBox) localBox.innerHTML = hits.length ? `
-        <div style="margin:2px 0 14px">
-          <div style="font-size:15px;font-weight:700;margin-bottom:10px">🔤 首字母「${esc(want)}」本地匹配 <small style="color:var(--dim);font-weight:400;font-size:12px">· 来自你浏览/收藏过的内容</small></div>
-          <div class="grid">${hits.map(cardHtml).join('')}</div>
-        </div>` : '';
+      if (localBox && hits.length) {
+        localBox.innerHTML = `
+          <div style="margin:2px 0 14px">
+            <div style="font-size:15px;font-weight:700;margin-bottom:10px">🔤 首字母「${esc(want)}」本地匹配 <small style="color:var(--dim);font-weight:400;font-size:12px">· 支持首字母模糊检索</small></div>
+            <div class="grid">${hits.map(cardHtml).join('')}</div>
+          </div>`;
+      }
+      // 同步拉取云端拼音首字母联想词 (如 JM -> 九门 / 老九门)，自动转换为中文片名并发搜索采集源
+      try {
+        const pyRes = await API.pySuggest(want);
+        if (pyRes && Array.isArray(pyRes.list) && pyRes.list.length) {
+          const cnWords = pyRes.list.map((x) => x && x.title).filter(Boolean);
+          if (cnWords.length) {
+            pyExpandedKeywords = cnWords.slice(0, 2);
+            if (!pyExpandedKeywords.includes(q)) pyExpandedKeywords.push(q);
+            if (localBox) {
+              const chipsHtml = pyRes.list.slice(0, 10).map((item) =>
+                `<a class="chip ${pyExpandedKeywords.includes(item.title) ? 'on' : ''}" href="#/search?q=${encodeURIComponent(item.title)}" style="text-decoration:none">${esc(item.title)} <small style="opacity:.7">${esc(item.py || '')}</small></a>`
+              ).join('');
+              localBox.insertAdjacentHTML('afterbegin', `
+                <div style="margin:0 0 14px;padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:12px">
+                  <div style="font-size:13.5px;font-weight:700;margin-bottom:8px">✨ 拼音首字母「${esc(want)}」智能联想（已自动为您检索：${esc(pyExpandedKeywords.slice(0, 2).join('、'))}）：</div>
+                  <div class="chips" style="flex-wrap:wrap;gap:8px">${chipsHtml}</div>
+                </div>`);
+            }
+          }
+        }
+      } catch (e) {}
     }
     if (!alive()) return;
     logSearch(q); // 搜索记录上报(登录用户)
@@ -1476,7 +1524,7 @@
         };
         const ex = merged.get(key);
         if (ex) { ex.srcCount++; ex.sources.push(hit); }
-        else merged.set(key, { ...hit, srcCount: 1, sources: [hit], showSource: true });
+        else merged.set(key, Object.assign({}, hit, { srcCount: 1, sources: [hit], showSource: true }));
       }
       scheduleRender();
     };
@@ -1489,7 +1537,12 @@
         const i = idx++;
         const s = sources[i];
         if (!s || doneKeys.has(s.key)) continue;
-        try { handle(s, await API.search(s, q)); } catch (e) { /* 该源失败 */ }
+        try {
+          for (let ki = 0; ki < pyExpandedKeywords.length; ki++) {
+            if (!life.ok()) break;
+            try { handle(s, await API.search(s, pyExpandedKeywords[ki])); } catch (e2) {}
+          }
+        } catch (e) { /* 该源失败 */ }
         doneKeys.add(s.key);
         applyProgress();
       }
@@ -3606,6 +3659,93 @@
   }
 
   /* ============================================================
+     视图：手机扫码同步电视搜索遥控器 (#/tv-remote?sid=XXXX)
+     ============================================================ */
+  async function viewTvRemote(sid, alive) {
+    const v = $('#view');
+    const cleanSid = String(sid || '').trim().replace(/[^a-zA-Z0-9_-]/g, '');
+    const hotWords = ['九门', '老九门', '庆余年第二季', '凡人修仙传', '仙逆', '完美世界', '唐朝诡事录之西行', '白夜破晓', '墨雨云间', '剑来', '斗破苍穹', '狂飙'];
+    v.innerHTML = `
+      <div class="container auth-wrap" style="max-width:520px;padding-top:20px">
+        <div class="admin-card" style="padding:22px 20px;border-radius:18px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+            <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#0ea5e9,#2563eb);display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;flex-shrink:0">📺</div>
+            <div>
+              <h3 style="margin:0;font-size:18px">电视搜索手机同步输入</h3>
+              <p class="hint" style="margin:3px 0 0;font-size:12.5px">
+                ${cleanSid ? `🟢 已配对电视房间号：<b>#${esc(cleanSid.slice(-6).toUpperCase())}</b>` : '⚠️ 未检测到电视配对码，请重新用手机扫描电视搜索页二维码'}
+              </p>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <input class="field-input" id="tvrInput" placeholder="输入片名或拼音首字母（如：九门 / JM）" autocomplete="off" style="flex:1;font-size:16px;padding:12px 14px">
+            <button class="btn primary" id="tvrSendBtn" style="padding:0 18px;font-weight:700;white-space:nowrap">🚀 推送到电视</button>
+          </div>
+          <div id="tvrStatus" style="font-size:13px;color:var(--ok);min-height:20px;margin-bottom:8px"></div>
+          <div id="tvrSuggestBox" style="margin-bottom:14px"></div>
+          <div style="border-top:1px solid var(--border);padding-top:12px">
+            <div style="font-size:13px;font-weight:700;color:var(--dim);margin-bottom:8px">🔥 热门影片点一下直接推送到电视：</div>
+            <div class="chips" id="tvrHotChips" style="flex-wrap:wrap;gap:8px">
+              ${hotWords.map((w) => `<button type="button" class="chip" data-w="${esc(w)}">${esc(w)}</button>`).join('')}
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    const inp = $('#tvrInput', v);
+    const btn = $('#tvrSendBtn', v);
+    const st = $('#tvrStatus', v);
+    const sugBox = $('#tvrSuggestBox', v);
+
+    async function pushToTv(word) {
+      const q = String(word || inp.value || '').trim();
+      if (!q) return toast('请输入要搜索的影片名称或拼音首字母', 'err');
+      if (!cleanSid) return toast('未绑定电视房间号，请重新扫描电视上的二维码', 'err');
+      inp.value = q;
+      btn.disabled = true;
+      btn.textContent = '推送中…';
+      try {
+        await API.tvSyncPush(cleanSid, q);
+        if (st) st.innerHTML = `✅ 已同步推送「<b>${esc(q)}</b>」到电视大屏！电视端正在自动为您搜索…`;
+        toast('已推送至电视：' + q, 'ok');
+      } catch (e) {
+        if (st) st.innerHTML = `<span style="color:var(--danger)">❌ 推送失败：${esc(e.message || '网络异常')}</span>`;
+        toast(e.message || '推送失败', 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🚀 推送到电视';
+      }
+    }
+
+    let sugTimer = null;
+    inp && inp.addEventListener('input', () => {
+      clearTimeout(sugTimer);
+      const val = inp.value.trim();
+      if (!val) { if (sugBox) sugBox.innerHTML = ''; return; }
+      sugTimer = setTimeout(async () => {
+        if (!alive()) return;
+        try {
+          const r = await API.pySuggest(val);
+          if (!alive() || !sugBox) return;
+          const list = (r && r.list) || [];
+          if (!list.length) { sugBox.innerHTML = ''; return; }
+          sugBox.innerHTML = `
+            <div style="font-size:12px;color:var(--dim);margin-bottom:6px">💡 猜你想搜（点击直接推送到电视）：</div>
+            <div class="chips" style="flex-wrap:wrap;gap:6px">
+              ${list.slice(0, 8).map((it) => `<button type="button" class="chip on" data-w="${esc(it.title)}">${esc(it.title)}</button>`).join('')}
+            </div>`;
+          $$('button[data-w]', sugBox).forEach((b) => b.addEventListener('click', () => pushToTv(b.dataset.w)));
+        } catch (e) {}
+      }, 160);
+    });
+
+    btn && btn.addEventListener('click', () => pushToTv());
+    inp && inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') pushToTv(); });
+    $$('#tvrHotChips button[data-w]', v).forEach((b) => b.addEventListener('click', () => pushToTv(b.dataset.w)));
+    setTimeout(() => { try { inp && inp.focus(); } catch (e) {} }, 100);
+  }
+
+  /* ============================================================
      视图：登录 / 注册
      ============================================================ */
   async function viewLogin(alive, forced) {
@@ -3638,37 +3778,68 @@
       if (isTvDevice()) { ['#authUser', '#authPwd', '#authPwd2'].forEach((sel) => { const i = $(sel, v); i && VKB.attach(i); }); }
     };
     async function doAuth() {
-      const username = $('#authUser').value.trim();
-      const pwd = $('#authPwd').value;
+      const username = ($('#authUser') ? $('#authUser').value : '').trim();
+      const pwd = $('#authPwd') ? $('#authPwd').value : '';
       if (!USERNAME_OK(username)) return toast('用户名需 2-20 位中文/字母/数字/下划线', 'err');
       if (pwd.length < 6) return toast('密码至少 6 位', 'err');
+      const btn = $('#authBtn');
+      if (btn && btn.disabled) return;
+      const origTxt = btn ? btn.textContent : '登 录';
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = mode === 'login' ? '⏳ 正在登录…' : '⏳ 正在注册并登录…';
+      }
       try {
-        if (mode === 'login') await API.userLogin(username, pwd);
+        let authRes = null;
+        if (mode === 'login') authRes = await API.userLogin(username, pwd);
         else {
-          if (pwd !== $('#authPwd2').value) return toast('两次输入的密码不一致', 'err');
-          await API.userRegister(username, pwd);
-        }
-        State.me = username;
-        try {
-          const mm = await API.userMe();
-          if (mm && mm.me) {
-            State.meCreated = Number(mm.me.createdAt || 0);
-            State.adultAllowed = Boolean(mm.me.adultAllowed);
-            State.adultExpireAt = Number(mm.me.adultExpireAt || 0);
-            State.unreadMsgCount = Number(mm.me.unreadMsgCount || 0);
+          if (pwd !== ($('#authPwd2') ? $('#authPwd2').value : '')) {
+            if (btn) { btn.disabled = false; btn.textContent = origTxt; }
+            return toast('两次输入的密码不一致', 'err');
           }
-        } catch (e) {}
-        try { State.config = await API.getConfig(); } catch (e) {}
+          authRes = await API.userRegister(username, pwd);
+        }
+        // 关闭 TV 虚拟键盘（若已弹出）
+        try { VKB.hide(); } catch (e) {}
+
+        // 0ms 瞬时更新用户状态并立即跳转页面，绝不卡在登录输入框页面
+        State.me = username;
+        store.set('cached_me', username);
+        if (authRes && authRes.me) {
+          State.meCreated = Number(authRes.me.createdAt || Date.now());
+          State.adultAllowed = Boolean(authRes.me.adultAllowed);
+          State.adultExpireAt = Number(authRes.me.adultExpireAt || 0);
+          State.unreadMsgCount = Number(authRes.me.unreadMsgCount || 0);
+        }
         updateUserBox();
         renderBottomNav();
-        pullFavsMerge(); // 登录/注册成功: 拉取云端收藏并合并
         toast((mode === 'login' ? '欢迎回来，' : '注册成功，') + username, 'ok');
-        // 关键: 若当前哈希已等于目标(如一直停在 #/home), 赋值不会触发路由, 必须手动调用
-        const target = store.get('afterLogin', '') || '#/home';
+
+        let target = store.get('afterLogin', '') || '#/home';
+        if (target === '#/login') target = '#/home';
         store.set('afterLogin', '');
         if ((location.hash || '') === target) route();
         else location.hash = target;
+
+        // 后台静默同步收藏、用户详情与源配置，零阻塞跳转
+        setTimeout(() => {
+          pullFavsMerge();
+          API.userMe().then((mm) => {
+            if (mm && mm.me) {
+              State.meCreated = Number(mm.me.createdAt || State.meCreated || 0);
+              State.adultAllowed = Boolean(mm.me.adultAllowed);
+              State.adultExpireAt = Number(mm.me.adultExpireAt || 0);
+              State.unreadMsgCount = Number(mm.me.unreadMsgCount || 0);
+              updateUserBox();
+              renderBottomNav();
+            }
+          }).catch(() => {});
+          API.getConfig().then((cfg) => {
+            if (cfg) { State.config = cfg; store.set('cached_config', cfg); }
+          }).catch(() => {});
+        }, 20);
       } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = origTxt; }
         toast(e.message || '操作失败', 'err');
       }
     }
@@ -3735,21 +3906,25 @@
           await API.userLogin(username, pwd);
         }
         State.me = username;
-        try {
-          const mm = await API.userMe();
-          if (mm && mm.me) {
-            State.meCreated = Number(mm.me.createdAt || 0);
-            State.adultAllowed = Boolean(mm.me.adultAllowed);
-            State.adultExpireAt = Number(mm.me.adultExpireAt || 0);
-            State.unreadMsgCount = Number(mm.me.unreadMsgCount || 0);
-          }
-        } catch (e) {}
-        try { State.config = await API.getConfig(); } catch (e) {}
+        store.set('cached_me', username);
         updateUserBox();
         renderBottomNav();
-        pullFavsMerge();
         toast((mode === 'reg' ? '注册成功，' : '欢迎回来，') + username + '，继续观影吧', 'ok');
         close();
+        setTimeout(() => {
+          pullFavsMerge();
+          API.userMe().then((mm) => {
+            if (mm && mm.me) {
+              State.meCreated = Number(mm.me.createdAt || 0);
+              State.adultAllowed = Boolean(mm.me.adultAllowed);
+              State.adultExpireAt = Number(mm.me.adultExpireAt || 0);
+              State.unreadMsgCount = Number(mm.me.unreadMsgCount || 0);
+              updateUserBox();
+              renderBottomNav();
+            }
+          }).catch(() => {});
+          API.getConfig().then((cfg) => { if (cfg) State.config = cfg; }).catch(() => {});
+        }, 20);
       } catch (e) { toast(e.message || '操作失败', 'err'); }
     };
     $('.t-go', box).addEventListener('click', submit);
@@ -3935,17 +4110,16 @@
     const v = $('#view');
     if (!State.me) { location.hash = '#/login'; return; }
 
-    let data = null;
-    try { data = await API.userHistory(); } catch (e) { /* 未登录/KV异常 */ }
-    if (!life.ok()) return;
-
+    // 0ms 瞬时渲染会员中心：优先读取本地缓存历史与收藏，彻底告别 10-30 秒白屏等待！
+    const cacheKey = 'cached_uhist:' + State.me;
+    let data = store.get(cacheKey, null);
     const favs = store.get('favs', []);
-    const watchItems = data ? data.items.filter((it) => it.kind === 'watch') : [];
-    const searchItems = data ? data.items.filter((it) => it.kind === 'search') : [];
+    const watchItems = data && Array.isArray(data.items) ? data.items.filter((it) => it.kind === 'watch') : [];
+    const searchItems = data && Array.isArray(data.items) ? data.items.filter((it) => it.kind === 'search') : [];
     const { query } = parseHash();
     let tab = (query && query.tab) ? query.tab : store.get('uTab', 'watch');
     const hasAdult = Boolean(State.config && State.config.adultEnabled);
-    const isAdultUnlocked = Boolean(State.config && State.config.adultUnlocked);
+    const isAdultUnlocked = Boolean((State.config && State.config.adultUnlocked) || State.adultAllowed);
 
     v.innerHTML = `
       <div class="container page-wrap">
@@ -4156,6 +4330,35 @@
 
     bindUserHeaderEvents();
     renderBody();
+
+    // 后台异步拉取最新云端观看历史与时长，完成后无感刷新当前面板
+    API.userHistory().then((fresh) => {
+      if (!life.ok() || !fresh) return;
+      data = fresh;
+      store.set(cacheKey, fresh);
+      watchItems.length = 0;
+      searchItems.length = 0;
+      (fresh.items || []).forEach((it) => {
+        if (it.kind === 'watch') watchItems.push(it);
+        else if (it.kind === 'search') searchItems.push(it);
+      });
+      const subEl = $('.user-profile-sub', v);
+      if (subEl && (fresh.lastLoginAt || (fresh.profile && fresh.profile.lastLoginAt))) {
+        subEl.textContent = '最近活跃时间：' + fmtDateTime(fresh.lastLoginAt || fresh.profile.lastLoginAt);
+      }
+      const kpiVals = $$('.user-kpi-val', v);
+      if (kpiVals[0]) kpiVals[0].textContent = fmtWatchSec(fresh.watchSec || 0);
+      if (kpiVals[1]) kpiVals[1].innerHTML = `${watchItems.length} <small style="font-size:13px;font-weight:400;color:var(--dim)">条</small>`;
+      if (kpiVals[2]) kpiVals[2].innerHTML = `${favs.length} <small style="font-size:13px;font-weight:400;color:var(--dim)">部</small>`;
+      if (!hasAdult && kpiVals[3]) {
+        kpiVals[3].innerHTML = `${searchItems.length} <small style="font-size:13px;font-weight:400;color:var(--dim)">条</small>`;
+      }
+      const wTab = $('#uTabs .user-tab-btn[data-t="watch"]', v);
+      if (wTab) wTab.textContent = `🎬 观看记录 (${watchItems.length})`;
+      const sTab = $('#uTabs .user-tab-btn[data-t="search"]', v);
+      if (sTab) sTab.textContent = `🔍 搜索记录 (${searchItems.length})`;
+      renderBody();
+    }).catch(() => {});
   }
 
   /* ============================================================
@@ -5831,7 +6034,7 @@
     });
     $('.promo-x', box).addEventListener('click', () => box.remove()); // × 关闭 = 10 天后再弹
     $('#promoForever', box).addEventListener('click', () => {
-      store.set('appPromoState', { ...store.get('appPromoState', {}), forever: true });
+      store.set('appPromoState', Object.assign({}, store.get('appPromoState', {}), { forever: true }));
       box.remove();
       toast('好的，不再打扰');
     });
@@ -5852,7 +6055,7 @@
       if (st.forever) return;                                                  // 用户永久关闭
       const TEN_DAYS = 10 * 24 * 3600 * 1000;
       if (st.lastShown && Date.now() - st.lastShown < TEN_DAYS) return;        // 10天内不重复
-      store.set('appPromoState', { ...st, lastShown: Date.now() });
+      store.set('appPromoState', Object.assign({}, st, { lastShown: Date.now() }));
       setTimeout(openAppPromoModal, 1500);                                     // 等首屏渲染完再弹
     } catch (e) { /* ignore */ }
   }
@@ -5894,7 +6097,7 @@
       }, 300);
     } else {
       const close = () => {
-        store.set('appUpdateState', { ...(store.get('appUpdateState', {}) || {}), skipCode: latestCode, skipAt: Date.now() });
+        store.set('appUpdateState', Object.assign({}, store.get('appUpdateState', {}) || {}, { skipCode: latestCode, skipAt: Date.now() }));
         box.remove();
       };
       box.addEventListener('click', (ev) => { if (ev.target === box) close(); });
@@ -6889,7 +7092,7 @@
             await API.adminSaveSettings({ statsRetentionHours: h });
             if (lastSettings) lastSettings.statsRetentionHours = h;
             s.statsRetentionHours = h;
-            State.settings = { ...State.settings, statsRetentionHours: h };
+            State.settings = Object.assign({}, State.settings, { statsRetentionHours: h });
             const label = h === 0 ? '全部历史记录' : (h >= 24 ? (h / 24 + ' 天') : (h + ' 小时'));
             toast('已将数据保留周期设为【' + label + '】，系统将按此周期自动清理过期记录', 'ok');
           } catch (e) {
@@ -6999,7 +7202,7 @@
           const on = e.target.checked;
           try {
             await API.adminSaveSettings({ requireLogin: on });
-            State.settings = { ...State.settings, requireLogin: on };
+            State.settings = Object.assign({}, State.settings, { requireLogin: on });
             syncTrialDep(on);
             toast(on ? '已开启：游客试看后需注册' : '已关闭：所有人免登录自由观看（试看机制停用）', on ? 'ok' : 'err');
           } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
@@ -7018,7 +7221,7 @@
           const on = e.target.checked;
           try {
             await API.adminSaveSettings({ allowRegister: on });
-            State.settings = { ...State.settings, allowRegister: on };
+            State.settings = Object.assign({}, State.settings, { allowRegister: on });
             toast(on ? '已开放注册' : '已关闭注册', 'ok');
           } catch (err) { e.target.checked = !on; toast('保存失败：' + err.message, 'err'); }
         });
@@ -7027,7 +7230,7 @@
           try {
             await API.adminSaveSettings({ regGiftAdultMonths: m });
             s.regGiftAdultMonths = m;
-            State.settings = { ...State.settings, regGiftAdultMonths: m };
+            State.settings = Object.assign({}, State.settings, { regGiftAdultMonths: m });
             toast(`新注册赠送特权设置已保存：${m === 0 ? '不赠送' : '赠送 ' + m + ' 个月'}`, 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
@@ -7038,7 +7241,7 @@
             await API.adminSaveSettings({ trialMinutes: n });
             const hint = $('#trialHintMin');
             if (hint) hint.textContent = n;
-            State.settings = { ...State.settings, trialMinutes: n };
+            State.settings = Object.assign({}, State.settings, { trialMinutes: n });
             toast(`游客试看时长已保存：${n === 0 ? '立即要求登录' : n + ' 分钟'}`, 'ok');
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
@@ -7329,7 +7532,7 @@
             <textarea class="field-area" id="liveInput" style="min-height:110px;font-family:monospace;font-size:12px">${esc((s.liveSources || []).join('\n'))}</textarea>
             <button class="btn primary" id="saveLiveBtn" style="margin-top:14px">保存直播源</button>
           </div>`;
-        const customRows = (s.customSources || []).map((x) => ({ ...x }));
+        const customRows = (s.customSources || []).map((x) => Object.assign({}, x));
         const disabledSet = new Set(s.disabledSources || []);
         const builtins = (s.allSources || []).filter((x) => !x.custom);
         const editor = $('#srcEditor');
@@ -7434,7 +7637,7 @@
         });
         renderEditor();
         updateCountInfo();
-        $('#resetLiveBtn')?.addEventListener('click', () => {
+        $('#resetLiveBtn') && $('#resetLiveBtn').addEventListener('click', () => {
           $('#liveInput').value = [
             'https://live.zbds.top/tv/iptv4.m3u',
             'https://iptv-org.github.io/iptv/countries/cn.m3u',
@@ -7600,7 +7803,7 @@
             const res = await API.adminSaveSettings({ adultBottomNav: on });
             if (lastSettings) lastSettings.adultBottomNav = on;
             if (State.settings) State.settings.adultBottomNav = on;
-            if (res.settings) State.settings = { ...State.settings, adultBottomNav: !!res.settings.adultBottomNav };
+            if (res.settings) State.settings = Object.assign({}, State.settings, { adultBottomNav: !!res.settings.adultBottomNav });
             $('#adultBottomNavState').textContent = on ? '已开启' : '已关闭';
             $('#adultBottomNavState').style.color = on ? 'var(--danger)' : 'var(--dim)';
             renderBottomNav();
@@ -7616,7 +7819,7 @@
             const res = await API.adminSaveSettings({ adultGuestVisible: on });
             if (lastSettings) lastSettings.adultGuestVisible = on;
             if (State.settings) State.settings.adultGuestVisible = on;
-            if (res.settings) State.settings = { ...State.settings, adultGuestVisible: !!res.settings.adultGuestVisible };
+            if (res.settings) State.settings = Object.assign({}, State.settings, { adultGuestVisible: !!res.settings.adultGuestVisible });
             $('#adultGuestState').textContent = on ? '允许游客可见（引导注册）' : '未登录严格隐藏（完全隐蔽）';
             $('#adultGuestState').style.color = on ? 'var(--danger)' : 'var(--ok)';
             renderBottomNav();
@@ -7654,15 +7857,13 @@
               announcement: $('#annInput').value,
               homeSources: homeLines,
             });
-            State.settings = {
-              ...State.settings,
-              siteName: res.settings.siteName,
+            State.settings = Object.assign({}, State.settings, { siteName: res.settings.siteName,
               siteSlogan: res.settings.siteSlogan,
               announcement: res.settings.announcement,
               homeSources: res.settings.homeSources || [],
               uiLayout: res.settings.uiLayout,
               uiModernTheme: res.settings.uiModernTheme,
-            };
+             });
             store.set('cached_settings', State.settings);
             if (lastSettings) {
               lastSettings.siteName = res.settings.siteName;
@@ -7688,7 +7889,7 @@
             const res = await API.adminSaveSettings({ playerOptimize: on });
             const saved = !!(res.settings && res.settings.playerOptimize);
             e.target.checked = saved;
-            State.settings = { ...State.settings, playerOptimize: saved };
+            State.settings = Object.assign({}, State.settings, { playerOptimize: saved });
             if (lastSettings) lastSettings.playerOptimize = saved;
             if (label) {
               label.textContent = saved ? '已开启优化' : '保持现状';
@@ -7712,14 +7913,12 @@
           try {
             const res = await API.adminSaveSettings({ wmEnabled: enabled, wmMode: mode, wmUrl: url, wmOpacity: opacity, wmDuration: duration });
             const st = res.settings || {};
-            State.settings = {
-              ...State.settings,
-              wmEnabled: !!st.wmEnabled,
+            State.settings = Object.assign({}, State.settings, { wmEnabled: !!st.wmEnabled,
               wmMode: st.wmMode === 'center' ? 'center' : 'corner',
               wmUrl: st.wmUrl || '',
               wmOpacity: Number(st.wmOpacity == null ? 0.55 : st.wmOpacity),
               wmDuration: Math.min(60, Math.max(1, Number(st.wmDuration == null ? 2 : st.wmDuration) || 2)),
-            };
+             });
             if (lastSettings) {
               lastSettings.wmEnabled = State.settings.wmEnabled;
               lastSettings.wmMode = State.settings.wmMode;
@@ -8240,7 +8439,7 @@
             const res = await API.adminSaveSettings(patch);
             const fresh = await API.adminGetSettings();
             lastSettings = fresh;
-            State.settings = { ...State.settings, ...fresh };
+            State.settings = Object.assign({}, State.settings, fresh);
             store.set('cached_settings', State.settings);
             toast(`🚀 版本 v${name || code} 已正式发布！客户端将收到更新弹窗`, 'ok');
             renderAdmTab(fresh);
@@ -8254,7 +8453,7 @@
             await API.adminSaveSettings({ appVersionActive: false });
             const fresh = await API.adminGetSettings();
             lastSettings = fresh;
-            State.settings = { ...State.settings, appVersionActive: false, appVersionCode: 0 };
+            State.settings = Object.assign({}, State.settings, { appVersionActive: false, appVersionCode: 0 });
             toast('已暂停客户端版本更新推送', 'ok');
             renderAdmTab(fresh);
           } catch (err) { toast('操作失败：' + err.message, 'err'); }
@@ -8266,7 +8465,7 @@
             await API.adminSaveSettings({ appVersionActive: true });
             const fresh = await API.adminGetSettings();
             lastSettings = fresh;
-            State.settings = { ...State.settings, appVersionActive: true, appVersionCode: fresh.appPublishedCode || fresh.appVersionCode };
+            State.settings = Object.assign({}, State.settings, { appVersionActive: true, appVersionCode: fresh.appPublishedCode || fresh.appVersionCode });
             toast('已恢复向客户端推送更新弹窗', 'ok');
             renderAdmTab(fresh);
           } catch (err) { toast('操作失败：' + err.message, 'err'); }
@@ -8529,7 +8728,7 @@
             await API.adminSaveSettings(patch);
             const fresh = await API.adminGetSettings();
             lastSettings = fresh;
-            State.settings = { ...State.settings, ...fresh };
+            State.settings = Object.assign({}, State.settings, fresh);
             toast('GitHub 配置已保存！后台打包与数据同步已绑定', 'ok');
             renderAdmTab(fresh);
           } catch (e) {

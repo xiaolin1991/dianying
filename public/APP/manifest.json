@@ -1,15 +1,15 @@
 {
-  "versionCode": 94,
-  "versionName": "1.0.94",
+  "versionCode": 93,
+  "versionName": "1.0.93",
   "changelog": "晓林影视 1.0.80\n优化私密福利双栏体验、会员中心UI全面升级",
-  "publishedAt": "2026-10-15T13:40:38.694Z",
+  "publishedAt": "2026-09-24T13:47:07.353Z",
   "phone": {
     "path": "/APP/xiaolintv-phone-latest.apk",
-    "versioned": "/APP/xiaolintv-phone-v1.0.94.apk"
+    "versioned": "/APP/xiaolintv-phone-v1.0.93.apk"
   },
   "tv": {
     "path": "/APP/xiaolintv-tv-latest.apk",
-    "versioned": "/APP/xiaolintv-tv-v1.0.94.apk"
+    "versioned": "/APP/xiaolintv-tv-v1.0.93.apk"
   },
   "ios": {
     "path": "/APP/xiaolintv-ios-latest.ipa",

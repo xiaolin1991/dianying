@@ -116,7 +116,133 @@ const COOKIE_NAME = 'ntv_auth';
 const SESSION_TTL = 60 * 60 * 12; // 12h
 
 /* ------------------------- 内存兜底存储(无 KV 时) ------------------------- */
-const MEM = { settings: null, loginHits: new Map() };
+const MEM = { settings: null, loginHits: new Map(), tvSync: new Map(), vodIndex: new Map() };
+
+/* ---- 常用热搜影视与拼音首字母索引 (供 /api/py-suggest 毫秒级响应 + 模糊匹配) ---- */
+const BUILTIN_PY_MOVIES = [
+  ['九门', 'JM', '热门剧集'],
+  ['老九门', 'LJM', '盗墓笔记前传 · 陈伟霆/张艺兴'],
+  ['老九门之青山海棠', 'LJMZQSH', '九门番外电影'],
+  ['盗墓笔记之九门', 'DMBJZJM', '热门悬疑冒险'],
+  ['庆余年', 'QYN', '张若昀 古装传奇'],
+  ['庆余年第二季', 'QYNDEJ', '张若昀 剧王续作'],
+  ['剑来', 'JL', '高分国漫'],
+  ['凡人修仙传', 'FRXXZ', '仙侠国漫年番'],
+  ['仙逆', 'XN', '王林修仙国漫'],
+  ['完美世界', 'WMSJ', '荒天帝石昊'],
+  ['斗破苍穹', 'DPCQ', '三年之约年番'],
+  ['斗罗大陆', 'DLDL', '玄机国漫'],
+  ['吞噬星空', 'TSXK', '科幻机甲国漫'],
+  ['遮天', 'ZT', '九龙拉棺国漫'],
+  ['诛仙', 'ZX', '经典仙侠国漫'],
+  ['不良人', 'BLR', '画江湖之不良人'],
+  ['画江湖之不良人', 'HJHZBLR', '武侠国漫巅峰'],
+  ['沧元图', 'CYT', '孟川神魔国漫'],
+  ['师兄啊师兄', 'SXASX', '爆笑修仙国漫'],
+  ['一念永恒', 'YNYH', '白小纯修仙'],
+  ['牧神记', 'MSJ', '秦牧国漫'],
+  ['斩神', 'ZS', '斩神之凡尘神域'],
+  ['狐妖小红娘', 'HYXHN', '国漫经典'],
+  ['时光代理人', 'SGDLR', '高分奇幻国漫'],
+  ['镖人', 'BR', '硬核武侠国漫'],
+  ['雾山五行', 'WSWX', '水墨国漫'],
+  ['灵笼', 'LL', '末日科幻国漫'],
+  ['眷思量', 'JSL', '唯美国漫'],
+  ['唐朝诡事录', 'TCGSL', '古装探案神剧'],
+  ['唐朝诡事录之西行', 'TCGSLZXX', '原班人马西行探案'],
+  ['白夜破晓', 'BYPX', '潘粤明硬核刑侦'],
+  ['白夜追凶', 'BYZX', '潘粤明经典悬疑'],
+  ['狂飙', 'KB', '张译/张颂文扫黑大剧'],
+  ['漫长的季节', 'MCDJJ', '范伟/秦昊高分悬疑'],
+  ['繁花', 'FH', '王家卫导演 胡歌主演'],
+  ['玫瑰的故事', 'MGDGS', '刘亦菲都市情感'],
+  ['墨雨云间', 'MYYJ', '吴谨言古装爽剧'],
+  ['与凤行', 'YFX', '赵丽颖/林更新仙侠'],
+  ['莲花楼', 'LHL', '成毅武侠探案'],
+  ['长相思', 'CXS', '杨紫古装神话'],
+  ['永夜星河', 'YYXH', '虞书欣/丁禹兮穿书奇幻'],
+  ['九重紫', 'JCZ', '孟子义/李昀锐古装'],
+  ['小巷人家', 'XXRJ', '年代温情口碑剧'],
+  ['我是刑警', 'WSXJ', '于和伟纪实刑侦'],
+  ['大奉打更人', 'DFDGR', '王鹤棣古装探案'],
+  ['国色芳华', 'GSFH', '杨紫/李现大唐传奇'],
+  ['藏海传', 'CHZ', '肖战古装权谋'],
+  ['赴山海', 'FSH', '成毅武侠穿书'],
+  ['狐妖小红娘月红篇', 'HYXHNYHP', '杨幂/龚俊古装奇幻'],
+  ['边水往事', 'BSWS', '郭麒麟/吴镇宇悬疑冒险'],
+  ['新生', 'XS', '井柏然悬疑人性剧'],
+  ['少年歌行', 'SNGX', '新派武侠热播剧'],
+  ['少年白马醉春风', 'SNBMZCF', '少年歌行前传'],
+  ['雪中悍刀行', 'XZHDX', '张若昀江湖武侠'],
+  ['赘婿', 'ZX', '郭麒麟古装轻喜剧'],
+  ['苍兰诀', 'CLJ', '虞书欣/王鹤棣东方奇幻'],
+  ['甄嬛传', 'ZHZ', '孙俪宫斗经典'],
+  ['知否知否应是绿肥红瘦', 'ZFZFYSLFHS', '赵丽颖古装宅斗'],
+  ['琅琊榜', 'LYB', '胡歌权谋巅峰'],
+  ['伪装者', 'WZZ', '胡歌/靳东谍战经典'],
+  ['人世间', 'RSJ', '雷佳音年代催泪大剧'],
+  ['三体', 'ST', '刘慈欣硬核科幻剧'],
+  ['开端', 'KD', '白敬亭/赵今麦时间循环'],
+  ['隐秘的角落', 'YMDJL', '秦昊悬疑经典'],
+  ['沉默的真相', 'CMDZX', '白宇/廖凡高分悬疑'],
+  ['大江大河', 'DJDH', '王凯年代奋斗剧'],
+  ['山海情', 'SHQ', '黄轩高分扶贫剧'],
+  ['觉醒年代', 'JXND', '于和伟历史正剧'],
+  ['鬼吹灯', 'GCD', '潘粤明摸金探险'],
+  ['龙岭迷窟', 'LLMK', '鬼吹灯高分篇'],
+  ['怒晴湘西', 'NQXX', '鬼吹灯之怒晴湘西'],
+  ['云南虫谷', 'YNCG', '鬼吹灯之云南虫谷'],
+  ['昆仑神宫', 'KLSG', '鬼吹灯之昆仑神宫'],
+  ['南海归墟', 'NHGX', '鬼吹灯之南海归墟'],
+  ['终极笔记', 'ZJBJ', '盗墓笔记高分版'],
+  ['沙海', 'SH', '吴磊/秦昊盗墓探险'],
+  ['重启之极海听雷', 'CQZJHTL', '朱一龙盗墓笔记'],
+  ['藏海花', 'CHH', '张鲁一盗墓探险'],
+  ['流浪地球', 'LLDQ', '吴京中国科幻大片'],
+  ['流浪地球2', 'LLDQ2', '吴京/刘德华科幻巨制'],
+  ['哪吒之魔童降世', 'NZZMTJS', '国漫票房冠军'],
+  ['哪吒之魔童闹海', 'NZZMTNH', '哪吒2魔童闹海'],
+  ['抓娃娃', 'ZWW', '沈腾/马丽爆笑喜剧'],
+  ['热辣滚烫', 'RLGT', '贾玲励志喜剧电影'],
+  ['飞驰人生2', 'FCRS2', '沈腾赛车喜剧'],
+  ['第二十条', 'DEST', '张艺谋普法贺岁片'],
+  ['周处除三害', 'ZCCSH', '阮经天高分动作犯罪'],
+  ['九龙城寨之围城', 'JLCZZWC', '古天乐/林峯硬核港片'],
+  ['孤注一掷', 'GZYZ', '张艺兴反诈大片'],
+  ['消失的她', 'XSDT', '朱一龙悬疑犯罪电影'],
+  ['封神第一部', 'FSDYB', '费翔/黄渤神话史诗'],
+  ['长安三万里', 'CASWL', '追光高分历史动画'],
+  ['满江红', 'MJH', '沈腾/易烊千玺古装悬疑'],
+  ['志愿军', 'ZYJ', '陈凯歌历史战争大片'],
+  ['长津湖', 'CJH', '吴京/易烊千玺抗美援朝'],
+  ['战狼2', 'ZL2', '吴京动作大片'],
+  ['红海行动', 'HHXD', '林超贤现代军事动作'],
+  ['我不是药神', 'WBSYS', '徐峥高分现实题材'],
+  ['让子弹飞', 'RZDF', '姜文/葛优/周润发经典'],
+  ['唐人街探案', 'TRJTA', '王宝强/刘昊然侦探喜剧'],
+  ['夏洛特烦恼', 'XLTFN', '沈腾/马丽开心麻花经典'],
+  ['西虹市首富', 'XHSSF', '沈腾爆笑喜剧'],
+  ['独行月球', 'DXYQ', '沈腾/马丽科幻喜剧'],
+  ['年会不能停', 'NHBNT', '大鹏/白客职场爆笑喜剧'],
+  ['里斯本丸沉没', 'LSBWCM', '方励高分历史纪录片'],
+  ['好东西', 'HDX', '宋佳/钟楚曦高分口碑片'],
+  ['破地狱', 'PDY', '黄子华/许冠文催泪港片'],
+  ['误杀', 'WS', '肖央高分悬疑犯罪'],
+  ['误杀3', 'WS3', '肖央悬疑犯罪新作'],
+  ['奔跑吧', 'BPB', '国民户外真人秀'],
+  ['王牌对王牌', 'WPDWP', '沈腾/贾玲爆笑室内综艺'],
+  ['你好星期六', 'NHXQL', '何炅棚内游戏综艺'],
+  ['现在就出发', 'XZJCF', '沈腾好友户外旅行综艺'],
+  ['歌手2024', 'GS2024', '实力唱将全开麦竞演'],
+  ['披荆斩棘', 'PJZJ', '全景音乐竞演综艺'],
+  ['乘风破浪的姐姐', 'CFPLDJJ', '女性励志音乐综艺'],
+  ['大侦探', 'DZT', '明星推理探案综艺'],
+  ['密室大逃脱', 'MSDTT', '实景解密体验秀'],
+  ['种地吧', 'ZDB', '十个勤天劳作纪实综艺'],
+  ['再见爱人', 'ZJAR', '婚姻纪实观察真人秀'],
+  ['喜剧之王单口季', 'XJZWKDJ', '爆笑单口喜剧竞演'],
+  ['脱口秀和Ta的朋友们', 'TKXHTDPYM', '脱口秀竞演综艺']
+];
 
 /* ------------------------------- 小工具 ---------------------------------- */
 const enc = (s) => new TextEncoder().encode(s);
@@ -1378,6 +1504,7 @@ async function loadSources(env, ctx, settingsArg) {
       // 并发抓取全部采集源, 按 key 合并: 排在前面的配置优先, 后面的只补缺
       const results = await Promise.allSettled(urls.map((u) => fetch(u, {
         headers: { 'User-Agent': 'Mozilla/5.0 XIAOLIN-TV/1.0' },
+        signal: AbortSignal.timeout(4500),
         cf: { cacheTtl: 7200, cacheEverything: true },
       })));
       const byKey = new Map();
@@ -1515,6 +1642,10 @@ async function verifyUserToken(env, token) {
   return safeEqual(sig, expect) ? Buffer_safeDecode(payload.slice(bar + 1)) : null;
 }
 function readSession(req, cookieName) {
+  if (cookieName === USER_COOKIE) {
+    const ut = req.headers.get('X-User-Token') || '';
+    if (ut) return ut.trim();
+  }
   const authz = req.headers.get('Authorization') || '';
   if (authz.startsWith('Bearer ')) return authz.slice(7).trim();
   const cookie = req.headers.get('Cookie') || '';
@@ -2059,6 +2190,143 @@ export default {
         return json(payload, 200, { 'Cache-Control': 'public, max-age=300' });
       }
 
+      /* ---- 拼音首字母 / 模糊联想接口 (/api/py-suggest?q=JM) ---- */
+      if (path === '/api/py-suggest' && request.method === 'GET') {
+        const rawQ = String(url.searchParams.get('q') || '').trim();
+        if (!rawQ) return json({ ok: true, q: '', list: [] });
+        const upperQ = rawQ.toUpperCase().replace(/\s+/g, '');
+        const outMap = new Map();
+        const addHit = (title, py, sub, score) => {
+          title = String(title || '').trim().replace(/<[^>]+>/g, '');
+          if (!title || title.length > 28) return;
+          const prev = outMap.get(title);
+          if (!prev || score > prev.score) {
+            outMap.set(title, { title, py: py || '', sub: sub || '', score });
+          }
+        };
+
+        // 1) 内置热播片库首字母精准/模糊子串匹配 (如 JM 匹配 九门[JM] 与 老九门[LJM])
+        for (const [title, py, sub] of BUILTIN_PY_MOVIES) {
+          if (title.includes(rawQ)) {
+            addHit(title, py, sub, title === rawQ ? 1200 : 950);
+          } else if (py === upperQ) {
+            addHit(title, py, sub, 1100);
+          } else if (py.startsWith(upperQ)) {
+            addHit(title, py, sub, 900 - (py.length - upperQ.length) * 10);
+          } else if (upperQ.length >= 2 && py.includes(upperQ)) {
+            addHit(title, py, sub, 780 - py.indexOf(upperQ) * 15);
+          }
+        }
+
+        // 2) 内存已索引片库匹配
+        for (const [title, info] of MEM.vodIndex.entries()) {
+          if (title.includes(rawQ)) {
+            addHit(title, info.py || '', info.sub || '站内片库', 880);
+          } else if (info.py) {
+            if (info.py === upperQ) addHit(title, info.py, info.sub || '站内片库', 1050);
+            else if (info.py.startsWith(upperQ)) addHit(title, info.py, info.sub || '站内片库', 850);
+            else if (upperQ.length >= 2 && info.py.includes(upperQ)) addHit(title, info.py, info.sub || '站内片库', 720);
+          }
+        }
+
+        // 3) 并发请求腾讯视频 Smartbox + 豆瓣电影 Suggest (支持拼音首字母智能联想)
+        const tasks = [];
+        // 腾讯视频 smartbox 支持直接传拼音首字母如 JM / LJM / QYN
+        tasks.push((async () => {
+          try {
+            const qqUrl = 'https://s.video.qq.com/smartbox?plat=2&ver=0&num=10&otype=json&query=' + encodeURIComponent(rawQ);
+            const r = await fetch(qqUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://v.qq.com/' },
+              signal: AbortSignal.timeout(2200),
+            });
+            if (!r.ok) return;
+            const txt = await r.text();
+            const m = txt.match(/QZOutputJson\s*=\s*(\{[\s\S]*\})\s*;?/);
+            if (!m) return;
+            const data = JSON.parse(m[1]);
+            const items = (data && data.item) || [];
+            items.forEach((it, idx) => {
+              const word = String(it.word || it.title || '').trim();
+              if (word && /[\u4e00-\u9fa5]/.test(word)) {
+                addHit(word, upperQ, it.typeName || '全网热搜', 680 - idx * 12);
+              }
+            });
+          } catch (e) {}
+        })());
+
+        // 豆瓣电影 subject_suggest 支持拼音首字母与片名联想
+        tasks.push((async () => {
+          try {
+            const dbUrl = 'https://movie.douban.com/j/subject_suggest?q=' + encodeURIComponent(rawQ);
+            const r = await fetch(dbUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0', Referer: 'https://movie.douban.com/' },
+              signal: AbortSignal.timeout(2200),
+            });
+            if (!r.ok) return;
+            const arr = await r.json();
+            if (Array.isArray(arr)) {
+              arr.slice(0, 8).forEach((it, idx) => {
+                const word = String(it.title || '').trim();
+                if (word && /[\u4e00-\u9fa5]/.test(word)) {
+                  addHit(word, upperQ, it.year ? (it.year + ' · 豆瓣影视') : '豆瓣影视', 660 - idx * 12);
+                }
+              });
+            }
+          } catch (e) {}
+        })());
+
+        await Promise.allSettled(tasks);
+
+        const list = [...outMap.values()]
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 14)
+          .map(({ title, py, sub }) => ({ title, py, sub }));
+        return json({ ok: true, q: rawQ, list });
+      }
+
+      /* ---- TV 扫码手机同步搜索接口 (/api/tv-sync) ---- */
+      if (path === '/api/tv-sync') {
+        if (request.method === 'GET') {
+          const sid = String(url.searchParams.get('sid') || '').trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 36);
+          if (!sid) return json({ ok: false, error: 'missing sid' }, 400);
+          let hit = MEM.tvSync.get(sid) || null;
+          if (!hit && hasStorage(env)) {
+            try {
+              const raw = await storageGet(env, 'tvsync:' + sid);
+              if (raw) {
+                hit = JSON.parse(raw);
+                if (hit) MEM.tvSync.set(sid, hit);
+              }
+            } catch (e) {}
+          }
+          // 超过 30 分钟的旧会话清理
+          if (hit && Date.now() - Number(hit.ts || 0) > 30 * 60 * 1000) {
+            hit = null;
+          }
+          return json({ ok: true, sid, q: hit ? hit.q : '', ts: hit ? hit.ts : 0 });
+        }
+        if (request.method === 'POST') {
+          let body = {};
+          try { body = await request.json(); } catch (e) {}
+          const sid = String(body.sid || '').trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 36);
+          const q = String(body.q || '').trim().slice(0, 60);
+          if (!sid || !q) return json({ ok: false, error: '缺少房间号或搜索词' }, 400);
+          const payload = { q, ts: Date.now() };
+          MEM.tvSync.set(sid, payload);
+          // 控制内存 Map 大小
+          if (MEM.tvSync.size > 500) {
+            const firstKey = MEM.tvSync.keys().next().value;
+            if (firstKey) MEM.tvSync.delete(firstKey);
+          }
+          if (hasStorage(env)) {
+            const p = storagePut(env, 'tvsync:' + sid, JSON.stringify(payload), { expirationTtl: 1800 }).catch(() => {});
+            if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(p);
+            else await p;
+          }
+          return json({ ok: true, sid, q: payload.q, ts: payload.ts });
+        }
+      }
+
       /* ---- 苹果CMS API 代理(白名单 + 权限隔离 + 视频流安全脱敏) ---- */
       if (path === '/api/proxy' && request.method === 'GET') {
         const target = url.searchParams.get('url') || '';
@@ -2105,9 +2373,12 @@ export default {
             }
           }
         } else {
-          // 正常影片: 走正常游客试看逻辑
-          g1 = await guestState(request, env, url);
-          if (!g1.ok) return json({ error: '试看时间已到，注册/登录后继续观看', code: 'login_required' }, 401);
+          // 正常影片: 仅当请求具体影片详情/播放地址(含 ids 参数)时校验游客试看时长，首页/分类/搜索海报列表永不拦截，确保机顶盒/新设备秒出海报
+          const isDetailOrPlayReq = Boolean(tu.searchParams.get('ids'));
+          if (isDetailOrPlayReq) {
+            g1 = await guestState(request, env, url);
+            if (!g1.ok) return json({ error: '试看时间已到，注册/登录后继续观看', code: 'login_required' }, 401);
+          }
         }
 
         // 判断私密福利是否解锁播放
@@ -2381,8 +2652,21 @@ export default {
           await saveMessages(env, username, [welcomeMsg]);
         }
         const token = await makeUserToken(env, username);
-        return json({ ok: true, username }, 200, {
-          'Set-Cookie': `${USER_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${USER_SESSION_TTL}`,
+        return json({
+          ok: true,
+          username,
+          token,
+          me: {
+            username,
+            createdAt: now,
+            lastLoginAt: now,
+            lastLoginIp: clientIp(request),
+            adultAllowed,
+            adultExpireAt: adultExpireAt || null,
+            unreadMsgCount: giftMonths > 0 ? 1 : 0,
+          },
+        }, 200, {
+          'Set-Cookie': `${USER_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${USER_SESSION_TTL}`,
         });
       }
       if (path === '/api/user/login' && request.method === 'POST') {
@@ -2399,10 +2683,26 @@ export default {
         rec.lastLoginAt = Date.now();
         rec.lastLoginIp = clientIp(request);
         rec.lastLoginIpGeo = geoOf(request);
-        await putUserRecord(env, rec);
+        // 异步更新登录时间与IP，不阻塞登录响应返回
+        const updateLoginPromise = putUserRecord(env, rec).catch(() => {});
+        if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(updateLoginPromise);
+        else await updateLoginPromise;
         const token = await makeUserToken(env, username);
-        return json({ ok: true, username }, 200, {
-          'Set-Cookie': `${USER_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${USER_SESSION_TTL}`,
+        return json({
+          ok: true,
+          username,
+          token,
+          me: {
+            username,
+            createdAt: rec.createdAt || null,
+            lastLoginAt: rec.lastLoginAt,
+            lastLoginIp: rec.lastLoginIp || '',
+            adultAllowed: isUserAdultAllowed(rec),
+            adultExpireAt: rec.adultExpireAt || null,
+            unreadMsgCount: 0,
+          },
+        }, 200, {
+          'Set-Cookie': `${USER_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${USER_SESSION_TTL}`,
         });
       }
       if (path === '/api/user/logout' && request.method === 'POST') {
@@ -2494,8 +2794,10 @@ export default {
       if (path === '/api/user/me' && request.method === 'GET') {
         const username = await currentUser(request, env, url);
         if (!username) return json({ me: null });
-        const rec = await getUserRecord(env, username);
-        const msgs = await loadMessages(env, username);
+        const [rec, msgs] = await Promise.all([
+          getUserRecord(env, username),
+          loadMessages(env, username),
+        ]);
         const unreadMsgCount = msgs.filter((m) => !m.read).length;
         return json({
           me: {
@@ -2514,10 +2816,13 @@ export default {
         if (!username) return json({ error: 'unauthorized' }, 401);
         /* 自己的历史(不含已自删标记的条目) */
         if (path === '/api/user/history' && request.method === 'GET') {
-          const hist = await loadUhist(env, username);
-          const rec = await getUserRecord(env, username);
+          const [hist, rec] = await Promise.all([
+            loadUhist(env, username),
+            getUserRecord(env, username),
+          ]);
           return json({
             watchSec: hist.watchSec,
+            lastLoginAt: rec ? rec.lastLoginAt : null,
             items: hist.items.filter((it) => !it.delUser).slice(0, 300).map(publicHistItem),
             profile: rec ? { createdAt: rec.createdAt, lastLoginAt: rec.lastLoginAt } : null,
           });

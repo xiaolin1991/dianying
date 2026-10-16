@@ -1,9 +1,7 @@
 /* ============================================================
    晓林影视 XIAOLIN-TV — 全新「流光旗舰版 UI」& 全站护眼日间/夜间双模引擎
    · 默认开启「☀️ 护眼日间模式」(Warm-Alabaster 暖瓷白底，久看不累)，支持一键切换「🌙 沉浸夜间模式」并永久本地记忆
-   · 网站版式由管理员后台控制:
-     - body.ui-modern: 全新「✨ 流光旗舰版 UI」(悬浮毛玻璃胶囊顶栏 + 左72%巨幕/右28%五片联动导视轨 + 快捷分类胶囊 + TOP10热播风云榜)
-     - body:not(.ui-modern): 保留原有「🎨 经典版 UI」
+   · 顶栏胶囊与下方影片网格宽度严格一致、居中对齐，彻底消除顶栏右侧多余留白
    · 严格隔离 TV 模式 (:not(.tv))，绝不干扰电视端极光大屏
    ============================================================ */
 
@@ -20,7 +18,7 @@ body[data-mtheme="light"]:not(.tv) {
   --acc2: #0ea5e9;
   --danger: #e11d48;
   --ok: #10b981;
-  --glass: rgba(255, 255, 255, 0.88);
+  --glass: rgba(255, 255, 255, 0.92);
   --shadow: 0 12px 32px -6px rgba(15, 23, 42, 0.08);
   --glow: 0 8px 22px rgba(37, 99, 235, 0.22);
   --hero-overlay: linear-gradient(90deg, rgba(11, 17, 32, 0.92) 0%, rgba(11, 17, 32, 0.58) 52%, rgba(11, 17, 32, 0.12) 100%);
@@ -28,11 +26,10 @@ body[data-mtheme="light"]:not(.tv) {
   color: var(--txt);
 }
 
-/* 日间模式下细节可读性强化 */
 body[data-mtheme="light"]:not(.tv) .topbar {
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.92);
   border-bottom: 1px solid rgba(15, 23, 42, 0.07);
-  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
 }
 
 body[data-mtheme="light"]:not(.tv) .brand-name {
@@ -98,7 +95,7 @@ body.ui-modern[data-mtheme="dark"]:not(.tv) {
   --acc2: #2563eb;
   --danger: #fb7185;
   --ok: #34d399;
-  --glass: rgba(15, 23, 42, 0.84);
+  --glass: rgba(15, 23, 42, 0.88);
   --shadow: 0 18px 46px rgba(0, 0, 0, 0.5);
   --glow: 0 0 26px rgba(56, 189, 248, 0.32);
   --hero-overlay: linear-gradient(90deg, rgba(9, 13, 22, 0.94) 0%, rgba(9, 13, 22, 0.56) 52%, rgba(9, 13, 22, 0.14) 100%);
@@ -150,18 +147,28 @@ body[data-mtheme="dark"]:not(.tv) .color-mode-btn {
   }
 }
 
-/* ---------- 4. 流光旗舰版 UI: 悬浮毛玻璃胶囊顶栏 ---------- */
+/* ---------- 4. 流光旗舰版 UI: 悬浮毛玻璃胶囊顶栏 (与下方影片严格居中对齐，零右侧留白) ---------- */
 body.ui-modern:not(.tv) #themeBtn {
   display: none !important;
 }
 
 @media (min-width: 961px) {
+  /* 容器与顶栏共享完全一致的居中宽度 (1480px)，确保上下左右边缘 100% 齐平 */
+  body.ui-modern:not(.tv) .container {
+    max-width: 1480px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: 22px !important;
+    padding-right: 22px !important;
+  }
+
   body.ui-modern:not(.tv) .topbar {
     position: sticky;
     top: 12px;
     z-index: 60;
-    max-width: 1540px;
-    margin: 12px auto 6px;
+    width: min(calc(100% - 44px), 1436px);
+    max-width: 1436px;
+    margin: 12px auto 8px;
     border-radius: 999px;
     border: 1px solid var(--card-br);
     background: var(--glass);
@@ -171,19 +178,31 @@ body.ui-modern:not(.tv) #themeBtn {
   }
 
   body.ui-modern:not(.tv) .topbar-inner {
+    width: 100%;
     max-width: none;
     height: 64px;
     padding: 0 22px;
-    gap: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+  }
+
+  body.ui-modern:not(.tv) .brand {
+    flex-shrink: 0;
   }
 
   body.ui-modern:not(.tv) .nav {
-    flex: 0 1 auto;
+    flex: 0 1 auto !important;
+    margin: 0 auto;
     background: rgba(148, 163, 184, 0.11);
-    padding: 5px 7px;
+    padding: 5px 8px;
     border-radius: 999px;
     border: 1px solid var(--card-br);
-    gap: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
   }
 
   body.ui-modern:not(.tv) .nav a {
@@ -199,19 +218,28 @@ body.ui-modern:not(.tv) #themeBtn {
     box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
   }
 
+  body.ui-modern:not(.tv) .topbar-right {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
   body.ui-modern:not(.tv) .searchbox {
     border-radius: 999px;
-    width: 230px;
+    width: 240px;
     padding: 7px 14px;
   }
 
-  body.ui-modern:not(.tv) .container {
-    max-width: 1540px;
+  body.ui-modern:not(.tv) .announce {
+    width: min(calc(100% - 44px), 1436px);
+    max-width: 1436px;
+    margin: 10px auto 4px;
   }
 }
 
 /* ---------- 5. 流光旗舰版 UI: 杂志级「左72%主巨幕 + 右28%五片导视轨」 ---------- */
-/* 经典模式下隐藏旗舰版专属组件 */
 body:not(.ui-modern) .fs-hero-rail,
 body:not(.ui-modern) .fs-quick-bar,
 body:not(.ui-modern) #fsTop10Row {
@@ -256,7 +284,6 @@ body:not(.ui-modern) #fsTop10Row {
   }
 }
 
-/* 主巨幕内部始终采用深色电影感渐变衬底，保证日间/夜间模式下海报文字都清晰醒目 */
 body.ui-modern:not(.tv) .hero .hero-bg::after {
   background:
     linear-gradient(90deg, rgba(8, 13, 26, 0.92) 0%, rgba(8, 13, 26, 0.56) 52%, rgba(8, 13, 26, 0.08) 100%),
@@ -413,6 +440,7 @@ body.ui-modern:not(.tv) .hero #heroFavBtn {
 .fs-quick-bar {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 12px;
   overflow-x: auto;
   padding: 4px 2px 18px;
@@ -527,7 +555,11 @@ body.ui-modern:not(.tv) .hero #heroFavBtn {
   -webkit-text-fill-color: transparent;
 }
 
-/* ---------- 8. 流光旗舰版卡片与版式圆角润色 ---------- */
+/* ---------- 8. 流光旗舰版卡片与网格居中对齐优化 ---------- */
+body.ui-modern:not(.tv) .grid {
+  justify-content: center;
+}
+
 body.ui-modern:not(.tv) .card {
   border-radius: 16px;
   padding: 6px 6px 10px;

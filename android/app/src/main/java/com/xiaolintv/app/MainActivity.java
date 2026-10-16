@@ -8,11 +8,14 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.net.Uri;
+import android.net.http.SslError;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -20,12 +23,11 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 /**
- * 晓林影视 安卓壳客户端 (兼容手机端与智能电视/盒子 TV 端)
+ * 晓林影视 安卓壳客户端 (全面兼容手机端与各类国产智能电视/机顶盒 TV 端)
  * - 全屏 WebView 装载线上站点(地址来自 BuildConfig.START_URL)
+ * - 针对机顶盒网络协议优化: 允许 HTTPS/HTTP 混合内容(MIXED_CONTENT_ALWAYS_ALLOW)、兼容老机顶盒 SSL 根证书、开启 Cookie 持久化
  * - TV 专版 APK (BuildConfig.IS_TV_APK) 或电视硬件自动锁定横屏并注入 XIAOLIN-TV-OS 标识
  * - 返回键 = 优先收起 TV 浮层/软键盘，再退全屏或网页后退(hash 路由)
- * - target=_blank 链接留在 App 内打开
- * - 支持视频元素级全屏(播放页 ⛶ 按钮)
  */
 public class MainActivity extends Activity {
 
@@ -74,16 +76,22 @@ public class MainActivity extends Activity {
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);                          // localStorage: 收藏/进度/主题
+        s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);          // 允许自动连播
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        // 关键修复: 机顶盒与采集源大量海报/视频流为 http 协议，必须开启 MIXED_CONTENT_ALWAYS_ALLOW 避免被 HTTPS 页面拦截
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(true);
         s.setSupportZoom(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
-        // 卡片是 target=_blank: 关闭多窗口后, 新窗口导航会落到当前 WebView, 不弹出外部浏览器
         s.setSupportMultipleWindows(false);
-        // 专属 UA: 网站识别官方 App, 并读取版本做更新检查
-        // 格式: XIAOLIN-TV-APP/<versionName>/<versionCode> (TV版额外附加 XIAOLIN-TV-OS/1)
+
+        try {
+            CookieManager cm = CookieManager.getInstance();
+            cm.setAcceptCookie(true);
+            cm.setAcceptThirdPartyCookies(web, true);
+        } catch (Exception ignored) {}
+
         String uaSuffix = " XIAOLIN-TV-APP/"
                 + BuildConfig.VERSION_NAME
                 + "/"
@@ -91,7 +99,6 @@ public class MainActivity extends Activity {
                 + (isTvDevice ? " XIAOLIN-TV-OS/1" : "");
         s.setUserAgentString(s.getUserAgentString() + uaSuffix);
 
-        // 注册 JS 桥梁: 供网页播放器在全屏时通知 App 强制横屏/恢复竖屏 + 查询 TV 硬件态
         web.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public boolean isTv() {
@@ -102,7 +109,6 @@ public class MainActivity extends Activity {
             public void setOrientation(String mode) {
                 runOnUiThread(() -> {
                     try {
-                        // TV 模式下始终保持横屏，忽略网页端的竖屏恢复请求
                         if (isTvDevice) {
                             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
                             return;
@@ -145,7 +151,6 @@ public class MainActivity extends Activity {
             private boolean openExternal(String url) {
                 if (url == null) return false;
                 String u = url.toLowerCase();
-                // APK / 应用市场链接 → 系统下载或安装器(应用内更新)
                 if (u.contains(".apk") || u.startsWith("market:") || u.startsWith("intent:")) {
                     try {
                         startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
@@ -169,6 +174,15 @@ public class MainActivity extends Activity {
                     if (openExternal(request.getUrl().toString())) return true;
                 }
                 return false;
+            }
+
+            @SuppressLint("WebViewClientOnReceivedSslError")
+            @Override
+            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+                // 关键修复: 机顶盒系统内置 CA 根证书往往较老，遇到 Cloudflare / Let's Encrypt 新证书会报错白屏，直接放行
+                if (handler != null) {
+                    handler.proceed();
+                }
             }
         });
 
@@ -219,11 +233,10 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (customView != null) {           // 系统视频全屏中: 先退全屏
+        if (customView != null) {
             hideCustomView();
             return;
         }
-        // 优先通知网页层处理返回键(TV 选集浮层收起 / 软键盘关闭 / 网页假全屏退出)
         if (web != null) {
             web.evaluateJavascript(
                     "(function(){try{if(window.__xlTvBack&&window.__xlTvBack())return 2;if(window.__ntvExitFs&&window.__ntvExitFs())return 1;return 0;}catch(e){return 0;}})()",
@@ -258,6 +271,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (web != null) {
+            try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
             web.loadUrl("about:blank");
             web.destroy();
         }
