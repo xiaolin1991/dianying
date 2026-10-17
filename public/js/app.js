@@ -808,6 +808,9 @@
       }
     } catch (e) {}
     markNav('#/' + (parts[0] || 'home'));
+    if (!parts[0] || ['home', 'browse', 'search', 'sources', 'source', 'user', 'adult'].includes(parts[0])) {
+      window.__lastListHash = location.hash || '#/home';
+    }
 
     const alive = makeAlive();
     const dec = (s) => { try { return decodeURIComponent(s || ''); } catch (e) { return s || ''; } };
@@ -1959,7 +1962,7 @@
       }
     }
 
-    v.innerHTML = `<div class="container page-wrap"><div class="video-wrap"><video id="videoEl" controls playsinline></video>
+    v.innerHTML = `<div class="container page-wrap"><div class="video-wrap"><video id="videoEl" controls playsinline poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></video>
       <div class="video-tip" id="videoTip">正在加载视频…</div></div>
       <div class="empty" style="padding:20px 0">正在获取剧集信息…</div></div>`;
 
@@ -2042,7 +2045,7 @@
         <div class="play-top-row">
           <div class="play-col">
             <div class="play-stage">
-              <div class="video-wrap" id="videoWrap"><video id="videoEl" playsinline webkit-playsinline autoplay></video>
+              <div class="video-wrap" id="videoWrap"><video id="videoEl" playsinline webkit-playsinline autoplay poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></video>
                 <div class="fs-top-bar" id="fsTopBar">
                   <button type="button" class="fs-back-btn" id="fsBackBtn" title="退出全屏" aria-label="退出全屏">
                     <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 19l-7-7 7-7"/></svg>
@@ -2254,11 +2257,7 @@
     if (playBackBtn) {
       playBackBtn.addEventListener('click', (e) => {
         e.preventDefault();
-        if (window.history.length > 1) {
-          window.history.back();
-        } else {
-          location.hash = '#/search';
-        }
+        location.hash = window.__lastListHash || '#/home';
       });
     }
     let adultBarrierEl = null;
@@ -2682,8 +2681,15 @@
         tip.innerHTML = '';
         syncPpBtn();
       };
-      const clearEvents = ['playing', 'play', 'canplay', 'loadeddata', 'loadedmetadata', 'timeupdate', 'player-autoplay-blocked'];
+      const clearEvents = ['playing', 'canplay', 'loadeddata'];
       clearEvents.forEach((ev) => video.addEventListener(ev, clear, { once: true }));
+      const onTimeUpdateClear = () => {
+        if (video.currentTime > 0.1 || video.readyState >= 2) {
+          video.removeEventListener('timeupdate', onTimeUpdateClear);
+          clear();
+        }
+      };
+      video.addEventListener('timeupdate', onTimeUpdateClear);
       video.addEventListener('error', (e) => handlePlaybackFailure(e), { once: true });
       video.addEventListener('player-error', (e) => handlePlaybackFailure(e.detail), { once: true });
 
@@ -2693,15 +2699,15 @@
       });
       applyPlayerPrefs();
 
-      // 即时检查：如果流元数据已就绪或正在播放，直接解除加载遮罩
-      if (video.readyState >= 1 || (video.duration && video.duration > 0) || !video.paused) {
+      // 即时检查：仅当视频真实帧数据已就绪(readyState >= 2)时才解除加载遮罩（切勿用 !video.paused 判断，否则 0ms 就会误关自动换源定时器！）
+      if (video.readyState >= 2 || (video.currentTime && video.currentTime > 0.1)) {
         clear();
       }
 
-      // iOS 移动端加载检测兜底: 若 3.5 秒内视频元数据或首帧就绪，清除遮罩，显示播放按钮
+      // 加载检测兜底: 若 3.5 秒内视频帧数据已就绪，清除遮罩
       readyCheckTimer = setTimeout(() => {
         if (!alive() || !video.isConnected || hasPlaybackFailed) return;
-        if (video.readyState >= 1 || (video.duration && video.duration > 0) || !video.paused) {
+        if (video.readyState >= 2 || (video.currentTime && video.currentTime > 0.1)) {
           clear();
         }
       }, 3500);
@@ -3424,7 +3430,7 @@
       const misses = []; // {s, ms, spdCls, why}
       let pending = others.length;
       swapPending = pending;
-      const norm = (s2) => String(s2 || '').replace(/\s/g, '');
+      const norm = (s2) => String(s2 || '').replace(/[\s:：·\-—_!！?？,，.。()（）\[\]【】]/g, '').toLowerCase();
       // 桌面端失效源收缩区(与可用源同款 5 列排列); 手机端由 CSS 隐藏
       const updMissToggle = () => {
         if (!missToggle) return;
@@ -3509,7 +3515,12 @@
             if (!alive()) return;
             const ms = Math.round(performance.now() - t0);
             const spdCls = ms < 900 ? 'sp-good' : ms < 2600 ? 'sp-mid' : 'sp-bad';
-            const hit = (r2.list || []).find((v2) => norm(v2.vod_name) === norm(vod.vod_name));
+            const targetNorm = norm(vod.vod_name);
+            const hit = (r2.list || []).find((v2) => norm(v2.vod_name) === targetNorm) ||
+                        (r2.list || []).find((v2) => {
+                          const n2 = norm(v2.vod_name);
+                          return n2 && targetNorm && (n2.includes(targetNorm) || targetNorm.includes(n2));
+                        });
             pending--;
             swapPending = pending;
             if (hit && hit.vod_id) {
@@ -6279,7 +6290,7 @@
             </div>
 
             <div class="video-wrap live-video-wrap" id="videoWrap">
-              <video id="videoEl" playsinline webkit-playsinline autoplay></video>
+              <video id="videoEl" playsinline webkit-playsinline autoplay poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></video>
               <div class="video-tip hidden" id="videoTip"></div>
             </div>
 

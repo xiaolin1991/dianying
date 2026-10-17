@@ -313,9 +313,12 @@
       '</a>';
   }
 
-  /* ---------------- 4. 严格网格行列索引 + 空间焦点导航引擎 (彻底解决遥控器按“下”变“右”错乱) ---------------- */
+  /* ---------------- 4. 严格网格行列索引 + 空间焦点导航引擎 ---------------- */
   var navAutoSwitchTimer = null;
   var liveGroupAutoTimer = null;
+  var tvPlayWatchdogTimer = null;
+  var backPressHistory = [];
+  var homeExitWarnAt = 0;
 
   function visible(el) {
     if (!el || el.disabled || (el.getAttribute && el.getAttribute('aria-hidden') === 'true')) return false;
@@ -337,9 +340,7 @@
       var modal = document.querySelector('.modal-mask:not(.hidden)');
       if (modal) root = modal;
       else if (document.body.classList.contains('tv-playing') && document.body.classList.contains('tv-fs-mode')) {
-        var osd = document.getElementById('tvPlayerOsd');
-        if (osd && osd.classList.contains('open')) root = osd;
-        else return [];
+        return [];
       }
     }
 
@@ -358,7 +359,6 @@
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   }
 
-  /* 获取页面上所有可见的 4 列影片网格容器 */
   function getAllVisibleCardGrids() {
     var rawGrids = document.querySelectorAll('#view .grid, #tvsResultGrid, #tvPlayRelGrid');
     var out = [];
@@ -380,7 +380,7 @@
     if (!all.length) return null;
     if (!cur || !visible(cur)) return all[0];
 
-    // 规则 A: 顶栏导航栏 (#mainNav a 与 #tvMyEntry) 严格线性/下跳控制
+    // 规则 A: 顶栏导航栏 (#mainNav a 与 #tvMyEntry)
     var inTopbar = cur.closest && cur.closest('#topbar');
     if (inTopbar && !scopeRoot) {
       var topItems = [];
@@ -397,7 +397,6 @@
         if (dir === 'right') return tIdx < topItems.length - 1 ? topItems[tIdx + 1] : topItems[topItems.length - 1];
         if (dir === 'up') return cur;
         if (dir === 'down') {
-          // 从顶栏按下键：优先进入搜索页键盘、巨幕播放按钮、直播分类或第一张海报卡
           var firstKb = document.querySelector('#tvsKbFull button');
           if (firstKb && visible(firstKb)) return firstKb;
           var heroPlay = document.getElementById('tahPlayBtn');
@@ -412,7 +411,7 @@
       }
     }
 
-    // 规则 B: 首页/分类页巨幕按钮 (#tahPlayBtn / #tahSearchBtn) 严格上下左右控制
+    // 规则 B: 首页/分类页巨幕按钮 (#tahPlayBtn / #tahSearchBtn)
     var inHero = cur.closest && cur.closest('#tvAuroraHero');
     if (inHero && !scopeRoot) {
       var pBtn = document.getElementById('tahPlayBtn');
@@ -428,7 +427,7 @@
       }
     }
 
-    // 规则 C: 4 列影片网格 (.card) 严格矩阵索引导航 (左-1，右+1，上-4，下+4，100% 不串行！)
+    // 规则 C: 4 列影片网格 (.card) 严格矩阵索引导航 (左-1，右+1，上-4，下+4)
     if (cur.classList && cur.classList.contains('card') && !scopeRoot) {
       var grids = getAllVisibleCardGrids();
       for (var gi = 0; gi < grids.length; gi++) {
@@ -443,13 +442,12 @@
           if (col < COLS - 1 && cIdx + 1 < cards.length) {
             return cards[cIdx + 1];
           }
-          return cur; // 行末按右不再乱跳到下一行
+          return cur;
         }
         if (dir === 'left') {
           if (col > 0 && cIdx - 1 >= 0) {
             return cards[cIdx - 1];
           }
-          // 若在搜索页结果网格第一列按左键，跳回中间联想词或左侧字母键盘
           if (grids[gi].grid.id === 'tvsResultGrid') {
             var sug0 = document.querySelector('#tvsSugList .tvs-sug-btn');
             if (sug0 && visible(sug0)) return sug0;
@@ -462,13 +460,11 @@
           if (cIdx + COLS < cards.length) {
             return cards[cIdx + COLS];
           }
-          // 若当前行是本网格倒数第二行但最后一排不足4个，跳到本网格最后一个卡片
           var curRow = Math.floor(cIdx / COLS);
           var lastRow = Math.floor((cards.length - 1) / COLS);
           if (curRow < lastRow) {
             return cards[cards.length - 1];
           }
-          // 跳到下一个分类区块网格的同列卡片
           if (gi + 1 < grids.length) {
             var nextCards = grids[gi + 1].cards;
             return nextCards[Math.min(col, nextCards.length - 1)];
@@ -479,7 +475,6 @@
           if (cIdx - COLS >= 0) {
             return cards[cIdx - COLS];
           }
-          // 当前网格第一排按上键：若有上一个网格则跳到上一个网格底排同列，否则回到巨幕按钮或顶栏
           if (gi > 0) {
             var prevCards = grids[gi - 1].cards;
             var prevLastRowStart = Math.floor((prevCards.length - 1) / COLS) * COLS;
@@ -494,7 +489,7 @@
       }
     }
 
-    // 规则 D: 搜索页左侧 6列×5行 A-Z 全键盘 (#tvsKbFull) 严格矩阵控制
+    // 规则 D: 搜索页左侧 6列×5行 A-Z 全键盘 (#tvsKbFull) 严格矩阵控制 (绝不越界触发滚动)
     var inKbFull = cur.closest && cur.closest('#tvsKbFull');
     if (inKbFull && !scopeRoot) {
       var kbBtns = [];
@@ -504,7 +499,6 @@
       }
       var kIdx = kbBtns.indexOf(cur);
       if (kIdx >= 0) {
-        // 前 24 个是 A~X (4行×6列，索引 0..23)，第 5 行是 Y(24), Z(25), 退格(26,占2格), 清空(27,占2格)
         if (dir === 'left') {
           if (kIdx === 0 || kIdx === 6 || kIdx === 12 || kIdx === 18 || kIdx === 24) return cur;
           return kbBtns[kIdx - 1];
@@ -525,11 +519,10 @@
             return document.querySelector('#mainNav a.active') || document.querySelector('#mainNav a') || cur;
           }
           if (kIdx < 24) return kbBtns[kIdx - 6];
-          // 第 5 行 (24=Y, 25=Z, 26=退格, 27=清空) 按上键回到第 4 行对应列
-          if (kIdx === 24) return kbBtns[18]; // S
-          if (kIdx === 25) return kbBtns[19]; // T
-          if (kIdx === 26) return kbBtns[20]; // U
-          return kbBtns[22]; // W
+          if (kIdx === 24) return kbBtns[18];
+          if (kIdx === 25) return kbBtns[19];
+          if (kIdx === 26) return kbBtns[20];
+          return kbBtns[22];
         }
         if (dir === 'down') {
           if (kIdx < 18) return kbBtns[kIdx + 6];
@@ -540,7 +533,7 @@
             if (cCol <= 3) return kbBtns[26];
             return kbBtns[27];
           }
-          return cur; // 第 5 行按下键不再乱跳，因为二维码无需焦点
+          return cur;
         }
       }
     }
@@ -573,7 +566,7 @@
       }
     }
 
-    // 规则 F: TV 播放页右侧 5 列选集网格 (.tvp-ep-grid) 严格矩阵控制
+    // 规则 F: TV 播放页右侧 5 列选集网格 (.tvp-ep-grid)
     var inEpGrid = cur.closest && cur.closest('#tvPlayEpGrid');
     if (inEpGrid && !scopeRoot) {
       var epBtns = [];
@@ -606,7 +599,6 @@
       }
     }
 
-    // 通用几何方向导航 (兜底处理其余按钮、弹窗键盘、直播页列表等)
     var cr = cur.getBoundingClientRect();
     var c = center(cr);
     var best = null;
@@ -661,21 +653,38 @@
     } catch (e) {}
 
     el.classList.add(FOCUSED_CLS);
-    try {
-      if (el.tagName !== 'INPUT') el.focus({ preventScroll: true });
-    } catch (e) {
-      try { if (el.tagName !== 'INPUT') el.focus(); } catch (e2) {}
+
+    // 关键修复: 老旧机顶盒 WebView 不支持 focus({ preventScroll: true })，若在搜索页固定左栏/中栏或固定顶栏调用原生 el.focus() 会导致浏览器强行滚页面！
+    var inFixedPanel = Boolean(el.closest && (el.closest('.tvs-left-panel') || el.closest('.tvs-mid-panel') || el.closest('#topbar')));
+    if (!inFixedPanel && el.tagName !== 'INPUT') {
+      try {
+        el.focus({ preventScroll: true });
+      } catch (e) {
+        try { el.focus(); } catch (e2) {}
+      }
     }
 
-    if (!noScroll) {
-      try {
-        // 搜索页左栏/中栏固定不滚动
-        var inFixedSearchCol = el.closest && (el.closest('.tvs-left-panel') || el.closest('.tvs-mid-panel') || el.closest('#topbar'));
-        if (!inFixedSearchCol) {
-          var r = el.getBoundingClientRect();
-          if (r.top < 90 || r.bottom > window.innerHeight - 50) {
-            el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    // 搜索页强制窗口滚动条锁死在 0，仅允许右侧 #tvsResultGrid 内部滚动
+    if (document.body.classList.contains('tv-search-lock')) {
+      if (window.scrollY !== 0) window.scrollTo(0, 0);
+      var inResGrid = el.closest && el.closest('#tvsResultGrid');
+      if (inResGrid && !noScroll) {
+        try {
+          var gridBox = document.getElementById('tvsResultGrid');
+          var gr = gridBox.getBoundingClientRect();
+          var er = el.getBoundingClientRect();
+          if (er.bottom > gr.bottom - 20) {
+            gridBox.scrollTop += (er.bottom - gr.bottom + 40);
+          } else if (er.top < gr.top + 20) {
+            gridBox.scrollTop -= (gr.top - er.top + 40);
           }
+        } catch (e) {}
+      }
+    } else if (!noScroll && !inFixedPanel) {
+      try {
+        var r = el.getBoundingClientRect();
+        if (r.top < 95 || r.bottom > window.innerHeight - 40) {
+          el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
         }
       } catch (e) {
         try { el.scrollIntoView(); } catch (e2) {}
@@ -686,7 +695,7 @@
       updateAuroraHeroFromCard(el);
     }
 
-    // 【问题 2.2 修复】：遥控器移动焦点到顶部导航（搜索/精选/电影/剧集/综艺/动漫/直播）自动确认切换频道，无需再按一次 OK 键！
+    // 遥控器移动焦点到顶部导航自动确认切换频道
     clearTimeout(navAutoSwitchTimer);
     if (el.closest && el.closest('#mainNav')) {
       var targetHref = el.getAttribute('data-href') || el.getAttribute('href') || '';
@@ -717,12 +726,11 @@
     }
   }
 
-  /* ---------------- 5. 顶栏改造: 永久删除公告栏 + 极简频道胶囊 + 右侧「👤 我的 | 13:20」 ---------------- */
+  /* ---------------- 5. 顶栏改造: 永久固定在顶部 + 删除公告栏 + 右侧「👤 我的 | 14:23」 ---------------- */
   function tuneTopbar() {
     var oldLegend = document.getElementById('tvLegend');
     if (oldLegend) oldLegend.remove();
 
-    // 【问题 1.2 修复】：永久删除并隐藏 TV 端的顶部公告栏 (#announceBar)
     var annBar = document.getElementById('announceBar');
     if (annBar) {
       annBar.classList.add('hidden');
@@ -806,7 +814,6 @@
     return h === '' || h === '#' || h === '#/' || h.indexOf('#/home') === 0 || h.indexOf('#/browse') === 0;
   }
 
-  /* 将首页每个分类行的卡片裁剪为 4 的整数倍(8 或 12 部)，保证每排严格 4 个绝不缺角 */
   function normalizeGridCardsToFour() {
     if (!isHomeOrBrowse()) return;
     var rowGrids = document.querySelectorAll('#rows .grid');
@@ -863,7 +870,6 @@
     return hero;
   }
 
-  /* 机顶盒自愈直连加载器 */
   var fallbackLoading = false;
   function checkAndFallbackLoadMovies() {
     if (!isHomeOrBrowse() || fallbackLoading) return;
@@ -1023,7 +1029,7 @@
     }
 
     if (descEl) {
-      descEl.textContent = '《' + title + '》 · 按遥控器 OK 键立即进入播放，支持选集、简介预览与多线路秒换源。';
+      descEl.textContent = '《' + title + '》 · 按遥控器 OK 键立即进入播放，下拉浏览时按返回键可一键回到顶部导航栏。';
     }
 
     clearTimeout(heroFetchTimer);
@@ -1050,7 +1056,7 @@
     }, 180);
   }
 
-  /* ---------------- 7. TV 搜索页 (#/search): 左侧固定紧凑 A-Z 全键盘 + 手机扫码二维码 + 右侧 4 列独立滚动 ---------------- */
+  /* ---------------- 7. TV 搜索页 (#/search): 左侧 position:fixed 紧凑锁死 A-Z 全键盘 + 手机扫码二维码 ---------------- */
   var searchState = {
     buf: '',
     searchSeq: 0,
@@ -1146,10 +1152,12 @@
     return scored.slice(0, 10);
   }
 
-  /* 【问题 3.1 修复】：删除九宫格与数字键，左栏严格一屏固定 A~Z 26个字母 + 退格/清空 + 手机扫码二维码 */
   function mountTvSearch(initialQuery) {
     var view = document.getElementById('view');
     if (!view) return;
+
+    document.body.classList.add('tv-search-lock');
+    window.scrollTo(0, 0);
 
     if (initialQuery && typeof initialQuery === 'string' && initialQuery.trim()) {
       searchState.buf = initialQuery.trim().toUpperCase();
@@ -1157,7 +1165,7 @@
 
     var sid = getOrCreateSyncSid();
     var remoteUrl = location.origin + '/?tv_sid=' + encodeURIComponent(sid) + '#/tv-remote';
-    var qrSvg = makeQrSvg(remoteUrl, 70);
+    var qrSvg = makeQrSvg(remoteUrl, 64);
 
     if (view.dataset.tvSearch === '1' && document.getElementById('tvsAuroraWrap')) {
       renderSearchInputAndMid();
@@ -1167,13 +1175,12 @@
     }
 
     view.dataset.tvSearch = '1';
-    // 仅保留 26 个英文字母 A~Z (6列×5行：第5行为 Y, Z, ⌫退格[2格], 🗑清空[2格])
     var alphaChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
     view.innerHTML =
-      '<div class="container page-wrap" style="padding-top:4px;padding-bottom:8px">' +
+      '<div class="container page-wrap" style="padding:0">' +
       '  <div class="tvs-aurora-wrap" id="tvsAuroraWrap">' +
-      '    <!-- 左栏: 固定一屏 A-Z 全键盘 + 底部固定手机扫码二维码 (绝不上下滚动) -->' +
+      '    <!-- 左栏: position:fixed 紧凑锁死 (输入框 + A~Z 26键 + 手机扫码二维码，总高仅340px，绝不滚动) -->' +
       '    <div class="tvs-left-panel">' +
       '      <div class="tvs-input-box">' +
       '        <span class="tvs-input-ico">🔍</span>' +
@@ -1195,13 +1202,13 @@
       '        </div>' +
       '      </div>' +
       '    </div>' +
-      '    <!-- 中栏: 猜你想搜(首字母模糊联想) -->' +
+      '    <!-- 中栏: position:fixed 锁死拼音首字母联想 -->' +
       '    <div class="tvs-mid-panel">' +
       '      <div class="tvs-col-title" id="tvsMidTitle">💡 拼音首字母联想</div>' +
       '      <div class="tvs-col-sub" id="tvsMidSub">支持首字母模糊匹配（如 JM 搜九门）</div>' +
       '      <div class="tvs-sug-list" id="tvsSugList"></div>' +
       '    </div>' +
-      '    <!-- 右栏: 独立上下滚动 4 列等高海报结果 -->' +
+      '    <!-- 右栏: 仅内部 #tvsResultGrid 独立上下滚动 -->' +
       '    <div class="tvs-right-panel">' +
       '      <div class="tvs-right-head">' +
       '        <div class="tvs-col-title" id="tvsRightTitle">🔥 热门大片推荐</div>' +
@@ -1556,7 +1563,7 @@
     return Promise.resolve();
   };
 
-  /* ---------------- 8. TV 端专属播放页工作台 (#tvPlayCockpit) + 全屏模式切换 ---------------- */
+  /* ---------------- 8. TV 端专属播放页工作台 (#tvPlayCockpit) · 已彻底删除遥控器说明条与进度浮层 ---------------- */
   var tvPlayEpRangeIdx = 0;
   var TV_EP_PAGE_SIZE = 30;
 
@@ -1574,11 +1581,9 @@
 
   function enterTvFullscreen() {
     document.body.classList.add('tv-fs-mode');
-    scheduleHideHint(4500);
   }
 
   function exitTvFullscreen() {
-    closePlayerOsd();
     document.body.classList.remove('tv-fs-mode');
     var fsBtn = document.getElementById('tvBtnFs');
     if (fsBtn && visible(fsBtn)) setFocus(fsBtn, true);
@@ -1589,8 +1594,15 @@
     document.body.classList.toggle('tv-playing', playing);
     if (!playing) {
       document.body.classList.remove('tv-fs-mode');
+      clearTimeout(tvPlayWatchdogTimer);
       return;
     }
+
+    // 彻底移除旧版遥控器说明条 (#tvPlayHint) 与进度条浮层 (#tvPlayerOsd)
+    var oldHint = document.getElementById('tvPlayHint');
+    if (oldHint) oldHint.remove();
+    var oldOsd = document.getElementById('tvPlayerOsd');
+    if (oldOsd) oldOsd.remove();
 
     var wrap = document.getElementById('videoWrap');
     var video = document.getElementById('videoEl');
@@ -1599,6 +1611,7 @@
     if (!wrap || !video || !topRow || !playCol) return;
 
     video.removeAttribute('controls');
+    video.setAttribute('poster', 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
 
     // 1. 挂载左下方遥控器大按钮控制栏 (#tvPlayCtrlBar)
     var ctrlBar = document.getElementById('tvPlayCtrlBar');
@@ -1669,51 +1682,14 @@
       topRow.parentElement.appendChild(relWrap);
     }
 
-    // 4. 全屏态内部提示与底部呼出浮层 (#tvPlayHint / #tvPlayCenterHud / #tvPlayerOsd)
-    if (!document.getElementById('tvPlayHint')) {
-      var hint = document.createElement('div');
-      hint.id = 'tvPlayHint';
-      hint.innerHTML =
-        '<span><b>◀▶</b> 快进/快退</span>' +
-        '<span><b>OK</b> 暂停/播放</span>' +
-        '<span><b>▼</b> 选集/换源</span>' +
-        '<span><b>返回键</b> 退出全屏</span>';
-      wrap.appendChild(hint);
-    }
-
     if (!document.getElementById('tvPlayCenterHud')) {
       var hud = document.createElement('div');
       hud.id = 'tvPlayCenterHud';
       wrap.appendChild(hud);
     }
 
-    if (!document.getElementById('tvPlayerOsd')) {
-      var osd = document.createElement('div');
-      osd.id = 'tvPlayerOsd';
-      osd.innerHTML =
-        '<div class="tvo-head">' +
-        '  <div class="tvo-title" id="tvoTitle">正在播放</div>' +
-        '  <div class="tvo-sub" id="tvoSub">▲▼ 切换选集与线路 · OK 确认 · 返回键收起</div>' +
-        '</div>' +
-        '<div class="tvo-prog-row">' +
-        '  <span class="tvo-time" id="tvoCurTime">00:00:00</span>' +
-        '  <div class="tvo-bar-track"><div class="tvo-bar-fill" id="tvoBarFill"></div></div>' +
-        '  <span class="tvo-time" id="tvoDurTime">/ 00:00:00</span>' +
-        '</div>' +
-        '<div class="tvo-rail" id="tvOsdEpRow"></div>' +
-        '<div class="tvo-rail" id="tvOsdSrcRow"></div>';
-      wrap.appendChild(osd);
-
-      video.addEventListener('timeupdate', updateOsdProgress);
-      video.addEventListener('loadedmetadata', updateOsdProgress);
-      video.addEventListener('play', function () { scheduleHideHint(4200); });
-    }
-
     refreshTvPlayCockpit();
-    refreshOsdContent();
-    scheduleHideHint(5000);
 
-    // 首次进入播放页默认将焦点放在「🖥 全屏播放 (按OK键)」按钮上
     if (!document.querySelector('.' + FOCUSED_CLS)) {
       var fsBtn0 = document.getElementById('tvBtnFs');
       if (fsBtn0 && visible(fsBtn0)) setFocus(fsBtn0, true);
@@ -1756,7 +1732,6 @@
       descBox.textContent = text || '使用遥控器方向键可快速切换备用播放源或剧集，点击全屏按钮即可全屏观影。';
     }
 
-    // 同步收藏按钮状态
     var origFav = document.getElementById('playFav');
     var tvFav = document.getElementById('tvBtnFav');
     if (origFav && tvFav) {
@@ -1764,7 +1739,6 @@
       tvFav.textContent = isFav ? '★ 已收藏' : '☆ 收藏影片';
     }
 
-    // 同步片源列表 (#tvPlaySrcList)
     var srcListEl = document.getElementById('tvPlaySrcList');
     var srcCountEl = document.getElementById('tvpSrcCount');
     if (srcListEl) {
@@ -1792,7 +1766,6 @@
       };
     }
 
-    // 同步 5 列选集矩阵 (#tvPlayEpGrid)
     var epGrid = document.getElementById('tvPlayEpGrid');
     var epRanges = document.getElementById('tvPlayEpRanges');
     var epTitle = document.getElementById('tvpEpTitle');
@@ -1832,7 +1805,6 @@
         var b = origEps[i];
         var isCur = b.classList.contains('current');
         var lbl = b.textContent.trim();
-        // 将纯数字集数格式化为 01, 02
         if (/^第?\d+[集期话]?$/.test(lbl)) {
           var numM = lbl.match(/\d+/);
           if (numM) lbl = String(numM[0]).padStart(2, '0');
@@ -1852,32 +1824,15 @@
       };
     }
 
-    // 同步底部 4 列相关推荐 (#tvPlayRelGrid)
     var relGrid = document.getElementById('tvPlayRelGrid');
-    var origRelCards = document.querySelectorAll('#relSec .card, #relRailList .rail-item');
-    if (relGrid && origRelCards.length && relGrid.children.length === 0) {
-      var secCards = document.querySelectorAll('#relSec .card');
-      if (secCards.length) {
-        var rCardsHtml = '';
-        for (var rc = 0; rc < Math.min(8, secCards.length); rc++) {
-          rCardsHtml += secCards[rc].outerHTML;
-        }
-        relGrid.innerHTML = rCardsHtml;
+    var secCards = document.querySelectorAll('#relSec .card');
+    if (relGrid && secCards.length && relGrid.children.length === 0) {
+      var rCardsHtml = '';
+      for (var rc = 0; rc < Math.min(8, secCards.length); rc++) {
+        rCardsHtml += secCards[rc].outerHTML;
       }
+      relGrid.innerHTML = rCardsHtml;
     }
-  }
-
-  function scheduleHideHint(ms) {
-    var hint = document.getElementById('tvPlayHint');
-    if (!hint) return;
-    hint.classList.remove('hide');
-    clearTimeout(hintHideTimer);
-    hintHideTimer = setTimeout(function () {
-      var osd = document.getElementById('tvPlayerOsd');
-      if (!osd || !osd.classList.contains('open')) {
-        hint.classList.add('hide');
-      }
-    }, ms || 4500);
   }
 
   function showCenterHud(text, ms) {
@@ -1891,131 +1846,7 @@
     }, ms || 1200);
   }
 
-  function updateOsdProgress() {
-    var video = document.getElementById('videoEl');
-    var curEl = document.getElementById('tvoCurTime');
-    var durEl = document.getElementById('tvoDurTime');
-    var fillEl = document.getElementById('tvoBarFill');
-    if (!video || !curEl || !durEl || !fillEl) return;
-    var c = video.currentTime || 0;
-    var d = video.duration || 0;
-    curEl.textContent = fmtTime(c);
-    durEl.textContent = '/ ' + fmtTime(d);
-    var pct = d > 0 ? Math.min(100, Math.max(0, (c / d) * 100)) : 0;
-    fillEl.style.width = pct.toFixed(2) + '%';
-  }
-
-  function refreshOsdContent() {
-    var pbTitle = document.querySelector('.pb-title');
-    var curEpEl = document.getElementById('curEpName');
-    var tvoTitle = document.getElementById('tvoTitle');
-    if (tvoTitle && pbTitle) {
-      var epStr = curEpEl ? curEpEl.textContent.trim() : '';
-      var rawTitle = pbTitle.childNodes[0] ? pbTitle.childNodes[0].textContent.trim() : pbTitle.textContent.trim();
-      tvoTitle.textContent = '《' + rawTitle + '》 ' + epStr;
-    }
-
-    var epRow = document.getElementById('tvOsdEpRow');
-    var sideEps = document.querySelectorAll('#sideEps .ep-btn');
-    if (epRow && sideEps.length) {
-      var epHtml = '';
-      for (var i = 0; i < Math.min(30, sideEps.length); i++) {
-        var b = sideEps[i];
-        var isCur = b.classList.contains('current');
-        var label = b.textContent.trim();
-        epHtml += '<button type="button" class="tvo-pill ' + (isCur ? 'current' : '') + '" data-epidx="' + i + '">' +
-          '<span>' + esc(label) + '</span>' +
-          (isCur ? '<small>[正在播放]</small>' : '') +
-          '</button>';
-      }
-      epRow.innerHTML = epHtml;
-      epRow.onclick = function (e) {
-        var pill = e.target.closest('button.tvo-pill');
-        if (!pill) return;
-        var idx = Number(pill.getAttribute('data-epidx'));
-        var origBtns = document.querySelectorAll('#sideEps .ep-btn');
-        if (origBtns[idx]) {
-          origBtns[idx].click();
-          setTimeout(function () {
-            refreshOsdContent();
-            refreshTvPlayCockpit();
-            closePlayerOsd();
-          }, 120);
-        }
-      };
-    }
-
-    var srcRow = document.getElementById('tvOsdSrcRow');
-    if (srcRow) {
-      var curBadge = document.querySelector('#srcBadge span');
-      var curSrcName = curBadge ? curBadge.textContent.trim() : '当前源';
-      var srcItems = document.querySelectorAll('#srcSwitch a.src-item');
-
-      var srcHtml = '<button type="button" class="tvo-pill current" data-act="cursrc">' +
-        '<span>线路1: ' + esc(curSrcName) + '</span><small>[当前线路]</small></button>';
-
-      for (var s = 0; s < Math.min(8, srcItems.length); s++) {
-        var a = srcItems[s];
-        var sNameEl = a.querySelector('span');
-        var spdEl = a.querySelector('i.spd');
-        var sName = sNameEl ? sNameEl.textContent.trim() : ('备用源' + (s + 2));
-        var spd = spdEl ? spdEl.textContent.trim() : '可用';
-        srcHtml += '<button type="button" class="tvo-pill" data-swap="' + s + '">' +
-          '<span>线路' + (s + 2) + ': ' + esc(sName) + '</span><small>' + esc(spd) + '</small></button>';
-      }
-
-      srcHtml += '<button type="button" class="tvo-pill" data-act="exitfs"><span>🗗 退出全屏选集</span></button>';
-
-      srcRow.innerHTML = srcHtml;
-      srcRow.onclick = function (e) {
-        var pill = e.target.closest('button.tvo-pill');
-        if (!pill) return;
-        if (pill.hasAttribute('data-swap')) {
-          var sIdx = Number(pill.getAttribute('data-swap'));
-          var links = document.querySelectorAll('#srcSwitch a.src-item');
-          if (links[sIdx]) {
-            closePlayerOsd();
-            location.replace(links[sIdx].getAttribute('href'));
-          }
-          return;
-        }
-        var act = pill.getAttribute('data-act');
-        if (act === 'exitfs') {
-          exitTvFullscreen();
-        } else if (act === 'cursrc') {
-          closePlayerOsd();
-        }
-      };
-    }
-  }
-
-  function openPlayerOsd() {
-    var osd = document.getElementById('tvPlayerOsd');
-    if (!osd) return;
-    refreshOsdContent();
-    updateOsdProgress();
-    osd.classList.add('open');
-    scheduleHideHint(8000);
-    bumpOsdTimer();
-    var curEpPill = osd.querySelector('#tvOsdEpRow .tvo-pill.current') || osd.querySelector('.tvo-pill');
-    if (curEpPill) setFocus(curEpPill, false);
-  }
-
-  function closePlayerOsd() {
-    var osd = document.getElementById('tvPlayerOsd');
-    if (osd) osd.classList.remove('open');
-    clearTimeout(osdHideTimer);
-    scheduleHideHint(2500);
-  }
-
-  function bumpOsdTimer() {
-    clearTimeout(osdHideTimer);
-    osdHideTimer = setTimeout(function () {
-      closePlayerOsd();
-    }, 8500);
-  }
-
-  /* ---------------- 9. 全局 TV 遥控器软键盘弹窗 (#tvModalKbMask - 供登录/注册输入数字与字母) ---------------- */
+  /* ---------------- 9. 全局 TV 遥控器软键盘弹窗 (#tvModalKbMask) ---------------- */
   var modalKbState = {
     targetInput: null,
     upper: false
@@ -2133,7 +1964,6 @@
     }
   }, true);
 
-  /* ---------------- 10. 电视直播页 (#/live) 与会员中心 (#/user) 遥控器适配 ---------------- */
   function enhanceLivePage() {
     if ((location.hash || '').indexOf('#/live') !== 0) {
       document.body.classList.remove('live-fs-mode');
@@ -2141,48 +1971,108 @@
     }
   }
 
-  /* ---------------- 11. 全局遥控器按键中枢 ---------------- */
+  /* ---------------- 11. 全局遥控器返回键中枢 (支持一键回顶部导航栏、播放页秒退、三按强制退出App) ---------------- */
+  function triggerNativeExitApp() {
+    try {
+      if (window.AndroidBridge && typeof window.AndroidBridge.exitApp === 'function') {
+        window.AndroidBridge.exitApp();
+        return true;
+      }
+    } catch (e) {}
+    try { window.close(); } catch (e2) {}
+    return false;
+  }
+
+  /* 返回值约定 (供 MainActivity.onBackPressed 识别):
+   *  1 = 网页端已消费返回键(关闭弹窗 / 退出全屏 / 从播放页退回列表 / 从下拉列表一键回到顶部导航栏)
+   *  3 = 请求立即退出 App
+   *  0 = 当前已在首页顶部导航栏，交由原生层提示或退出 App
+   */
   function handleBackAction() {
+    var now = Date.now();
+    backPressHistory.push(now);
+    backPressHistory = backPressHistory.filter(function (t) { return now - t < 2000; });
+
+    // 任意时刻连续按 3 次返回键 -> 直接强制退出 App！
+    if (backPressHistory.length >= 3) {
+      triggerNativeExitApp();
+      return 3;
+    }
+
     var kbMask = document.getElementById('tvModalKbMask');
     if (kbMask && !kbMask.classList.contains('hidden')) {
       closeModalKb(true);
-      return true;
+      return 1;
     }
+
     if (document.body.classList.contains('live-fs-mode')) {
       document.body.classList.remove('live-fs-mode');
       var lFsBtn = document.getElementById('liveFsBtn');
       if (lFsBtn && visible(lFsBtn)) setFocus(lFsBtn, true);
-      return true;
+      return 1;
     }
+
+    // 【问题 1.1 修复】：在播放页按返回键 -> 若在全屏则退回选集工作台；若在选集工作台则立即销毁播放器并退回进入前的影片列表页！
     if (isPlayRoute()) {
-      var osd = document.getElementById('tvPlayerOsd');
-      if (osd && osd.classList.contains('open')) {
-        closePlayerOsd();
-        return true;
-      }
       if (document.body.classList.contains('tv-fs-mode')) {
         exitTvFullscreen();
-        return true;
+        return 1;
       }
+      try { if (window.Player && window.Player.destroy) window.Player.destroy(); } catch (e) {}
+      var backTarget = window.__lastListHash || '#/home';
+      if (backTarget.indexOf('#/play/') === 0) backTarget = '#/home';
+      location.hash = backTarget;
+      return 1;
     }
+
     var mask = document.querySelector('.modal-mask:not(.hidden)');
     if (mask) {
       var closeBtn = mask.querySelector('.modal-close, .btn-cancel, button');
       if (closeBtn) closeBtn.click();
       else mask.remove();
-      return true;
+      return 1;
     }
+
+    // 【问题 2 核心修复】：在浏览影片下拉很多（比如 50 个影片）或焦点在页面下方时，按遥控器返回键 -> 一键直达上方导航栏！
+    var curFocus = document.querySelector('.' + FOCUSED_CLS);
+    var isFocusInTopbar = Boolean(curFocus && curFocus.closest && curFocus.closest('#topbar'));
+    var resGrid = document.getElementById('tvsResultGrid');
+    var isSearchScrolled = Boolean(resGrid && resGrid.scrollTop > 20);
+
+    if (!isFocusInTopbar || window.scrollY > 20 || isSearchScrolled) {
+      window.scrollTo(0, 0);
+      if (resGrid) resGrid.scrollTop = 0;
+      var navAct = document.querySelector('#mainNav a.active') || document.querySelector('#mainNav a');
+      if (navAct) setFocus(navAct, true);
+      var hooks = getHooks();
+      if (hooks && hooks.toast) hooks.toast('⬆ 已回到顶部导航栏');
+      return 1;
+    }
+
+    // 此时焦点已经在顶部导航栏：若当前不在默认首页(#/home)，按返回键切回「精选」首页
     var h = location.hash || '#/home';
     if (h !== '#/home' && h !== '#/' && h !== '') {
-      if (window.history.length > 1) window.history.back();
-      else location.hash = '#/home';
-      return true;
+      location.hash = '#/home';
+      setTimeout(function () {
+        var homeTab = document.querySelector('#mainNav a[data-href="#/home"]') || document.querySelector('#mainNav a');
+        if (homeTab) setFocus(homeTab, true);
+      }, 60);
+      return 1;
     }
-    return false;
+
+    // 当前已在默认首页 (#/home) 且焦点已在顶栏：再按返回键即可退出 App
+    if (now - homeExitWarnAt < 2400) {
+      triggerNativeExitApp();
+      return 3;
+    }
+    homeExitWarnAt = now;
+    var hooks2 = getHooks();
+    if (hooks2 && hooks2.toast) hooks2.toast('再按一次返回键退出应用');
+    return 0;
   }
 
   window.__xlTvBack = function () {
-    return handleBackAction() ? 1 : 0;
+    return handleBackAction();
   };
 
   window.addEventListener('keydown', function (ev) {
@@ -2191,7 +2081,8 @@
 
     var isBack = k === 'Escape' || k === 'Backspace' || k === 'GoBack' || k === 'BrowserBack' || code === 4 || code === 461 || code === 10009;
     if (isBack) {
-      if (handleBackAction()) {
+      var res = handleBackAction();
+      if (res > 0) {
         ev.preventDefault();
         ev.stopPropagation();
       }
@@ -2206,63 +2097,39 @@
 
     var isOk = k === 'Enter' || k === ' ' || code === 23 || code === 66;
 
-    // 仅当在播放页且已进入全屏态 (tv-fs-mode) 时，才拦截方向键用于快进/快退与呼出 OSD 浮层
+    // 全屏播放态 (tv-fs-mode) 下：左右快进快退 15s，OK 暂停/播放，上下键退出全屏回到选集工作台
     if (isPlayRoute() && document.body.classList.contains('tv-fs-mode') && !document.querySelector('.modal-mask:not(.hidden)')) {
-      var osd = document.getElementById('tvPlayerOsd');
       var video = document.getElementById('videoEl');
-      var isOsdOpen = osd && osd.classList.contains('open');
-
-      if (!isOsdOpen) {
-        if (dir === 'left' || dir === 'right') {
-          ev.preventDefault();
-          ev.stopPropagation();
-          if (video && video.duration) {
-            var step = dir === 'right' ? 15 : -15;
-            var targetTime = Math.min(video.duration - 0.5, Math.max(0, (video.currentTime || 0) + step));
-            try { video.currentTime = targetTime; } catch (e) {}
-            showCenterHud((step > 0 ? '⏩ 快进 15秒 · ' : '⏪ 快退 15秒 · ') + fmtTime(targetTime) + ' / ' + fmtTime(video.duration), 1400);
-            scheduleHideHint(3500);
+      if (dir === 'left' || dir === 'right') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (video && video.duration) {
+          var step = dir === 'right' ? 15 : -15;
+          var targetTime = Math.min(video.duration - 0.5, Math.max(0, (video.currentTime || 0) + step));
+          try { video.currentTime = targetTime; } catch (e) {}
+          showCenterHud((step > 0 ? '⏩ 快进 15秒 · ' : '⏪ 快退 15秒 · ') + fmtTime(targetTime) + ' / ' + fmtTime(video.duration), 1400);
+        }
+        return;
+      }
+      if (dir === 'down' || dir === 'up') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        exitTvFullscreen();
+        return;
+      }
+      if (isOk) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (video) {
+          if (video.paused) {
+            video.play().catch(function () {});
+            showCenterHud('▶ 继续播放', 900);
+          } else {
+            video.pause();
+            showCenterHud('⏸ 已暂停 · 按 OK 键继续播放', 2200);
           }
-          return;
         }
-        if (dir === 'down' || dir === 'up' || k === 'ContextMenu' || code === 82) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          openPlayerOsd();
-          return;
-        }
-        if (isOk) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          if (video) {
-            if (video.paused) {
-              video.play().catch(function () {});
-              showCenterHud('▶ 继续播放', 900);
-            } else {
-              video.pause();
-              showCenterHud('⏸ 已暂停 · 按 OK 键继续播放', 2500);
-            }
-            scheduleHideHint(4000);
-          }
-          return;
-        }
-      } else {
-        bumpOsdTimer();
-        if (dir) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          var curOsdFocus = osd.querySelector('.' + FOCUSED_CLS) || osd.querySelector('.tvo-pill');
-          var nextOsd = pickNext(curOsdFocus, dir, osd);
-          if (nextOsd) setFocus(nextOsd, false);
-          return;
-        }
-        if (isOk) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          var actPill = osd.querySelector('.' + FOCUSED_CLS);
-          if (actPill) actPill.click();
-          return;
-        }
+        return;
       }
     }
 
@@ -2299,7 +2166,10 @@
     enhanceLivePage();
 
     var h = location.hash || '#/home';
-    if (h === '#/search' || h.indexOf('#/search?') === 0) {
+    var isSearch = (h === '#/search' || h.indexOf('#/search?') === 0);
+    document.body.classList.toggle('tv-search-lock', isSearch);
+
+    if (isSearch) {
       var qm = h.match(/[?&]q=([^&]*)/);
       var qVal = qm ? decodeURIComponent(qm[1]) : '';
       mountTvSearch(qVal);
