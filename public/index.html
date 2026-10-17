@@ -2,6 +2,7 @@
 <html lang="zh-CN" data-theme="midnight">
 <head>
 <meta charset="UTF-8">
+<base href="/">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <title>晓林影视 XIAOLIN-TV</title>
@@ -15,18 +16,32 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="晓林影院">
 <meta name="theme-color" content="#f3f6fb">
-<link rel="stylesheet" href="./css/themes.css?v=20261016v12">
+<!-- 关键内联防崩兜底样式：彻底杜绝机顶盒偶发网络抖动时出现图五的白屏巨型图标或巨型SVG圆圈 -->
+<style id="xlCriticalFallback">
+  html, body { margin: 0; padding: 0; }
+  img.brand-logo { width: 40px; height: 40px; object-fit: contain; vertical-align: middle; }
+  .topbar svg.ico, #backTop svg { width: 22px; height: 22px; max-width: 24px; max-height: 24px; }
+  #backTop { width: 42px; height: 42px; }
+  .hidden { display: none !important; }
+  body.tv { background: #060a14 !important; color: #f2f6ff !important; }
+  body.tv #announceBar, body.tv .announce, body.tv #backTop, body.tv #tvLegend { display: none !important; }
+</style>
+<link rel="stylesheet" href="./css/themes.css?v=20261017v15">
 <!-- 改动 js/css 后必须递增 v= 版本号, 否则手机浏览器/APK WebView 会一直用旧缓存 -->
-<link rel="stylesheet" href="./css/app.css?v=20261016v12">
-<link rel="stylesheet" href="./css/tv.css?v=20261016v12">
-<link rel="stylesheet" href="./css/modern.css?v=20261016v12">
+<link rel="stylesheet" href="./css/app.css?v=20261017v15">
+<link rel="stylesheet" href="./css/tv.css?v=20261017v15">
+<link rel="stylesheet" href="./css/modern.css?v=20261017v15">
 <!-- 非阻塞异步加载 HLS.js + 国内高速 CDN 自动容灾，绝不阻塞机顶盒/电视端首屏加载 -->
 <script src="https://s4.zstatic.net/ajax/libs/hls.js/1.5.15/hls.min.js" async defer onerror="(function(){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js';s.async=true;document.head.appendChild(s);})()"></script>
 </head>
 <body class="ui-modern" data-mtheme="light">
 <script>
-/* 首屏 0ms 瞬时挂载用户记忆的日间/夜间模式与网站版式，杜绝黑屏闪烁 */
+/* 首屏 0ms 瞬时挂载用户记忆的日间/夜间模式与网站版式，并彻底清理旧版遗留的 ntv:tvMode 电脑端污染 */
 (function(){
+  try {
+    localStorage.removeItem('ntv:tvMode');
+    sessionStorage.removeItem('ntv_tv_override');
+  } catch (e) {}
   try {
     var rawMode = localStorage.getItem('ntv:userColorMode') || localStorage.getItem('ntv:uiModernTheme');
     var mode = rawMode ? JSON.parse(rawMode) : 'light';
@@ -101,9 +116,9 @@
   </svg>
 </button>
 
-<script src="./js/api.js?v=20261016v12"></script>
-<script src="./js/player.js?v=20261016v12"></script>
-<script src="./js/app.js?v=20261016v12"></script>
-<script src="./js/tv.js?v=20261016v12"></script>
+<script src="./js/api.js?v=20261017v15"></script>
+<script src="./js/player.js?v=20261017v15"></script>
+<script src="./js/app.js?v=20261017v15"></script>
+<script src="./js/tv.js?v=20261017v15"></script>
 </body>
 </html>

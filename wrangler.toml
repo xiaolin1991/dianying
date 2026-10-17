@@ -14,8 +14,9 @@ compatibility_date = "2025-01-01"
 [assets]
 directory = "./public"
 binding = "ASSETS"
-# /api/* 与 /APP/* 先进入 Worker（APP 可在静态资源过期时从 GitHub 拉最新包）
-run_worker_first = ["/api/*", "/APP/*"]
+not_found_handling = "single-page-application"
+# /api/*、/APP/* 与免 # 后台路径先进入 Worker
+run_worker_first = ["/api/*", "/APP/*", "/xiaolin1991", "/xiaolin1991/*"]
 
 # ============================================================
 # D1 关系型数据库绑定 (核心主存储，高性能 SQL 存储)

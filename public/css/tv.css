@@ -6,9 +6,9 @@
 body.tv {
   --tv-bg: #060a14;
   --tv-bg-soft: #0d1528;
-  --tv-panel: rgba(16, 25, 48, 0.86);
-  --tv-panel-strong: rgba(12, 19, 38, 0.95);
-  --tv-border: rgba(255, 255, 255, 0.09);
+  --tv-panel: rgba(16, 25, 48, 0.9);
+  --tv-panel-strong: rgba(12, 19, 38, 0.96);
+  --tv-border: rgba(255, 255, 255, 0.1);
   --tv-cyan: #00e5ff;
   --tv-cyan-glow: rgba(0, 229, 255, 0.68);
   --tv-blue: #12b7f5;
@@ -22,7 +22,9 @@ body.tv {
   -webkit-user-select: none;
 }
 
-/* ---------- 彻底隐藏手机端/网页端冗余组件与底部无用提示栏 ---------- */
+/* ---------- 永久隐藏公告栏、手机/网页端冗余按钮及底部旧提示栏 ---------- */
+body.tv #announceBar,
+body.tv .announce,
 body.tv .searchbox,
 body.tv #voiceBtn,
 body.tv #searchMBtn,
@@ -43,78 +45,85 @@ body.tv #yearChips,
 body.tv .hist-del,
 body.tv #view > .container > .hero,
 body.tv #mainNav a[href="#/sources"],
-body.tv #mainNav a[href="#/download"] {
+body.tv #mainNav a[href="#/download"],
+body.tv #liveFilterBox {
   display: none !important;
 }
 
-/* ---------- 全局强焦点光圈 (遥控器一眼可见) ---------- */
+/* ---------- 全局遥控器强焦点光圈 ---------- */
 body.tv :focus {
   outline: none !important;
 }
 
 body.tv .tv-f {
   outline: none !important;
-  box-shadow: 0 0 0 4px var(--tv-cyan), 0 0 28px var(--tv-cyan-glow), 0 14px 34px rgba(0, 0, 0, 0.82) !important;
-  transform: scale(1.06);
-  z-index: 20 !important;
+  box-shadow: 0 0 0 3.5px var(--tv-cyan), 0 0 24px var(--tv-cyan-glow), 0 12px 30px rgba(0, 0, 0, 0.8) !important;
+  transform: scale(1.04);
+  z-index: 25 !important;
   position: relative;
-  transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.16s ease, background 0.16s ease;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
 }
 
-/* ---------- 顶栏: 腾讯TV极光胶囊频道栏 (左Logo · 中频道栏 · 右「我的+时钟」严格分列不重叠) ---------- */
+/* ---------- 顶栏: 适配电视安全区 (Overscan)，左Logo · 中频道 · 右「👤 我的 | 13:20」一体胶囊 ---------- */
 body.tv .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 70;
-  background: linear-gradient(180deg, rgba(5, 8, 17, 0.96) 0%, rgba(5, 8, 17, 0.78) 75%, transparent 100%) !important;
-  border-bottom: none !important;
-  backdrop-filter: blur(14px);
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 80 !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  background: linear-gradient(180deg, rgba(5, 8, 17, 0.98) 0%, rgba(5, 8, 17, 0.86) 80%, rgba(5, 8, 17, 0) 100%) !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 body.tv .topbar-inner {
-  max-width: 1780px;
-  margin: 0 auto;
-  padding: 16px 40px 12px !important;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  max-width: 1720px !important;
+  width: 100% !important;
+  margin: 0 auto !important;
+  padding: 12px 28px 10px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  box-sizing: border-box !important;
 }
 
 body.tv .brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-decoration: none;
-  padding: 6px 10px;
-  border-radius: 16px;
-  flex-shrink: 0;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  text-decoration: none !important;
+  padding: 4px 8px !important;
+  border-radius: 14px !important;
+  flex-shrink: 0 !important;
 }
 
 body.tv .brand-logo {
-  width: 42px !important;
-  height: 42px !important;
-  border-radius: 11px !important;
-  box-shadow: 0 0 18px rgba(0, 229, 255, 0.35);
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 10px !important;
+  box-shadow: 0 0 16px rgba(0, 229, 255, 0.35);
 }
 
 body.tv .brand-name,
 body.tv #brandName {
-  font-size: 24px !important;
+  font-size: 21px !important;
   font-weight: 900 !important;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   color: #fff !important;
-  display: flex;
-  flex-direction: column;
-  line-height: 1.1;
+  display: flex !important;
+  flex-direction: column !important;
+  line-height: 1.1 !important;
 }
 
 body.tv #brandName::after {
   content: 'XIAOLIN-TV';
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--tv-cyan);
-  letter-spacing: 2px;
+  letter-spacing: 1.5px;
   margin-top: 2px;
 }
 
@@ -122,32 +131,32 @@ body.tv .nav {
   flex: 0 1 auto !important;
   margin: 0 auto !important;
   display: flex !important;
-  align-items: center;
-  justify-content: center;
-  gap: 8px !important;
-  background: rgba(16, 25, 48, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 6px 12px;
-  border-radius: 999px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  background: rgba(16, 25, 48, 0.85) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  padding: 5px 10px !important;
+  border-radius: 999px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
 }
 
 body.tv .nav a {
-  padding: 10px 24px !important;
-  font-size: 19px !important;
+  padding: 8px 20px !important;
+  font-size: 18px !important;
   font-weight: 700 !important;
   border-radius: 999px !important;
   color: #c5d2eb !important;
   background: transparent;
   text-decoration: none;
   white-space: nowrap;
-  transition: all 0.15s ease;
+  transition: all 0.14s ease;
 }
 
 body.tv .nav a.active {
-  background: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(0, 229, 255, 0.18) !important;
   color: #ffffff !important;
-  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 0 1.5px rgba(0, 229, 255, 0.45);
 }
 
 body.tv .nav a.tv-f {
@@ -156,33 +165,42 @@ body.tv .nav a.tv-f {
   font-weight: 900 !important;
 }
 
-/* 顶栏右侧: 仅保留「👤 我的」+ 实时时钟，留足间距绝不挤压 */
+/* 顶栏右侧: 「👤 我的 | 13:20」紧凑防裁切设计 */
 body.tv .topbar-right {
   flex-shrink: 0 !important;
   display: flex !important;
-  align-items: center;
+  align-items: center !important;
+  justify-content: flex-end !important;
 }
 
 #tvTopRight {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+  background: rgba(16, 25, 48, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 5px 14px 5px 6px;
+  border-radius: 999px;
   flex-shrink: 0;
 }
 
 #tvMyEntry {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 22px;
+  gap: 6px;
+  padding: 7px 16px;
   border-radius: 999px;
-  background: rgba(18, 29, 56, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
   color: #eef4ff;
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 16.5px;
+  font-weight: 800;
   text-decoration: none;
   white-space: nowrap;
+}
+
+#tvMyEntry.active {
+  background: rgba(0, 229, 255, 0.2);
+  color: var(--tv-cyan);
 }
 
 #tvMyEntry.tv-f {
@@ -191,65 +209,70 @@ body.tv .topbar-right {
 }
 
 #tvClock {
-  font-size: 21px;
+  font-size: 18px;
   font-weight: 800;
   color: #dce6fa;
-  letter-spacing: 1px;
+  letter-spacing: 0.8px;
   font-variant-numeric: tabular-nums;
-  min-width: 58px;
-  text-align: right;
+  white-space: nowrap;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 /* ---------- 主容器宽度 ---------- */
 body.tv .container {
-  max-width: 1760px !important;
-  padding-left: 40px !important;
-  padding-right: 40px !important;
+  max-width: 1700px !important;
+  padding-left: 28px !important;
+  padding-right: 28px !important;
+  box-sizing: border-box !important;
 }
 
-/* ---------- 首页/频道页: 70% 沉浸式联动巨幕舞台 (#tvAuroraHero) ---------- */
+/* ---------- 首页/频道页: 极光联动巨幕舞台 (#tvAuroraHero) ---------- */
 #tvAuroraHero {
   position: relative;
   width: 100%;
-  height: min(48vh, 450px);
-  min-height: 340px;
-  border-radius: 26px;
+  height: 330px;
+  border-radius: 22px;
   overflow: hidden;
-  margin: 4px 0 22px;
+  margin: 2px 0 20px;
   background: #081022;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
 }
 
 #tvAuroraHero .tah-bg-blur {
   position: absolute;
-  inset: -30px;
+  top: -30px;
+  left: -30px;
+  right: -30px;
+  bottom: -30px;
   background-size: cover;
   background-position: center;
-  filter: blur(34px) brightness(0.42) saturate(1.35);
-  transform: scale(1.1);
-  transition: background-image 0.35s ease;
+  filter: blur(32px) brightness(0.42) saturate(1.3);
+  transform: scale(1.08);
 }
 
 #tvAuroraHero .tah-bg-main {
   position: absolute;
   top: 0;
   right: 0;
-  width: 66%;
+  width: 64%;
   height: 100%;
   background-size: cover;
-  background-position: center 22%;
+  background-position: center 20%;
   mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.65) 24%, #000 58%);
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.65) 24%, #000 58%);
-  transition: background-image 0.35s ease;
 }
 
 #tvAuroraHero .tah-vignette {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background:
     linear-gradient(90deg, #060a14 0%, rgba(6, 10, 20, 0.94) 36%, rgba(6, 10, 20, 0.32) 72%, rgba(6, 10, 20, 0.55) 100%),
-    linear-gradient(180deg, rgba(6, 10, 20, 0.15) 0%, rgba(6, 10, 20, 0.0) 50%, #060a14 100%);
+    linear-gradient(180deg, rgba(6, 10, 20, 0.12) 0%, rgba(6, 10, 20, 0) 50%, #060a14 100%);
   pointer-events: none;
 }
 
@@ -258,81 +281,79 @@ body.tv .container {
   z-index: 3;
   height: 100%;
   max-width: 58%;
-  padding: 34px 46px;
+  padding: 24px 38px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
-  gap: 14px;
+  gap: 10px;
+  box-sizing: border-box;
 }
 
 #tvAuroraHero .tah-title {
-  font-size: clamp(32px, 3vw, 50px);
+  font-size: 36px;
   font-weight: 900;
   color: #ffffff;
   line-height: 1.15;
-  letter-spacing: 1px;
-  text-shadow: 0 6px 24px rgba(0, 0, 0, 0.85);
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 #tvAuroraHero .tah-tags {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 #tvAuroraHero .tah-tag {
-  padding: 4px 12px;
-  border-radius: 8px;
-  font-size: 15px;
+  padding: 3px 10px;
+  border-radius: 7px;
+  font-size: 13.5px;
   font-weight: 700;
-  background: rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.12);
   color: #dce6fa;
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 #tvAuroraHero .tah-tag.tah-4k {
-  background: linear-gradient(135deg, rgba(0, 229, 255, 0.24), rgba(18, 183, 245, 0.18));
+  background: rgba(0, 229, 255, 0.22);
   color: var(--tv-cyan);
   border-color: rgba(0, 229, 255, 0.45);
 }
 
 #tvAuroraHero .tah-desc {
-  font-size: 18px;
-  line-height: 1.6;
+  font-size: 16px;
+  line-height: 1.55;
   color: #b9c9e8;
-  max-width: 680px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  max-width: 640px;
+  height: 50px;
   overflow: hidden;
 }
 
 #tvAuroraHero .tah-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-top: 6px;
+  gap: 14px;
+  margin-top: 4px;
 }
 
 #tvAuroraHero .tah-play-btn {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 36px;
+  gap: 8px;
+  padding: 11px 30px;
   border-radius: 999px;
-  font-size: 21px;
+  font-size: 18px;
   font-weight: 900;
   color: #031022;
   background: linear-gradient(135deg, #00e5ff 0%, #1794ff 100%);
   border: none;
   text-decoration: none;
-  box-shadow: 0 8px 28px rgba(0, 229, 255, 0.42);
+  box-shadow: 0 6px 24px rgba(0, 229, 255, 0.4);
   cursor: pointer;
 }
 
@@ -340,20 +361,23 @@ body.tv .container {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 13px 26px;
+  padding: 10px 22px;
   border-radius: 999px;
-  font-size: 18px;
+  font-size: 16.5px;
   font-weight: 700;
   color: #e4edff;
   background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   text-decoration: none;
   cursor: pointer;
 }
 
-/* ---------- 大屏海报卡与横向轨道 ---------- */
+/* ============================================================
+ * 全站 TV 影片海报网格: 严格一排 4 个 (repeat(4, 1fr)) + 100% 统一等高盒模型
+ * 彻底解决老旧机顶盒不支持 aspect-ratio 导致的高矮不一和方向键串行问题
+ * ============================================================ */
 body.tv .row {
-  margin-bottom: 28px !important;
+  margin-bottom: 24px !important;
 }
 
 body.tv .row-head {
@@ -362,12 +386,12 @@ body.tv .row-head {
 
 body.tv .row-head .row-title,
 body.tv .page-title {
-  font-size: 26px !important;
+  font-size: 24px !important;
   font-weight: 900 !important;
   color: #ffffff !important;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
 }
 
 body.tv .row-head .row-title::before,
@@ -375,84 +399,115 @@ body.tv .page-title::before {
   content: '';
   display: inline-block;
   width: 6px;
-  height: 24px;
+  height: 22px;
   border-radius: 999px;
   background: linear-gradient(180deg, #00e5ff, #1278ff);
 }
 
-body.tv #rows .grid {
-  display: flex !important;
-  flex-wrap: nowrap !important;
-  overflow-x: auto !important;
-  overflow-y: visible !important;
-  gap: 24px !important;
-  padding: 14px 12px 26px !important;
-  scrollbar-width: none;
-}
-
-body.tv #rows .grid::-webkit-scrollbar {
-  display: none;
-}
-
-body.tv #rows .card {
-  flex: 0 0 calc((100% - 120px) / 6) !important;
-  min-width: 220px !important;
-  max-width: 270px !important;
-  margin: 0 !important;
-}
-
+/* 强制所有影片列表（首页推荐行、分类页、会员中心、相关推荐）统一为一排 4 个标准网格，绝不横向滚动 */
+body.tv #rows .grid,
 body.tv #browseGrid,
 body.tv #uBody .grid,
-body.tv .tv-direct-grid {
+body.tv .tv-direct-grid,
+body.tv #relSec .grid,
+body.tv #tvPlayRelGrid {
   display: grid !important;
-  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
-  gap: 26px !important;
-  padding: 14px 8px 40px !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  grid-gap: 22px !important;
+  gap: 22px !important;
+  padding: 10px 6px 26px !important;
   overflow: visible !important;
+  flex-wrap: wrap !important;
 }
 
+body.tv #rows .card,
 body.tv .card {
-  border-radius: 18px !important;
-  background: rgba(15, 23, 44, 0.72) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  flex: none !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  margin: 0 !important;
+  border-radius: 16px !important;
+  background: rgba(15, 24, 46, 0.85) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.09) !important;
   padding: 8px 8px 12px !important;
-  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.18s ease !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
 }
 
+/* 100% 兼容 Android 5/6/7/8/9 机顶盒 WebView 的固定比例竖向海报容器 */
 body.tv .card-poster {
-  border-radius: 14px !important;
-  aspect-ratio: 2 / 2.75 !important;
-  overflow: hidden;
+  position: relative !important;
+  width: 100% !important;
+  height: 0 !important;
+  padding-bottom: 132% !important;
+  aspect-ratio: auto !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  background: linear-gradient(145deg, #162447 0%, #0a1224 100%) !important;
+  flex-shrink: 0 !important;
+}
+
+body.tv .card-poster img {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  display: block !important;
 }
 
 body.tv .card-badge {
-  font-size: 13px !important;
+  position: absolute !important;
+  left: 8px !important;
+  bottom: 8px !important;
+  z-index: 2 !important;
+  font-size: 12.5px !important;
   font-weight: 800 !important;
-  padding: 4px 10px !important;
-  border-radius: 8px !important;
-  background: rgba(6, 12, 26, 0.86) !important;
+  padding: 3px 9px !important;
+  border-radius: 7px !important;
+  background: rgba(6, 12, 26, 0.88) !important;
   color: var(--tv-cyan) !important;
   border: 1px solid rgba(0, 229, 255, 0.35);
+  max-width: calc(100% - 16px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 body.tv .card-name {
-  font-size: 19px !important;
+  font-size: 18px !important;
   font-weight: 800 !important;
   margin-top: 10px !important;
   color: #f0f5ff !important;
   text-align: center !important;
+  height: 26px !important;
+  line-height: 26px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  display: block !important;
 }
 
 body.tv .card-sub,
 body.tv .card-src {
-  font-size: 14px !important;
+  font-size: 13.5px !important;
   text-align: center !important;
   color: var(--tv-dim) !important;
+  height: 20px !important;
+  line-height: 20px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  margin-top: 2px !important;
 }
 
 body.tv .card.tv-f {
-  transform: scale(1.08) translateY(-6px) !important;
-  background: rgba(20, 34, 66, 0.98) !important;
+  transform: scale(1.05) translateY(-4px) !important;
+  background: rgba(20, 36, 70, 0.98) !important;
   border-color: var(--tv-cyan) !important;
 }
 
@@ -461,333 +516,130 @@ body.tv .card.tv-f .card-name {
 }
 
 /* ============================================================
- * 三栏同屏实时搜索页 (对标腾讯视频TV版 + 集成手机扫码同步输入)
+ * TV 搜索页 (#/search):
+ * 左侧固定 A-Z 全键盘(无九宫格、无数字键) + 底部固定手机扫码二维码 (一屏紧凑绝不上下滚)
+ * 中栏猜你想搜 · 右栏 4 列等高海报独立上下滚动
  * ============================================================ */
 .tvs-aurora-wrap {
   display: grid;
-  grid-template-columns: 420px 280px minmax(0, 1fr);
-  gap: 24px;
-  min-height: calc(100vh - 118px);
-  max-height: calc(100vh - 108px);
-  padding: 4px 0 18px;
-  align-items: stretch;
+  grid-template-columns: 380px 240px minmax(0, 1fr);
+  grid-gap: 18px;
+  gap: 18px;
+  height: calc(100vh - 96px);
+  max-height: calc(100vh - 96px);
+  padding: 2px 0 12px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .tvs-left-panel {
   background: var(--tv-panel);
   border: 1px solid var(--tv-border);
-  border-radius: 24px;
-  padding: 18px;
+  border-radius: 20px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  justify-content: space-between;
+  gap: 10px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
 }
 
 .tvs-input-box {
-  height: 56px;
-  background: rgba(6, 10, 20, 0.9);
-  border: 2px solid rgba(0, 229, 255, 0.42);
-  border-radius: 16px;
-  padding: 0 16px;
+  height: 46px;
+  background: rgba(6, 10, 20, 0.92);
+  border: 2px solid rgba(0, 229, 255, 0.48);
+  border-radius: 13px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.6);
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .tvs-input-ico {
-  font-size: 21px;
+  font-size: 18px;
   color: var(--tv-cyan);
 }
 
 .tvs-input-text {
   flex: 1;
-  font-size: 24px;
+  font-size: 21px;
   font-weight: 900;
   color: #ffffff;
-  letter-spacing: 3px;
+  letter-spacing: 2.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .tvs-input-text.is-placeholder {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: #7c92ba;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 
-.tvs-mode-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  background: rgba(8, 13, 26, 0.75);
-  padding: 5px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-}
-
-.tvs-mode-tab {
-  height: 42px;
-  border-radius: 999px;
-  border: none;
-  background: transparent;
-  color: #9cb0d6;
-  font-size: 16px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.tvs-mode-tab.on {
-  background: linear-gradient(135deg, rgba(0, 229, 255, 0.25), rgba(18, 131, 255, 0.35));
-  color: #ffffff;
-  border: 1px solid rgba(0, 229, 255, 0.55);
-}
-
+/* 紧凑 6列×5行 纯字母键盘 (A-Z + 退格 + 清空)，高度锁死绝不拉伸 */
 .tvs-kb-full {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  gap: 8px;
-  flex: 1;
+  grid-auto-rows: 40px;
+  grid-gap: 6px;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .tvs-kb-full button {
-  height: 48px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   background: #152240;
   color: #f0f5ff;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
   cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.tvs-kb-full button.tv-f,
-.tvs-kb-t9 button.tv-f,
-.tvs-fn-row button.tv-f {
+.tvs-kb-full button.tvs-fn-inline {
+  grid-column: span 2;
+  background: #1e315c;
+  color: #dce8ff;
+  font-size: 14.5px;
+}
+
+.tvs-kb-full button.tv-f {
   background: linear-gradient(135deg, #00e5ff, #1283ff) !important;
   color: #031022 !important;
   border-color: transparent !important;
 }
 
-.tvs-kb-t9 {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  flex: 1;
-  position: relative;
-}
-
-.tvs-t9-btn {
-  height: 86px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: #152240;
-  color: #ffffff;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  cursor: pointer;
-  position: relative;
-}
-
-.tvs-t9-btn strong {
-  font-size: 25px;
-  font-weight: 900;
-  letter-spacing: 2px;
-}
-
-.tvs-t9-btn small {
-  font-size: 13.5px;
-  color: #8fa4c9;
-  font-weight: 700;
-}
-
-.tvs-t9-btn.tv-f small {
-  color: #06223f;
-}
-
-.tvs-t9-pop {
-  position: absolute;
-  inset: 0;
-  background: rgba(6, 11, 24, 0.96);
-  border: 2px solid var(--tv-cyan);
-  border-radius: 18px;
-  z-index: 35;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 18px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85);
-}
-
-.tvs-t9-pop-title {
-  font-size: 16px;
-  color: var(--tv-dim);
-}
-
-.tvs-t9-pop-row {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.tvs-t9-sub {
-  width: 66px;
-  height: 66px;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: #192a4f;
-  color: #fff;
-  font-size: 25px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.tvs-fn-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1.25fr;
-  gap: 10px;
-}
-
-.tvs-fn-row button {
-  height: 50px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: #1a2849;
-  color: #e4edff;
-  font-size: 17px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.tvs-fn-row button.tvs-fn-go {
-  background: linear-gradient(135deg, #12b7f5, #2b68ff);
-  color: #ffffff;
-}
-
-/* 中栏: 猜你想搜 + 底部手机扫码同步搜索卡片 */
-.tvs-mid-panel {
-  background: rgba(13, 21, 40, 0.65);
-  border: 1px solid var(--tv-border);
-  border-radius: 24px;
-  padding: 18px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow: hidden;
-}
-
-.tvs-col-title {
-  font-size: 22px;
-  font-weight: 900;
-  color: #ffffff;
-  padding: 0 6px;
-}
-
-.tvs-col-sub {
-  font-size: 13.5px;
-  color: var(--tv-dim);
-  padding: 0 6px;
-  margin-top: -6px;
-}
-
-.tvs-sug-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 2px;
-  flex: 1;
-  overflow-y: auto;
-  scrollbar-width: none;
-  padding: 2px 4px;
-}
-
-.tvs-sug-list::-webkit-scrollbar {
-  display: none;
-}
-
-.tvs-sug-btn {
-  width: 100%;
-  text-align: left;
-  padding: 10px 12px;
-  border-radius: 13px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(22, 34, 62, 0.65);
-  color: #edf3ff;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.tvs-sug-rank {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 900;
-  background: rgba(255, 255, 255, 0.1);
-  color: #9cb0d6;
-  flex-shrink: 0;
-}
-
-.tvs-sug-rank.r1 { background: #ff6b3d; color: #fff; }
-.tvs-sug-rank.r2 { background: #ffb400; color: #1a1200; }
-.tvs-sug-rank.r3 { background: #12b7f5; color: #fff; }
-
-.tvs-sug-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.tvs-sug-name {
-  font-size: 16.5px;
-  font-weight: 800;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tvs-sug-py {
-  font-size: 12px;
-  color: #7c93bd;
-  letter-spacing: 1.5px;
-  margin-top: 1px;
-}
-
-/* 📱 手机扫码同步输入卡片 */
+/* 左栏底部紧凑固定的手机扫码同步卡片 */
 .tvs-qr-card {
-  margin-top: auto;
-  background: linear-gradient(135deg, rgba(16, 30, 62, 0.95), rgba(10, 18, 38, 0.95));
-  border: 1px solid rgba(0, 229, 255, 0.32);
-  border-radius: 18px;
-  padding: 12px;
+  background: linear-gradient(135deg, rgba(16, 30, 62, 0.96), rgba(10, 18, 38, 0.96));
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 14px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   gap: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   flex-shrink: 0;
 }
 
 .tvs-qr-box {
-  width: 86px;
-  height: 86px;
-  border-radius: 10px;
+  width: 74px;
+  height: 74px;
+  border-radius: 9px;
   background: #ffffff;
   padding: 4px;
   flex-shrink: 0;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -805,40 +657,138 @@ body.tv .card.tv-f .card-name {
 }
 
 .tvs-qr-title {
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 900;
   color: var(--tv-cyan);
-  display: flex;
-  align-items: center;
-  gap: 5px;
 }
 
 .tvs-qr-desc {
-  font-size: 12px;
+  font-size: 11.5px;
   color: #b8c7e6;
-  line-height: 1.45;
-  margin-top: 4px;
+  line-height: 1.35;
+  margin-top: 3px;
 }
 
 .tvs-qr-status {
-  font-size: 11.5px;
+  font-size: 11px;
   color: #34d399;
   font-weight: 700;
-  margin-top: 5px;
+  margin-top: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* 右栏: 同屏实时大海报网格 */
-.tvs-right-panel {
-  background: rgba(13, 21, 40, 0.45);
+/* 中栏: 猜你想搜 / 拼音首字母联想 (固定一屏高度) */
+.tvs-mid-panel {
+  background: rgba(13, 21, 40, 0.72);
   border: 1px solid var(--tv-border);
-  border-radius: 24px;
-  padding: 18px 22px;
+  border-radius: 20px;
+  padding: 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.tvs-col-title {
+  font-size: 19px;
+  font-weight: 900;
+  color: #ffffff;
+  padding: 0 4px;
+}
+
+.tvs-col-sub {
+  font-size: 12px;
+  color: var(--tv-dim);
+  padding: 0 4px;
+  margin-top: -4px;
+}
+
+.tvs-sug-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 2px;
+  flex: 1;
+  overflow: hidden;
+  padding: 2px;
+}
+
+.tvs-sug-btn {
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(22, 34, 62, 0.72);
+  color: #edf3ff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tvs-sug-btn.tv-f {
+  background: linear-gradient(135deg, #00e5ff, #1283ff) !important;
+  color: #031022 !important;
+}
+
+.tvs-sug-btn.tv-f .tvs-sug-py {
+  color: #042244 !important;
+}
+
+.tvs-sug-rank {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 900;
+  background: rgba(255, 255, 255, 0.12);
+  color: #9cb0d6;
+  flex-shrink: 0;
+}
+
+.tvs-sug-rank.r1 { background: #ff6b3d; color: #fff; }
+.tvs-sug-rank.r2 { background: #ffb400; color: #1a1200; }
+.tvs-sug-rank.r3 { background: #12b7f5; color: #fff; }
+
+.tvs-sug-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.tvs-sug-name {
+  font-size: 15px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tvs-sug-py {
+  font-size: 11px;
+  color: #7c93bd;
+  letter-spacing: 1px;
+}
+
+/* 右栏: 独立滚动 4 列海报结果网格 */
+.tvs-right-panel {
+  background: rgba(13, 21, 40, 0.5);
+  border: 1px solid var(--tv-border);
+  border-radius: 20px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
@@ -846,44 +796,42 @@ body.tv .card.tv-f .card-name {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .tvs-right-stat {
-  font-size: 15px;
+  font-size: 13.5px;
   color: var(--tv-dim);
 }
 
 #tvsResultGrid {
   display: grid !important;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  gap: 20px !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  grid-gap: 16px !important;
+  gap: 16px !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
-  padding: 10px 8px 28px !important;
+  padding: 8px 6px 24px !important;
   flex: 1;
-  scrollbar-width: none;
+  align-content: start;
 }
 
 #tvsResultGrid::-webkit-scrollbar {
-  display: none;
+  width: 6px;
 }
 
-#tvsResultGrid .card {
-  width: 100% !important;
-  max-width: none !important;
-  min-width: 0 !important;
+#tvsResultGrid::-webkit-scrollbar-thumb {
+  background: rgba(0, 229, 255, 0.3);
+  border-radius: 999px;
 }
 
 /* ============================================================
- * 全屏 TV 播放页 & 底部极光遥控器选集/换源浮层 (#tvPlayerOsd)
+ * TV 端专属播放页 (#/play/...):
+ * 左上 58% 高清 16:9 播放窗 + 遥控器大按钮栏
+ * 右上 42% 影片简介 + 切换片源胶囊 + 5列选集矩阵
+ * 下方 4 列相关推荐影片
  * ============================================================ */
-body.tv.tv-playing {
-  overflow: hidden !important;
-  background: #000 !important;
-}
-
-body.tv.tv-playing #topbar,
 body.tv.tv-playing .play-head,
 body.tv.tv-playing .play-actions,
 body.tv.tv-playing #relRail,
@@ -895,15 +843,31 @@ body.tv.tv-playing #gestHud {
   display: none !important;
 }
 
+body.tv.tv-playing .play-top-row {
+  display: grid !important;
+  grid-template-columns: 58% minmax(0, 42%) !important;
+  grid-gap: 22px !important;
+  gap: 22px !important;
+  align-items: stretch !important;
+  margin-top: 4px !important;
+}
+
+body.tv.tv-playing .play-col {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+}
+
 body.tv.tv-playing #videoWrap {
-  position: fixed !important;
-  inset: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  max-height: none !important;
-  z-index: 90 !important;
-  border-radius: 0 !important;
+  position: relative !important;
+  width: 100% !important;
+  height: 430px !important;
+  border-radius: 18px !important;
   background: #000 !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.12) !important;
+  overflow: hidden !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.7) !important;
 }
 
 body.tv.tv-playing #videoEl {
@@ -912,22 +876,261 @@ body.tv.tv-playing #videoEl {
   object-fit: contain !important;
 }
 
+/* 左下遥控器播放控制条 */
+#tvPlayCtrlBar {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1fr 1fr;
+  grid-gap: 12px;
+  gap: 12px;
+  background: var(--tv-panel);
+  border: 1px solid var(--tv-border);
+  border-radius: 16px;
+  padding: 10px 12px;
+}
+
+.tv-pctrl-btn {
+  height: 46px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #162445;
+  color: #eef4ff;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tv-pctrl-btn.primary {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.25), rgba(18, 131, 255, 0.35));
+  border-color: rgba(0, 229, 255, 0.55);
+  color: #ffffff;
+}
+
+.tv-pctrl-btn.tv-f {
+  background: linear-gradient(135deg, #00e5ff, #1283ff) !important;
+  color: #031022 !important;
+  border-color: transparent !important;
+}
+
+/* 右侧 TV 专属选集/换源/简介控制台 */
+#tvPlayRightPanel {
+  background: var(--tv-panel);
+  border: 1px solid var(--tv-border);
+  border-radius: 18px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 498px;
+  box-sizing: border-box;
+  overflow: hidden;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+}
+
+.tvp-meta-head {
+  flex-shrink: 0;
+}
+
+.tvp-vod-title {
+  font-size: 24px;
+  font-weight: 900;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tvp-vod-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.tvp-badge {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 2px 9px;
+  border-radius: 6px;
+  background: rgba(0, 229, 255, 0.16);
+  color: var(--tv-cyan);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+}
+
+.tvp-vod-desc {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #a9bce0;
+  margin-top: 6px;
+  max-height: 40px;
+  overflow: hidden;
+}
+
+.tvp-sec-label {
+  font-size: 15px;
+  font-weight: 800;
+  color: #dce8ff;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tvp-src-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 4px;
+  flex-shrink: 0;
+}
+
+.tvp-src-btn {
+  flex: 0 0 auto;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #152342;
+  color: #dce8ff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tvp-src-btn.current {
+  background: rgba(0, 229, 255, 0.2);
+  border-color: var(--tv-cyan);
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.tvp-src-btn.tv-f {
+  background: linear-gradient(135deg, #00e5ff, #1283ff) !important;
+  color: #031022 !important;
+}
+
+.tvp-ep-ranges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+
+.tvp-range-btn {
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: #9cb0d6;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tvp-range-btn.on {
+  background: rgba(0, 229, 255, 0.22);
+  border-color: var(--tv-cyan);
+  color: #fff;
+}
+
+.tvp-range-btn.tv-f {
+  background: var(--tv-cyan) !important;
+  color: #031022 !important;
+}
+
+.tvp-ep-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-gap: 8px;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 2px;
+  flex: 1;
+  align-content: start;
+}
+
+.tvp-ep-btn {
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #162445;
+  color: #eef4ff;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+}
+
+.tvp-ep-btn.current {
+  background: rgba(0, 229, 255, 0.24);
+  border-color: var(--tv-cyan);
+  color: var(--tv-cyan);
+  font-weight: 900;
+}
+
+.tvp-ep-btn.tv-f {
+  background: linear-gradient(135deg, #00e5ff, #1283ff) !important;
+  color: #031022 !important;
+}
+
+#tvPlayRelWrap {
+  margin-top: 22px;
+}
+
+/* ---------- 当点击「🖥 全屏播放」进入真全屏模式 (body.tv-fs-mode) ---------- */
+body.tv.tv-playing.tv-fs-mode {
+  overflow: hidden !important;
+  background: #000 !important;
+}
+
+body.tv.tv-playing.tv-fs-mode #topbar,
+body.tv.tv-playing.tv-fs-mode #tvPlayCtrlBar,
+body.tv.tv-playing.tv-fs-mode #tvPlayRightPanel,
+body.tv.tv-playing.tv-fs-mode #tvPlayRelWrap {
+  display: none !important;
+}
+
+body.tv.tv-playing.tv-fs-mode #videoWrap {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 9990 !important;
+  border-radius: 0 !important;
+  border: none !important;
+}
+
 #tvPlayHint {
   position: absolute;
-  top: 28px;
-  right: 38px;
+  top: 18px;
+  right: 22px;
   z-index: 96;
-  background: rgba(8, 13, 26, 0.78);
+  background: rgba(8, 13, 26, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(10px);
   border-radius: 999px;
-  padding: 10px 24px;
+  padding: 8px 18px;
   color: #dce6fa;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 14px;
   pointer-events: none;
   transition: opacity 0.35s ease;
 }
@@ -938,23 +1141,22 @@ body.tv.tv-playing #videoEl {
 
 #tvPlayHint b {
   color: var(--tv-cyan);
-  margin-right: 4px;
+  margin-right: 3px;
 }
 
 #tvPlayCenterHud {
   position: absolute;
-  top: 42%;
+  top: 45%;
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 97;
-  background: rgba(6, 11, 24, 0.86);
-  border: 1.5px solid rgba(0, 229, 255, 0.45);
-  border-radius: 20px;
-  padding: 18px 34px;
+  background: rgba(6, 11, 24, 0.88);
+  border: 1.5px solid rgba(0, 229, 255, 0.5);
+  border-radius: 16px;
+  padding: 14px 28px;
   color: #ffffff;
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 900;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.8);
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.2s ease;
@@ -970,15 +1172,15 @@ body.tv.tv-playing #videoEl {
   right: 0;
   bottom: 0;
   z-index: 98;
-  background: linear-gradient(180deg, rgba(5, 8, 16, 0.0) 0%, rgba(5, 9, 20, 0.88) 20%, rgba(5, 9, 20, 0.98) 100%);
-  padding: 44px 54px 34px;
+  background: linear-gradient(180deg, rgba(5, 8, 16, 0) 0%, rgba(5, 9, 20, 0.92) 22%, rgba(5, 9, 20, 0.98) 100%);
+  padding: 32px 36px 26px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   transform: translateY(105%);
   opacity: 0;
   pointer-events: none;
-  transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.22s ease;
+  transition: transform 0.22s ease, opacity 0.2s ease;
 }
 
 #tvPlayerOsd.open {
@@ -991,18 +1193,17 @@ body.tv.tv-playing #videoEl {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
 }
 
 .tvo-title {
-  font-size: 34px;
+  font-size: 26px;
   font-weight: 900;
   color: #ffffff;
-  text-shadow: 0 4px 16px rgba(0, 0, 0, 0.8);
 }
 
 .tvo-sub {
-  font-size: 17px;
+  font-size: 15px;
   color: var(--tv-cyan);
   font-weight: 700;
 }
@@ -1010,112 +1211,83 @@ body.tv.tv-playing #videoEl {
 .tvo-prog-row {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
 }
 
 .tvo-time {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
   color: #d6e2fa;
-  font-variant-numeric: tabular-nums;
-  min-width: 78px;
+  min-width: 72px;
 }
 
 .tvo-bar-track {
   flex: 1;
-  height: 10px;
+  height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.2);
   position: relative;
-  overflow: visible;
 }
 
 .tvo-bar-fill {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #00e5ff, #1296ff);
-  box-shadow: 0 0 18px rgba(0, 229, 255, 0.8);
-  position: relative;
   width: 0%;
-}
-
-.tvo-bar-fill::after {
-  content: '';
-  position: absolute;
-  right: -9px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #ffffff;
-  border: 4px solid var(--tv-cyan);
-  box-shadow: 0 0 16px var(--tv-cyan);
 }
 
 .tvo-rail {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   overflow-x: auto;
-  padding: 8px 6px;
-  scrollbar-width: none;
-}
-
-.tvo-rail::-webkit-scrollbar {
-  display: none;
+  padding: 6px 4px;
 }
 
 .tvo-pill {
   flex: 0 0 auto;
-  min-width: 132px;
-  height: 58px;
-  padding: 0 24px;
+  min-width: 118px;
+  height: 50px;
+  padding: 0 20px;
   border-radius: 999px;
-  border: 1.5px solid rgba(255, 255, 255, 0.13);
-  background: rgba(22, 34, 62, 0.85);
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+  background: rgba(22, 34, 62, 0.88);
   color: #eef4ff;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
   cursor: pointer;
 }
 
 .tvo-pill small {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--tv-cyan);
-  font-weight: 700;
 }
 
 .tvo-pill.current {
-  background: rgba(0, 229, 255, 0.18);
+  background: rgba(0, 229, 255, 0.2);
   border-color: var(--tv-cyan);
-  color: #ffffff;
 }
 
 .tvo-pill.tv-f {
   background: linear-gradient(135deg, #00e5ff, #1283ff) !important;
   color: #031022 !important;
-  border-color: transparent !important;
-}
-
-.tvo-pill.tv-f small {
-  color: #041d3d !important;
 }
 
 /* ============================================================
- * 全局 TV 遥控器软键盘弹窗 (#tvModalKbMask)
+ * 全局 TV 遥控器软键盘弹窗 (#tvModalKbMask - 供会员登录/注册输入数字与字母)
  * ============================================================ */
 #tvModalKbMask {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 220;
-  background: rgba(3, 6, 14, 0.82);
-  backdrop-filter: blur(10px);
+  background: rgba(3, 6, 14, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1126,15 +1298,15 @@ body.tv.tv-playing #videoEl {
 }
 
 .tmk-box {
-  width: min(92vw, 760px);
+  width: min(92vw, 740px);
   background: #0e1830;
-  border: 2px solid rgba(0, 229, 255, 0.45);
-  border-radius: 26px;
-  padding: 26px 30px;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.9);
+  border: 2px solid rgba(0, 229, 255, 0.48);
+  border-radius: 24px;
+  padding: 22px 26px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.9);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .tmk-head {
@@ -1144,45 +1316,45 @@ body.tv.tv-playing #videoEl {
 }
 
 .tmk-title {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 900;
   color: #ffffff;
 }
 
 .tmk-preview {
-  height: 58px;
-  border-radius: 14px;
+  height: 52px;
+  border-radius: 12px;
   background: #060b18;
-  border: 1.5px solid rgba(0, 229, 255, 0.4);
-  padding: 0 18px;
-  font-size: 24px;
+  border: 1.5px solid rgba(0, 229, 255, 0.42);
+  padding: 0 16px;
+  font-size: 22px;
   font-weight: 800;
   color: var(--tv-cyan);
   display: flex;
   align-items: center;
-  letter-spacing: 2px;
 }
 
 .tmk-grid {
   display: grid;
   grid-template-columns: repeat(9, 1fr);
-  gap: 10px;
+  grid-gap: 8px;
+  gap: 8px;
 }
 
 .tmk-key {
-  height: 52px;
-  border-radius: 12px;
+  height: 46px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: #172647;
   color: #ffffff;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
   cursor: pointer;
 }
 
 .tmk-key.fn {
   background: #20335e;
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .tmk-key.ok {
@@ -1196,15 +1368,31 @@ body.tv.tv-playing #videoEl {
   color: #031022 !important;
 }
 
-/* ---------- 电视直播 (#/live) 大屏优化 ---------- */
-body.tv .live-ch {
-  padding: 14px 18px !important;
-  font-size: 19px !important;
-  font-weight: 700 !important;
-  border-radius: 14px !important;
-  cursor: pointer;
+/* ---------- TV 端电视直播 (#/live) 大屏增强样式 ---------- */
+body.tv .live-cockpit {
+  grid-template-columns: 200px 310px minmax(0, 1fr) !important;
+  height: calc(100vh - 98px) !important;
+  max-height: calc(100vh - 98px) !important;
 }
 
-body.tv .live-fav {
-  display: none !important;
+body.tv .live-col-groups,
+body.tv .live-col-channels,
+body.tv .live-col-stage {
+  background: var(--tv-panel) !important;
+  border-color: var(--tv-border) !important;
+}
+
+body.tv .live-group-btn {
+  font-size: 17px !important;
+  padding: 13px 16px !important;
+}
+
+body.tv .lch-name {
+  font-size: 16.5px !important;
+}
+
+body.tv .live-line-pill,
+body.tv .live-act-btn {
+  font-size: 15px !important;
+  padding: 8px 16px !important;
 }

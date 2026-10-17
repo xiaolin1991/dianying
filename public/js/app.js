@@ -42,22 +42,22 @@
   /* ---------- 电视/盒子识别(WebView 无触摸屏) + 标题首字母索引 ---------- */
   function isTvDevice() {
     try {
+      // 彻底清理旧版遗留的持久化 TV 标记，确保电脑端输入正常域名 100% 显示电脑界面
+      try { localStorage.removeItem('ntv:tvMode'); sessionStorage.removeItem('ntv_tv_override'); } catch (e) {}
+      const pathStr = (location.pathname || '/').replace(/^\/+|\/+$/g, '');
       const hashStr = location.hash || '';
       const searchStr = (location.search || '') + '&' + (hashStr.split('?')[1] || '');
-      if (/^#\/tv-remote/i.test(hashStr) || /(?:^|[?&])tv_sid=/i.test(searchStr)) {
+      // 管理员后台与手机扫码遥控页永远强制使用电脑/手机原生 UI，绝不混入 TV 样式
+      if (pathStr === 'xiaolin1991' || pathStr === 'admin' || /^#\/(xiaolin1991|admin|tv-remote)/i.test(hashStr) || /(?:^|[?&])tv_sid=/i.test(searchStr)) {
         return false;
       }
       if (/(?:^|[?&])tv=0(?:&|$)/i.test(searchStr)) {
-        try { localStorage.removeItem('ntv:tvMode'); sessionStorage.removeItem('ntv_tv_override'); } catch (e) {}
         return false;
       }
+      // 仅当网址当前明确带有 ?tv=1 参数时，才在电脑上预览 TV 模式
       if (/(?:^|[?&])tv=1(?:&|$)/i.test(searchStr)) {
-        try { localStorage.setItem('ntv:tvMode', '1'); sessionStorage.setItem('ntv_tv_override', '1'); } catch (e) {}
         return true;
       }
-      try {
-        if (localStorage.getItem('ntv:tvMode') === '1' || sessionStorage.getItem('ntv_tv_override') === '1') return true;
-      } catch (e) {}
       if (window.AndroidBridge && typeof window.AndroidBridge.isTv === 'function') {
         try { if (window.AndroidBridge.isTv()) return true; } catch (e) {}
       }
@@ -748,7 +748,16 @@
 
   /* ------------------------------ 路由 ------------------------------ */
   function parseHash() {
-    let h = location.hash.replace(/^#/, '') || '/home';
+    let rawHash = location.hash.replace(/^#/, '');
+    const pathSeg = (location.pathname || '/').replace(/^\/+|\/+$/g, '');
+    let h = rawHash;
+    if (!h || h === '/') {
+      if (pathSeg && pathSeg !== 'index.html') {
+        h = '/' + pathSeg + (location.search || '');
+      } else {
+        h = '/home';
+      }
+    }
     const qi = h.indexOf('?');
     const query = {};
     if (qi >= 0) {
@@ -762,6 +771,22 @@
   async function route() {
     const { parts, query } = parseHash();
     const view = $('#view');
+    const customAdm = store.get('adminPathLive', 'xiaolin1991') || 'xiaolin1991';
+    const isAdmRoute = parts[0] === 'xiaolin1991' || parts[0] === 'admin' || parts[0] === customAdm;
+    if (isAdmRoute) {
+      // 进入后台强制移除一切 TV 模式样式，保持纯正电脑管理端界面
+      document.body.classList.remove('tv', 'tv-playing', 'tv-fs-mode');
+      document.documentElement.classList.remove('tv-root');
+      // 将 /#/xiaolin1991 自动美化为无 # 的 /xiaolin1991
+      if (location.hash && location.hash.indexOf('#/' + parts[0]) === 0) {
+        try { history.replaceState(null, '', '/' + parts[0]); } catch (e) {}
+      }
+    } else {
+      const curPath = (location.pathname || '/').replace(/^\/+|\/+$/g, '');
+      if (curPath && curPath !== 'index.html' && location.hash) {
+        try { history.replaceState(null, '', '/' + location.hash); } catch (e) {}
+      }
+    }
     const routeKey = listRouteKey(parts, query);
     const prev = route._prev || null;
     if (prev && prev.key && isListRoute(prev.parts)) saveListPageCache(prev.key);
@@ -1979,7 +2004,34 @@
     const allProg = store.get(progKey, {});
 
     const isFav = store.get('favs', []).some((f) => f.key === key && f.id === String(vod.vod_id));
+    const cleanVodText = (str) => String(str || '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&ldquo;|&rdquo;|&quot;/gi, '"')
+      .replace(/&lsquo;|&rsquo;|&#39;/gi, "'")
+      .replace(/&hellip;/gi, '…')
+      .replace(/&mdash;/gi, '—')
+      .replace(/&amp;/gi, '&')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const vodCleanDesc = cleanVodText(vod.vod_content || vod.vod_blurb || '');
+    const vodCleanActor = cleanVodText(vod.vod_actor || '');
+    const vodCleanArea = cleanVodText(vod.vod_area || '');
+    const vodCleanYear = cleanVodText(vod.vod_year || '');
+    const vodCleanType = cleanVodText(vod.type_name || '');
+    const vodCleanRemarks = cleanVodText(vod.vod_remarks || '');
+
     v.innerHTML = `
+      <div id="vodMetaData" class="hidden"
+        data-title="${esc(vod.vod_name)}"
+        data-year="${esc(vodCleanYear)}"
+        data-area="${esc(vodCleanArea)}"
+        data-type="${esc(vodCleanType)}"
+        data-remarks="${esc(vodCleanRemarks)}"
+        data-actor="${esc(vodCleanActor)}"
+        data-desc="${esc(vodCleanDesc)}"
+        data-pic="${esc(vod.vod_pic || '')}"
+        data-total-eps="${groups[gi].eps.length}"></div>
       <div class="container page-wrap play-head">
         <button type="button" class="play-back-btn" id="playBackBtn" title="返回" aria-label="返回">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
@@ -2568,7 +2620,7 @@
             renderFailoverCancelled();
           };
           clearTimeout(autoFailoverTimer);
-          autoFailoverTimer = setTimeout(doSwap, 1200);
+          autoFailoverTimer = setTimeout(doSwap, isTvDevice() ? 300 : 1000);
         } else if (swapPending > 0) {
           tip.innerHTML = `
             <div class="failover-box" style="padding:16px 20px;background:rgba(0,0,0,0.85);border-radius:12px;border:1px solid rgba(255,255,255,0.15);max-width:380px;margin:0 auto">
@@ -2654,13 +2706,13 @@
         }
       }, 3500);
 
-      // 超时兜底(14秒): 若完全无法连接/无流到达，尝试自动换源
+      // 超时兜底(6.5秒): 若 6.5 秒内仍未加载出视频帧(readyState < 2 且进度为 0)，立即触发自动换源，杜绝电视/网页端卡死黑屏
       failoverCheckTimer = setTimeout(() => {
         if (!alive() || !video.isConnected || hasPlaybackFailed) return;
-        if (video.readyState === 0 && video.paused && !tip.classList.contains('hidden') && !tip.querySelector('.failover-box')) {
+        if (video.readyState < 2 && (!video.currentTime || video.currentTime < 0.2) && !tip.querySelector('.failover-box')) {
           handlePlaybackFailure('timeout_no_stream');
         }
-      }, 14000);
+      }, 6500);
 
       if (resume && allProg[gi + ':' + ei] && allProg[gi + ':' + ei].t > 20) {
         const onceSeek = () => { try { video.currentTime = allProg[gi + ':' + ei].t; } catch (e) {} };
@@ -6187,159 +6239,377 @@
   }
 
 
-  async function viewLive(query) {    const v = $('#view');
-    v.innerHTML = `<div class="container page-wrap">
-      <div class="video-wrap" style="aspect-ratio:auto;height:min(52vh,430px)">
-        <video id="videoEl" controls playsinline autoplay muted></video>
-        <div class="video-tip hidden" id="videoTip"></div>
-      </div>
-      <div class="live-now" id="nowName">📺 正在加载频道列表…</div>
-      <div id="liveLinesWrap" style="display:none;margin-top:8px;padding:6px 12px;background:rgba(255,255,255,0.04);border-radius:8px;align-items:center;gap:8px;flex-wrap:wrap">
-        <span style="font-size:12px;color:var(--dim);font-weight:600;display:flex;align-items:center;gap:4px">📡 线路切换:</span>
-        <div id="liveLinesList" style="display:flex;gap:6px;flex-wrap:wrap"></div>
-      </div>
-      <div class="live-layout" style="margin-top:14px">
-        <div class="live-groups" id="liveGroups"></div>
-        <div class="live-channels" id="liveChs"><div class="empty" style="grid-column:1/-1;padding:40px">频道加载中，若较慢请稍候…</div></div>
-      </div></div>`;
+  /* ============================================================
+     视图：电视直播 (TV大屏 / 电脑宽屏 / 手机竖屏 三端专属直播工作台)
+     ============================================================ */
+  async function viewLive(query) {
+    const v = $('#view');
+    v.innerHTML = `
+      <div class="container page-wrap live-cockpit-page">
+        <div class="live-cockpit" id="liveCockpit">
+          <!-- 左栏：频道分类 -->
+          <aside class="live-col-groups" id="liveGroupsCol">
+            <div class="live-col-head">频道分类</div>
+            <div class="live-groups-list" id="liveGroups"></div>
+          </aside>
 
-    let data;
+          <!-- 中栏：频道列表 -->
+          <section class="live-col-channels" id="liveChsCol">
+            <div class="live-col-head">
+              <span id="liveGroupTitle">频道列表</span>
+              <small id="liveGroupCount" style="color:var(--dim);font-size:12px;font-weight:500"></small>
+            </div>
+            <div class="live-filter-box" id="liveFilterBox">
+              <input type="search" id="liveFilterInput" placeholder="快速搜台（如 CCTV5 / 卫视）…" autocomplete="off">
+            </div>
+            <div class="live-channels-list" id="liveChs">
+              <div class="empty" style="padding:40px 16px"><span class="spin"></span> 正在加载高清直播频道…</div>
+            </div>
+          </section>
+
+          <!-- 右栏：16:9 实时直播播放舱 + 极速换线与遥控面板 -->
+          <section class="live-col-stage" id="liveStageCol">
+            <div class="live-stage-header">
+              <div class="live-now-badge">
+                <span class="live-dot"></span>
+                <span class="live-now-label">LIVE 实时直播</span>
+                <strong id="nowName">正在连接频道…</strong>
+              </div>
+              <div class="live-now-meta" id="liveNowMeta"></div>
+            </div>
+
+            <div class="video-wrap live-video-wrap" id="videoWrap">
+              <video id="videoEl" playsinline webkit-playsinline autoplay></video>
+              <div class="video-tip hidden" id="videoTip"></div>
+            </div>
+
+            <div class="live-ctrl-panel">
+              <div class="live-lines-bar" id="liveLinesWrap">
+                <span class="live-lines-label">⇄ 极速换线：</span>
+                <div class="live-lines-list" id="liveLinesList"></div>
+              </div>
+              <div class="live-action-bar">
+                <div class="live-action-left">
+                  <button type="button" class="btn ghost small live-act-btn" id="livePrevChBtn">⏮ 上一台</button>
+                  <button type="button" class="btn ghost small live-act-btn" id="liveNextChBtn">⏭ 下一台</button>
+                  <button type="button" class="btn ghost small live-act-btn" id="liveFavCurBtn">☆ 收藏频道</button>
+                </div>
+                <div class="live-action-right">
+                  <button type="button" class="btn primary small live-act-btn" id="liveFsBtn">🖥 全屏观看</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>`;
+
+    let rawData;
     try {
-      data = State.liveCache || (State.liveCache = await API.getLive());
+      rawData = State.liveCache || (State.liveCache = await API.getLive());
     } catch (e) {
-      $('#liveChs').innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">📡</div>直播源加载失败：${esc(e.message)}<br><small>可在后台配置其他直播源地址</small></div>`;
+      const chBox = $('#liveChs');
+      if (chBox) {
+        chBox.innerHTML = `<div class="empty" style="padding:36px 16px"><div class="big">📡</div>直播源加载失败：${esc(e.message)}<br><small>可在后台配置其他直播源地址</small></div>`;
+      }
       return;
     }
-    if (!data.groups || !data.groups.length) {
-      $('#liveChs').innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="big">📭</div>直播源为空，请在后台添加直播源地址</div>';
-      $('#nowName').textContent = '';
+    if (!rawData || !rawData.groups || !rawData.groups.length) {
+      const chBox = $('#liveChs');
+      if (chBox) {
+        chBox.innerHTML = '<div class="empty" style="padding:36px 16px"><div class="big">📭</div>直播源为空，请在后台添加直播源地址</div>';
+      }
       return;
     }
 
-    const favs = store.get('favChs', []);
-    const favGroup = { name: '⭐ 我的收藏', channels: favs };
-    const groups = [favGroup, ...data.groups];
-
-    let curG = 0;
-    function renderGroups() {
-      $('#liveGroups').innerHTML = groups.map((g, i) =>
-        `<button class="live-group-btn ${i === curG ? 'on' : ''}" data-i="${i}">
-           <span>${esc(g.name)}</span><i>${g.channels.length}</i></button>`).join('');
-      $$('#liveGroups .live-group-btn').forEach((b) => b.addEventListener('click', () => { curG = Number(b.dataset.i); renderGroups(); renderChs(); }));
-    }
-    function renderChs() {
-      const g = groups[curG];
-      if (!g.channels.length) { $('#liveChs').innerHTML = '<div class="empty" style="grid-column:1/-1;padding:36px;font-size:13px">暂无收藏，点击频道右侧 ☆ 添加</div>'; return; }
-      $('#liveChs').innerHTML = g.channels.map((ch, i) => `
-        <div class="live-ch" data-u="${esc(ch.url)}" data-n="${esc(ch.name)}" data-l="${esc(ch.logo || '')}">
-          ${ch.logo ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(ch.logo)}" onerror="this.onerror=null;this.style.display='none';this.insertAdjacentHTML('afterend','<span style=\\'width:30px;text-align:center\\'>📺</span>');">` : '<span style="width:30px;text-align:center">📺</span>'}
-          <span>${esc(ch.name)}</span>
-          <button class="live-fav ${favs.some((f) => f.url === ch.url) ? 'on' : ''}" data-fav="${esc(ch.url)}">☆</button>
-        </div>`).join('');
-      $$('#liveChs .live-ch').forEach((el) => {
-        el.addEventListener('click', (ev) => {
-          if (ev.target.closest('.live-fav')) return;
-          playCh(el.dataset.u, el.dataset.n);
-        });
-      });
-      $$('#liveChs .live-fav').forEach((b) => b.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        const host = b.closest('.live-ch');
-        const list = store.get('favChs', []);
-        const idx = list.findIndex((f) => f.url === b.dataset.fav);
-        if (idx >= 0) { list.splice(idx, 1); b.classList.remove('on'); b.textContent = '☆'; }
-        else {
-          list.push({ name: host.dataset.n, url: host.dataset.u, logo: host.dataset.l, group: '收藏' });
-          b.classList.add('on'); b.textContent = '★'; toast('已收藏频道', 'ok');
-        }
-        store.set('favChs', list);
-        groups[0].channels = list;
-        renderGroups();
-      }));
+    // 前端二次清洗分类与频道名（兼容本地缓存旧数据，彻底剔除 Undefined/Religious/News 与 24秒短视频假源）
+    function classifyGroup(gName, title) {
+      const comb = String(gName || '') + ' ' + String(title || '');
+      if (/religious|religion|christian|islam|buddh|church|bible|worship|购物|导购|测试|test/i.test(comb)) return null;
+      if (/CCTV|CGTN|央视|中央|风云|第一剧场|怀旧剧场|世界地理|兵器科技|女性时尚/i.test(comb)) return '央视频道';
+      if (/卫视/.test(title) && !/凤凰|星空|澳亚|东森|中天|三立|纬来|八大|民视|华视|台视|中视/i.test(title)) return '卫视频道';
+      if (/港澳|香港|澳门|台湾|国际|海外|翡翠|明珠|TVB|VIUTV|HOY|RTHK|凤凰|星空|华视|中视|台视|民视|东森|三立|中天|纬来|八大|澳视|Now|HBO|BBC|CNN|NHK|CNA|ABN/i.test(comb)) return '港澳台/国际';
+      if (/电影|影院|剧场|少儿|卡通|动漫|金鹰卡通|卡酷|炫动|纪实|体育|音乐|戏曲|欢笑|CHC|NewTV|SiTV|iHOT|咪咕|求索/i.test(comb)) return '影视/特色';
+      if (/地方|北京|上海|广东|深圳|广州|浙江|杭州|江苏|山东|四川|湖北|湖南|河南|福建|安徽|辽宁|重庆|天津|河北|山西|内蒙古|吉林|黑龙江|江西|广西|海南|贵州|云南|陕西|甘肃|珠江|南方|钱江|民生|经视|都市|公共|新闻/i.test(comb)) return '地方频道';
+      if (/[\u4e00-\u9fa5]/.test(title)) return '地方频道';
+      return null;
     }
 
-    // 频道核心名归一化 (如 "CCTV-1 综合 (1080p)" / "CCTV-1" / "CCTV1" 统一归为 "CCTV1")
+    function normalizeChTitle(rawTitle) {
+      let s = String(rawTitle || '').trim();
+      s = s.replace(/\[[^\]]*\]/g, '').replace(/\((?:1080p|720p|576p|480p|50fps|25fps|HD|FHD|UHD|HEVC|IPv6|IPv4|备用|测试)\)/gi, '').trim();
+      const cctvMap = {
+        '1': 'CCTV-1 综合', '2': 'CCTV-2 财经', '3': 'CCTV-3 综艺', '4': 'CCTV-4 中文国际',
+        '5': 'CCTV-5 体育', '5+': 'CCTV-5+ 体育赛事', '6': 'CCTV-6 电影', '7': 'CCTV-7 国防军事',
+        '8': 'CCTV-8 电视剧', '9': 'CCTV-9 纪录', '10': 'CCTV-10 科教', '11': 'CCTV-11 戏曲',
+        '12': 'CCTV-12 社会与法', '13': 'CCTV-13 新闻', '14': 'CCTV-14 少儿', '15': 'CCTV-15 音乐',
+        '16': 'CCTV-16 奥林匹克', '17': 'CCTV-17 农业农村'
+      };
+      const m = s.match(/^CCTV[-_\s]*(\d+\+?)(?:\s|$|[-_])/i);
+      if (m && cctvMap[m[1].toUpperCase()]) return cctvMap[m[1].toUpperCase()];
+      return s || rawTitle;
+    }
+
     function getChannelCoreKey(name) {
       if (!name) return '';
       const cctv = name.match(/CCTV[-_\s]*(\d+\+?)/i);
       if (cctv) return 'CCTV' + cctv[1].toUpperCase();
       const ws = name.match(/([\u4e00-\u9fa5]{2,4})卫视/);
       if (ws) return ws[1] + '卫视';
-      return name.trim().toUpperCase().replace(/[\s\-_]+/g, '');
+      return name.trim().toUpperCase().replace(/[\s\-_()（）]+/g, '');
     }
 
-    // 线路播放能力评分 (越大越优先起播)
     function scoreLine(url, tag) {
-      if (tag === 'official') return 100; // 官方 1080p CDN (443端口) 最高优先
+      if (/kwimgs\.com\/bs3\/video-hls/i.test(url)) return -999; // 剔除快手短视频假源
       try {
         const u = new URL(url);
         const port = u.port || (u.protocol === 'https:' ? '443' : '80');
         const isHttps = u.protocol === 'https:';
-        // 标准端口 HTTPS (443)
-        if (isHttps && port === '443') return 80;
-        // 标准端口 HTTP (80/8080)
-        if (port === '80' || port === '8080') return 60;
-        // 专网/非标端口 (如 82, 9901, 6610)
-        return 10;
+        let sc = 50;
+        if (tag === 'official') sc += 35;
+        if (isHttps && port === '443') sc += 30;
+        else if (port === '80' || port === '8080') sc += 20;
+        else sc -= 25;
+        if (/\[/.test(u.hostname)) sc -= 15; // IPv6 在纯 IPv4 宽带下置后作为备用
+        return sc;
       } catch (e) {
         return 0;
       }
     }
 
-    // 获取当前频道的所有候选线路，并按播放成功率智能排序
-    function getCandidateLines(chName, currentUrl) {
-      if (!chName || !data || !data.groups) return currentUrl ? [{ name: chName, url: currentUrl, score: scoreLine(currentUrl) }] : [];
-      const coreKey = getChannelCoreKey(chName);
-      const lines = [];
-      const seenUrls = new Set();
+    // 聚合全部合法频道，按标准分类归并，并将同名频道的多条线路合并为一个频道实体
+    const ORDER = ['央视频道', '卫视频道', '地方频道', '影视/特色', '港澳台/国际'];
+    const groupBuckets = new Map();
+    ORDER.forEach((gn) => groupBuckets.set(gn, new Map()));
 
-      // 先收集所有同名候选流
-      for (const g of data.groups) {
-        for (const ch of g.channels) {
-          if (seenUrls.has(ch.url)) continue;
-          const k = getChannelCoreKey(ch.name);
-          if (k && k === coreKey) {
-            seenUrls.add(ch.url);
-            lines.push({ name: ch.name, url: ch.url, tag: ch.tag, score: scoreLine(ch.url, ch.tag) });
-          }
+    const allLinesByCore = new Map();
+
+    for (const g of (rawData.groups || [])) {
+      for (const ch of (g.channels || [])) {
+        if (!ch || !ch.url || /kwimgs\.com\/bs3\/video-hls/i.test(ch.url)) continue;
+        // 修正旧缓存中误标为 CCTV-13 的浙江中国蓝新闻流
+        let fixedName = ch.name;
+        let fixedGroup = g.name;
+        if (/ali-m-l\.cztv\.com\/channels\/lantian\/channel21/i.test(ch.url) && /CCTV/i.test(fixedName)) {
+          fixedName = '中国蓝新闻直播';
+          fixedGroup = '地方频道';
+        }
+        const normG = classifyGroup(fixedGroup, fixedName);
+        if (!normG) continue;
+        const cleanName = normalizeChTitle(fixedName);
+        const coreKey = getChannelCoreKey(cleanName);
+        if (!coreKey) continue;
+
+        const lineObj = {
+          name: cleanName,
+          url: ch.url,
+          logo: ch.logo || '',
+          tag: ch.tag || '',
+          score: scoreLine(ch.url, ch.tag)
+        };
+
+        if (!allLinesByCore.has(coreKey)) allLinesByCore.set(coreKey, []);
+        const existingLines = allLinesByCore.get(coreKey);
+        if (!existingLines.some((x) => x.url === lineObj.url)) {
+          existingLines.push(lineObj);
+        }
+
+        if (!groupBuckets.has(normG)) groupBuckets.set(normG, new Map());
+        const gMap = groupBuckets.get(normG);
+        if (!gMap.has(coreKey)) {
+          gMap.set(coreKey, {
+            coreKey,
+            name: cleanName,
+            logo: ch.logo || '',
+            group: normG,
+            url: ch.url
+          });
+        } else if (!gMap.get(coreKey).logo && ch.logo) {
+          gMap.get(coreKey).logo = ch.logo;
         }
       }
-
-      // 若传入的 currentUrl 不在同名匹配中，额外追加
-      if (currentUrl && !seenUrls.has(currentUrl)) {
-        lines.push({ name: chName, url: currentUrl, score: scoreLine(currentUrl) });
-      }
-
-      // 按评分降序排序，优质/官方/标准端口线路排前面
-      lines.sort((a, b) => b.score - a.score);
-      return lines.length ? lines : [{ name: chName, url: currentUrl, score: scoreLine(currentUrl) }];
     }
 
+    // 对每个频道的候选线路按得分排序，并把最优线路作为默认 url
+    for (const [ck, lines] of allLinesByCore.entries()) {
+      lines.sort((a, b) => b.score - a.score);
+    }
+
+    const cleanGroups = [];
+    for (const gn of ORDER) {
+      const gMap = groupBuckets.get(gn);
+      if (!gMap || !gMap.size) continue;
+      const chList = [...gMap.values()].map((item) => {
+        const lines = allLinesByCore.get(item.coreKey) || [];
+        return {
+          coreKey: item.coreKey,
+          name: item.name,
+          logo: item.logo,
+          group: item.group,
+          url: lines[0] ? lines[0].url : item.url,
+          lineCount: Math.max(1, lines.length)
+        };
+      });
+      if (gn === '央视频道') {
+        const cctvRank = (name) => {
+          const m = String(name || '').match(/CCTV[-_\s]*(\d+)(\+)?/i);
+          if (!m) return 999;
+          return Number(m[1]) * 2 + (m[2] ? 1 : 0);
+        };
+        chList.sort((a, b) => cctvRank(a.name) - cctvRank(b.name));
+      }
+      cleanGroups.push({ name: gn, channels: chList });
+    }
+
+    let favs = store.get('favChs', []);
+    const favGroup = {
+      name: '⭐ 我的收藏',
+      isFav: true,
+      channels: favs.map((f) => {
+        const ck = getChannelCoreKey(f.name);
+        const lines = allLinesByCore.get(ck) || [];
+        return {
+          coreKey: ck,
+          name: normalizeChTitle(f.name),
+          logo: f.logo || '',
+          group: '⭐ 我的收藏',
+          url: f.url,
+          lineCount: Math.max(1, lines.length)
+        };
+      })
+    };
+    const groups = [...cleanGroups, favGroup];
+
+    // 默认选中第一个非空分类（央视频道），彻底告别一进直播页显示空收藏黑框的问题
+    let curG = 0;
+    let filterKw = '';
+    let curCoreKey = '';
+    let curPlayingName = '';
+    let curPlayingLogo = '';
     let curPlayingLines = [];
     let curLineIndex = 0;
+    let liveWatchdogTimer = null;
+
+    function syncFavGroup() {
+      favs = store.get('favChs', []);
+      favGroup.channels = favs.map((f) => {
+        const ck = getChannelCoreKey(f.name);
+        const lines = allLinesByCore.get(ck) || [];
+        return {
+          coreKey: ck,
+          name: normalizeChTitle(f.name),
+          logo: f.logo || '',
+          group: '⭐ 我的收藏',
+          url: f.url,
+          lineCount: Math.max(1, lines.length)
+        };
+      });
+    }
+
+    function renderGroups() {
+      const box = $('#liveGroups');
+      if (!box) return;
+      box.innerHTML = groups.map((g, i) => `
+        <button type="button" class="live-group-btn ${i === curG ? 'on' : ''}" data-i="${i}">
+          <span class="lg-name">${esc(g.name)}</span>
+          <i class="lg-cnt">${g.channels.length}</i>
+        </button>`).join('');
+      $$('#liveGroups .live-group-btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          curG = Number(b.dataset.i);
+          filterKw = '';
+          const inp = $('#liveFilterInput');
+          if (inp) inp.value = '';
+          renderGroups();
+          renderChs();
+        });
+      });
+    }
+
+    function getVisibleChannels() {
+      if (filterKw) {
+        const kw = filterKw.toLowerCase();
+        const allCh = [];
+        const seen = new Set();
+        for (const g of cleanGroups) {
+          for (const ch of g.channels) {
+            if (seen.has(ch.coreKey)) continue;
+            if (ch.name.toLowerCase().includes(kw) || titleInitials(ch.name).toLowerCase().includes(kw)) {
+              seen.add(ch.coreKey);
+              allCh.push(ch);
+            }
+          }
+        }
+        return allCh;
+      }
+      const g = groups[curG] || groups[0];
+      return g ? g.channels : [];
+    }
+
+    function renderChs() {
+      const box = $('#liveChs');
+      const gTitle = $('#liveGroupTitle');
+      const gCount = $('#liveGroupCount');
+      if (!box) return;
+      const g = groups[curG] || groups[0];
+      const list = getVisibleChannels();
+      if (gTitle) gTitle.textContent = filterKw ? `搜索：${filterKw}` : (g ? g.name : '频道列表');
+      if (gCount) gCount.textContent = `共 ${list.length} 台`;
+
+      if (!list.length) {
+        box.innerHTML = `<div class="empty" style="padding:36px 14px;font-size:13.5px">${
+          g && g.isFav ? '暂无收藏频道，点击右下方「☆ 收藏频道」即可添加' : '未找到匹配的直播频道'
+        }</div>`;
+        return;
+      }
+
+      box.innerHTML = list.map((ch, i) => {
+        const isOn = ch.coreKey === curCoreKey;
+        const numStr = String(i + 1).padStart(2, '0');
+        return `
+          <button type="button" class="live-ch ${isOn ? 'on' : ''}" data-ck="${esc(ch.coreKey)}" data-u="${esc(ch.url)}" data-n="${esc(ch.name)}" data-l="${esc(ch.logo || '')}">
+            <span class="lch-num">${numStr}</span>
+            <div class="lch-info">
+              <div class="lch-name">${esc(ch.name)}</div>
+              <div class="lch-sub">${ch.lineCount > 1 ? `${ch.lineCount} 条备用源` : '高清直播'}</div>
+            </div>
+            ${ isOn ? '<span class="lch-wave">直播中</span>' : `<span class="lch-badge">${ch.lineCount}线</span>` }
+          </button>`;
+      }).join('');
+
+      $$('#liveChs .live-ch').forEach((el) => {
+        el.addEventListener('click', () => {
+          playCh(el.dataset.u, el.dataset.n, el.dataset.l);
+        });
+      });
+    }
+
+    function updateFavCurBtn() {
+      const btn = $('#liveFavCurBtn');
+      if (!btn) return;
+      const isFav = favs.some((f) => getChannelCoreKey(f.name) === curCoreKey);
+      btn.textContent = isFav ? '★ 已收藏' : '☆ 收藏频道';
+      btn.classList.toggle('primary', isFav);
+    }
 
     function renderLineButtons() {
       const wrap = $('#liveLinesWrap');
       const list = $('#liveLinesList');
       if (!wrap || !list) return;
-      if (!curPlayingLines || curPlayingLines.length <= 1) {
-        wrap.style.display = 'none';
+      if (!curPlayingLines || !curPlayingLines.length) {
+        list.innerHTML = '<span style="font-size:12px;color:var(--dim)">默认主线路</span>';
         return;
       }
-      wrap.style.display = 'flex';
-      list.innerHTML = curPlayingLines.map((line, idx) => {
+      list.innerHTML = curPlayingLines.slice(0, 8).map((line, idx) => {
         const isCur = idx === curLineIndex;
-        let label = `线路 ${idx + 1}`;
-        if (line.tag === 'official') label += ' (极速官方)';
-        else if (line.score >= 80) label += ' (超清)';
-        else if (line.score >= 60) label += ' (标清)';
-        else label += ' (备用)';
-        return `<button type="button" class="btn small ${isCur ? 'primary' : 'outline'}" data-lidx="${idx}" style="font-size:11px;padding:3px 9px;border-radius:12px;font-weight:${isCur ? '700' : '500'}">${esc(label)}</button>`;
+        let tagTxt = idx === 0 ? '主线高清' : `备用线 ${idx + 1}`;
+        if (line.tag === 'official') tagTxt = '官方1080P';
+        return `<button type="button" class="live-line-pill ${isCur ? 'on' : ''}" data-lidx="${idx}">线路 ${idx + 1} · ${esc(tagTxt)}</button>`;
       }).join('');
-      $$('#liveLinesList button').forEach((btn) => {
+
+      $$('#liveLinesList .live-line-pill').forEach((btn) => {
         btn.addEventListener('click', () => {
           const idx = Number(btn.dataset.lidx);
-          if (idx !== curLineIndex && curPlayingLines[idx]) {
+          if (curPlayingLines[idx]) {
             curLineIndex = idx;
             playCurrentLine(true);
           }
@@ -6348,90 +6618,192 @@
     }
 
     function playCurrentLine(isManual) {
+      clearTimeout(liveWatchdogTimer);
       if (!curPlayingLines.length) return;
       const cur = curPlayingLines[curLineIndex];
       const url = cur.url;
-      const name = cur.name;
+      const name = curPlayingName || cur.name;
+      const video = $('#videoEl');
+      const tip = $('#videoTip');
+      if (!video) return;
 
-      if (checkMobileWebLimit($('#videoEl'))) return;
+      if (checkMobileWebLimit(video)) return;
       if (inApp()) maybeAppUpdate();
 
       renderLineButtons();
+      updateFavCurBtn();
 
       const isHttpsPage = location.protocol === 'https:';
       const isHttpStream = /^http:\/\//i.test(url);
       const isAlreadyProxied = url.includes('/api/live/stream?url=');
 
+      // 在 Android TV / 手机 APK 内已开启 MIXED_CONTENT_ALWAYS_ALLOW，可直接拉取 HTTP 直播流获得最低延迟；浏览器 HTTPS 下走安全代理
+      const inNativeApk = Boolean(window.AndroidBridge);
       let targetPlayUrl = url;
       let isProxied = false;
-      if (isHttpsPage && isHttpStream && !isAlreadyProxied) {
+      if (isHttpsPage && isHttpStream && !isAlreadyProxied && !inNativeApk) {
         targetPlayUrl = '/api/live/stream?url=' + encodeURIComponent(url);
         isProxied = true;
       }
 
-      const lineText = `[线路 ${curLineIndex + 1}/${curPlayingLines.length}]`;
-      $('#nowName').innerHTML = `📺 正在播放：<b>${esc(name)}</b> <span style="font-size:12px;color:var(--dim);margin-left:6px">${lineText}</span>` +
-        (cur.tag === 'official' ? ' <span class="badge ok" style="font-size:10px">⚡官方1080p</span>' : (isProxied ? ' <span class="badge dim" style="font-size:10px">🛡️代理</span>' : ''));
+      const nowEl = $('#nowName');
+      const metaEl = $('#liveNowMeta');
+      if (nowEl) nowEl.textContent = name;
+      if (metaEl) {
+        metaEl.innerHTML = `<span class="live-meta-pill">线路 ${curLineIndex + 1}/${curPlayingLines.length}</span>` +
+          (cur.tag === 'official' ? '<span class="live-meta-pill ok">⚡ 1080P 官方源</span>' : (isProxied ? '<span class="live-meta-pill">🛡️ 安全加速</span>' : '<span class="live-meta-pill">🟢 直连秒播</span>'));
+      }
       updateTrackTitle('电视直播：' + name);
 
-      Player.play($('#videoEl'), targetPlayUrl, $('#videoTip'), {
-        optimize: !!(State.settings && State.settings.playerOptimize),
-        onError: (err) => {
-          console.warn(`[live] 线路 ${curLineIndex + 1} 播放异常:`, url, err);
-          // 自动故障切换到下一条线路
-          if (curLineIndex + 1 < curPlayingLines.length) {
-            const nextIdx = curLineIndex + 1;
-            console.warn(`[live] 线路 ${curLineIndex + 1} 异常，正在自动切至 线路 ${nextIdx + 1}...`);
-            toast(`当前线路异常，已自动切换至线路 ${nextIdx + 1}`, 'info');
-            curLineIndex = nextIdx;
-            playCurrentLine(false);
-          } else {
-            // 所有线路均尝试完毕
-            let tipHtml = `<div style="padding:16px;line-height:1.6;font-size:13px;text-align:center">
-              <div style="font-size:15px;font-weight:700;margin-bottom:6px">⚠️ 该频道所有线路暂无法直接在网页播放</div>
-              <div style="color:var(--dim);margin-bottom:12px;font-size:12px">由于部分地方台及运营商源使用专网非标端口，浏览器受安全策略限制无法直接拉取。</div>
-              <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-                <button type="button" class="btn small primary" id="copyLiveUrlBtn">📋 复制当前源地址</button>
-                <a href="#/download" class="btn small success">📱 下载App无限制播放</a>
+      const switchNextLine = (reason) => {
+        clearTimeout(liveWatchdogTimer);
+        if (curLineIndex + 1 < Math.min(8, curPlayingLines.length)) {
+          curLineIndex++;
+          toast(`线路 ${curLineIndex} 响应较慢，已自动切换至线路 ${curLineIndex + 1}`, 'info');
+          playCurrentLine(false);
+        } else if (tip) {
+          tip.classList.remove('hidden');
+          tip.innerHTML = `
+            <div style="padding:18px;text-align:center;line-height:1.6">
+              <div style="font-size:16px;font-weight:700;margin-bottom:6px">⚠️ 当前频道各线路暂时繁忙</div>
+              <div style="font-size:13px;color:var(--dim);margin-bottom:12px">您可以点击下方按钮重试，或切换左侧其他频道观看</div>
+              <div style="display:flex;gap:10px;justify-content:center">
+                <button type="button" class="btn primary small" id="liveRetryBtn">🔄 重新连接</button>
+                <button type="button" class="btn ghost small" id="liveSkipNextBtn">⏭ 换下一台</button>
               </div>
             </div>`;
-            const tipEl = $('#videoTip');
-            if (tipEl) {
-              tipEl.classList.remove('hidden');
-              tipEl.innerHTML = tipHtml;
-              const copyBtn = $('#copyLiveUrlBtn');
-              if (copyBtn) {
-                copyBtn.onclick = () => {
-                  navigator.clipboard.writeText(url).then(() => toast('已复制直播源地址', 'ok')).catch(() => toast(url, 'ok'));
-                };
-              }
-            }
-          }
-        },
+          const rb = $('#liveRetryBtn');
+          if (rb) rb.onclick = () => { curLineIndex = 0; playCurrentLine(true); };
+          const sb = $('#liveSkipNextBtn');
+          if (sb) sb.onclick = () => stepChannel(1);
+        }
+      };
+
+      // 6.5 秒直播流断流/超时看门狗：若 6.5 秒内未渲染出画面自动切下一条线路
+      liveWatchdogTimer = setTimeout(() => {
+        if (!video.isConnected) return;
+        if (video.readyState < 2) {
+          switchNextLine('watchdog_timeout');
+        }
+      }, 6500);
+
+      video.addEventListener('playing', () => {
+        clearTimeout(liveWatchdogTimer);
+        if (tip) { tip.classList.add('hidden'); tip.innerHTML = ''; }
+      }, { once: true });
+
+      Player.play(video, targetPlayUrl, tip, {
+        optimize: !!(State.settings && State.settings.playerOptimize),
+        onError: () => switchNextLine('player_error'),
       });
 
-      $$('#liveChs .live-ch').forEach((el) => el.classList.toggle('on', el.dataset.u === url));
-      store.set('lastCh', { url, name });
+      $$('#liveChs .live-ch').forEach((el) => {
+        const on = el.dataset.ck === curCoreKey;
+        el.classList.toggle('on', on);
+      });
+      store.set('lastCh', { url, name, logo: curPlayingLogo });
     }
 
-    function playCh(url, name) {
-      curPlayingLines = getCandidateLines(name, url);
+    function playCh(url, name, logo) {
+      const cleanName = normalizeChTitle(name);
+      curCoreKey = getChannelCoreKey(cleanName);
+      curPlayingName = cleanName;
+      curPlayingLogo = logo || '';
+      const lines = allLinesByCore.get(curCoreKey) || [];
+      curPlayingLines = lines.length ? lines.slice() : [{ name: cleanName, url, score: 50 }];
       curLineIndex = 0;
+      renderChs();
       playCurrentLine(false);
     }
 
-    renderGroups(); renderChs();
+    function stepChannel(delta) {
+      const list = getVisibleChannels();
+      if (!list.length) return;
+      const idx = list.findIndex((c) => c.coreKey === curCoreKey);
+      const nextIdx = idx < 0 ? 0 : (idx + delta + list.length) % list.length;
+      const target = list[nextIdx];
+      if (target) playCh(target.url, target.name, target.logo);
+    }
+
+    // 绑定控制栏事件
+    const prevBtn = $('#livePrevChBtn');
+    const nextBtn = $('#liveNextChBtn');
+    const favBtn = $('#liveFavCurBtn');
+    const fsBtn = $('#liveFsBtn');
+    const filterInp = $('#liveFilterInput');
+
+    if (prevBtn) prevBtn.addEventListener('click', () => stepChannel(-1));
+    if (nextBtn) nextBtn.addEventListener('click', () => stepChannel(1));
+    if (favBtn) {
+      favBtn.addEventListener('click', () => {
+        if (!curCoreKey || !curPlayingName) return;
+        const list = store.get('favChs', []);
+        const idx = list.findIndex((f) => getChannelCoreKey(f.name) === curCoreKey);
+        if (idx >= 0) {
+          list.splice(idx, 1);
+          toast('已取消收藏频道');
+        } else {
+          const primaryUrl = curPlayingLines[0] ? curPlayingLines[0].url : '';
+          list.unshift({ name: curPlayingName, url: primaryUrl, logo: curPlayingLogo, group: '收藏' });
+          toast('⭐ 已加入收藏频道', 'ok');
+        }
+        store.set('favChs', list);
+        syncFavGroup();
+        renderGroups();
+        if (groups[curG] && groups[curG].isFav) renderChs();
+        updateFavCurBtn();
+      });
+    }
+
+    // 直播全屏切换（兼容 TV 遥控器、电脑真全屏与手机全屏）
+    function toggleLiveFullscreen() {
+      const wrap = $('#videoWrap');
+      const video = $('#videoEl');
+      if (!wrap) return;
+      const isFsNow = document.body.classList.contains('live-fs-mode') || document.fullscreenElement || document.webkitFullscreenElement;
+      if (isFsNow) {
+        document.body.classList.remove('live-fs-mode');
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        if (fsEl) {
+          try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {}
+        }
+      } else {
+        document.body.classList.add('live-fs-mode');
+        if (!isTvDevice()) {
+          try {
+            if (wrap.requestFullscreen) wrap.requestFullscreen().catch(() => {});
+            else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen();
+            else if (video && video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+          } catch (e) {}
+        }
+      }
+    }
+
+    if (fsBtn) fsBtn.addEventListener('click', toggleLiveFullscreen);
+    const vWrap = $('#videoWrap');
+    if (vWrap) {
+      vWrap.addEventListener('dblclick', toggleLiveFullscreen);
+    }
+
+    if (filterInp) {
+      filterInp.addEventListener('input', () => {
+        filterKw = filterInp.value.trim();
+        renderChs();
+      });
+    }
+
+    renderGroups();
+    renderChs();
+
+    // 默认自动起播：优先恢复上次有效频道（排除旧假源），否则默认播央视频道第 1 台（CCTV-1 综合）
     const last = store.get('lastCh', null);
-    if (last && !query.noResume) playCh(last.url, last.name);
-    else {
-      // 默认优先播 CCTV-13 (1080p) 或 CCTV-1 等高清央视频道
-      const cctv = data.groups.find((g) => /央视|CCTV/i.test(g.name));
-      const ch = (cctv && (
-        cctv.channels.find((c) => /CCTV-?13\b|新闻/i.test(c.name)) ||
-        cctv.channels.find((c) => /CCTV-?1\b|综合/i.test(c.name)) ||
-        cctv.channels[0]
-      )) || (data.groups[1] && data.groups[1].channels[0]) || (data.groups[0] && data.groups[0].channels[0]);
-      if (ch) playCh(ch.url, ch.name);
+    const isLastFake = last && (/kwimgs\.com/i.test(last.url || '') || (/ali-m-l\.cztv\.com.*channel21/i.test(last.url || '') && /CCTV/i.test(last.name || '')));
+    if (last && last.url && !isLastFake && !query.noResume) {
+      playCh(last.url, last.name, last.logo || '');
+    } else {
+      const firstGroup = cleanGroups[0];
+      const firstCh = firstGroup && firstGroup.channels[0];
+      if (firstCh) playCh(firstCh.url, firstCh.name, firstCh.logo);
     }
   }
 
@@ -8839,7 +9211,7 @@
           </div>
           <div class="admin-card">
             <h3>🚪 后台入口路径</h3>
-            <p class="hint">自定义后台访问地址：<b>留空/填 xiaolin1991</b> 使用默认 <code>#/xiaolin1991</code>；例如填 <code>my-panel</code> 后，只有 <code>#/my-panel</code> 能进入后台，旧地址对外显示「页面不存在」。<br>当前完整入口：<code>${esc(location.origin + '/#/' + (s.adminPath || 'xiaolin1991'))}</code>（建议收藏到书签）</p>
+            <p class="hint">自定义后台访问地址：<b>留空/填 xiaolin1991</b> 使用默认 <code>#/xiaolin1991</code>；例如填 <code>my-panel</code> 后，只有 <code>#/my-panel</code> 能进入后台，旧地址对外显示「页面不存在」。<br>当前完整入口：<code>${esc(location.origin + '/' + (s.adminPath || 'xiaolin1991'))}</code>（建议收藏到书签）</p>
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">
               <input class="field-input" id="admPathInput" style="max-width:260px" value="${esc(s.adminPath || '')}" placeholder="xiaolin1991（留空=默认）" maxlength="40">
               <button class="btn primary" id="saveAdmPathBtn">保存入口路径</button>
@@ -8864,8 +9236,8 @@
             const res = await API.adminSaveSettings({ adminPath: np });
             const eff = (res.settings && res.settings.adminPath) || 'xiaolin1991';
             store.set('adminPathLive', eff);
-            toast(`入口路径已保存：今后请从 #/${eff} 进入后台`, 'ok');
-            setTimeout(() => { location.hash = '#/' + eff; }, 900);
+            toast(`入口路径已保存：今后请从 /${eff} 进入后台`, 'ok');
+            setTimeout(() => { location.href = '/' + eff; }, 900);
           } catch (err) { toast('保存失败：' + err.message, 'err'); }
         });
       }
@@ -9270,7 +9642,7 @@
       store.set('cached_me', null);
       // 仅当存在管理员会话令牌或访问后台路由时才探测 adminSession，省去普通访客每次401往返
       const hasAdmTok = Boolean(sessionStorage.getItem('ntv:adminToken')) || /ntv_auth=/.test(document.cookie || '');
-      const isAdmHash = /^#\/(xiaolin1991|admin)/i.test(location.hash || '');
+      const isAdmHash = /^#\/(xiaolin1991|admin)/i.test(location.hash || '') || /^\/(xiaolin1991|admin)(?:\/|$)/i.test(location.pathname || '');
       if (hasAdmTok || isAdmHash) {
         try {
           await API.adminSession();

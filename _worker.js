@@ -1881,27 +1881,84 @@ async function statRecord(env, entry) {
 
 /* --------------------------- 直播 m3u 解析与代理 ------------------------------- */
 const OFFICIAL_LIVE_CHANNELS = [
-  // 央视频道官方极速 1080p 高可用 CDN
-  { name: 'CCTV-13 新闻 (1080p)', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV13.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel21/1080p.m3u8', tag: 'official' },
-  { name: 'CCTV-4 中文国际 (1080p)', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV4.png', url: 'https://dash2.antik.sk/live/test_cctv_tizen/playlist.m3u8', tag: 'official' },
-  { name: 'CCTV+ 全球直播 (1080p)', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV13.png', url: 'https://cd-live-stream.news.cctvplus.com/live/smil:CHANNEL1.smil/playlist.m3u8', tag: 'official' },
-  { name: 'CGTN 国际纪实 (1080p)', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV9.png', url: 'https://global.cgtn.cicc.media.caton.cloud/master/cgtn-america.m3u8', tag: 'official' },
-  // 卫视频道官方极速 1080p 高可用 CDN
-  { name: '浙江卫视 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel01/1080p.m3u8', tag: 'official' },
-  { name: '湖南卫视 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/湖南卫视.png', url: 'https://txmov2.a.kwimgs.com/bs3/video-hls/5199687338554291078_hlsb.m3u8', tag: 'official' },
-  { name: '东方卫视 (1080p)', group: '卫视频道', logo: 'https://tb.zbds.top/logo/东方卫视.png', url: 'https://txmov2.a.kwimgs.com/bs3/video-hls/5219953535631090825_hlsb.m3u8', tag: 'official' },
-  // 地方/特色官方极速 1080p 高可用 CDN
-  { name: '钱江都市 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel02/1080p.m3u8', tag: 'official' },
-  { name: '经济生活 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel03/1080p.m3u8', tag: 'official' },
-  { name: '教科影院 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江教科.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel04/1080p.m3u8', tag: 'official' },
-  { name: '影视剧场 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江影视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel05/1080p.m3u8', tag: 'official' },
-  { name: '民生休闲 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江民生.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel06/1080p.m3u8', tag: 'official' },
-  { name: '浙江新闻 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel07/1080p.m3u8', tag: 'official' },
-  { name: '浙江少儿 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel08/1080p.m3u8', tag: 'official' },
-  { name: '浙江国际 (1080p)', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel10/1080p.m3u8', tag: 'official' },
-  // 国际频道官方极速高可用
-  { name: 'ABN 国际新闻 (HTTPS)', group: '国际频道', logo: 'https://tb.zbds.top/logo/CCTV4.png', url: 'https://mediaserver.abnvideos.com/live/ABN_China/index.m3u8', tag: 'official' },
+  // 卫视频道与地方官方高可用 1080p HTTPS 直播源 (真实直播流，已剔除所有短视频录播假源)
+  { name: '浙江卫视', group: '卫视频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel01/1080p.m3u8', tag: 'official' },
+  { name: '钱江都市', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel02/1080p.m3u8', tag: 'official' },
+  { name: '浙江经视', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel03/1080p.m3u8', tag: 'official' },
+  { name: '浙江教科影院', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江教科.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel04/1080p.m3u8', tag: 'official' },
+  { name: '浙江民生休闲', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江民生.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel06/1080p.m3u8', tag: 'official' },
+  { name: '浙江新闻频道', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel07/1080p.m3u8', tag: 'official' },
+  { name: '浙江少儿频道', group: '影视/特色', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel08/1080p.m3u8', tag: 'official' },
+  { name: '浙江国际频道', group: '港澳台/国际', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel10/1080p.m3u8', tag: 'official' },
+  { name: '中国蓝新闻直播', group: '地方频道', logo: 'https://tb.zbds.top/logo/浙江卫视.png', url: 'https://ali-m-l.cztv.com/channels/lantian/channel21/1080p.m3u8', tag: 'official' },
+  { name: 'CCTV-4 中文国际', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV4.png', url: 'https://dash2.antik.sk/live/test_cctv_tizen/playlist.m3u8', tag: 'official' },
+  { name: 'CGTN 国际新闻', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV13.png', url: 'https://cd-live-stream.news.cctvplus.com/live/smil:CHANNEL1.smil/playlist.m3u8', tag: 'official' },
+  { name: 'CGTN 国际纪实', group: '央视频道', logo: 'https://tb.zbds.top/logo/CCTV9.png', url: 'https://global.cgtn.cicc.media.caton.cloud/master/cgtn-america.m3u8', tag: 'official' },
 ];
+
+/**
+ * 智能清洗并归类直播频道分组：
+ * 彻底消除 Undefined / Religious / News / General / Entertainment 等杂乱英文分类，
+ * 统一归入：央视频道、卫视频道、地方频道、影视/特色、港澳台/国际（并返回 null 过滤掉宗教/购物等垃圾台）
+ */
+function normalizeLiveGroup(rawGroup, rawTitle) {
+  const g = String(rawGroup || '').trim();
+  const t = String(rawTitle || '').trim();
+  const combined = g + ' ' + t;
+
+  // 过滤宗教、购物、测试与无效外文杂台
+  if (/religious|religion|christian|islam|buddh|god|church|bible|worship|法轮|新唐人|大纪元|希望之声|美国之音|自由亚洲|购物|导购|理财|测试|test/i.test(combined)) {
+    return null;
+  }
+
+  // 1. 央视频道
+  if (/CCTV|CGTN|央视|中央|风云|第一剧场|怀旧剧场|世界地理|兵器科技|女性时尚|央视文化|央视台球|高尔夫|电视指南|卫生健康|老故事|中学生|发现之旅|证券资讯|书画|梨园|文物宝库|武术世界|国学/i.test(combined)) {
+    return '央视频道';
+  }
+  // 2. 卫视频道 (排除凤凰卫视归入港澳台)
+  if (/卫视/.test(t) && !/凤凰|星空|澳亚|莲花|东森|中天|三立|纬来|八大|民视|华视|台视|中视|公视/i.test(t)) {
+    return '卫视频道';
+  }
+  if (/卫视/.test(g) && !/港澳|台湾|国际|海外/i.test(g)) {
+    return '卫视频道';
+  }
+  // 3. 港澳台/国际
+  if (/港澳|香港|澳门|台湾|国际|海外|翡翠|明珠|TVB|J2|VIUTV|HOY|RTHK|港台|凤凰|星空|华视|中视|台视|民视|公视|东森|三立|中天|纬来|八大|靖天|龙华|寰宇|博斯|爱尔达|澳视|澳亚|莲花|Now|HBO|AXN|MOVIEMAX|CINEMAX|DISCOVERY|NGC|国家地理|BBC|CNN|NHK|CNA|ABN|ARIRANG|KBS|SBS|MBC|TVN|JTBC/i.test(combined)) {
+    return '港澳台/国际';
+  }
+  // 4. 影视/少儿/体育/特色数字频道
+  if (/电影|影院|剧场|动作|喜剧|科幻|家庭|惊悚|少儿|卡通|动漫|动画|金鹰卡通|卡酷|炫动|哈哈炫动|优漫|嘉佳|纪实|纪录|体育|足球|篮球|赛事|音乐|戏曲|综艺|游戏|电竞|欢笑|都市剧场|全纪实|魅力足球|劲爆体育|极速汽车|生活时尚|金色学堂|法治天地|CHC|NewTV|SiTV|iHOT|咪咕|求索|纪实人文|哒啵|黑莓/i.test(combined)) {
+    return '影视/特色';
+  }
+  // 5. 地方频道 (匹配全国各省市名称或中文地方台)
+  if (/地方|北京|上海|广东|深圳|广州|浙江|杭州|宁波|温州|江苏|南京|苏州|山东|济南|青岛|四川|成都|湖北|武汉|湖南|长沙|河南|郑州|福建|厦门|福州|安徽|合肥|辽宁|沈阳|大连|重庆|天津|河北|山西|内蒙古|吉林|黑龙江|哈尔滨|江西|广西|海南|贵州|云南|西藏|陕西|西安|甘肃|青海|宁夏|新疆|珠江|南方|岭南|钱江|民生|经视|都市|公共|新闻综合|教育|科教|影视|生活|文旅|农科|交通|房产/i.test(combined)) {
+    return '地方频道';
+  }
+  // 若标题包含中文字符，归入地方频道；纯英文未识别杂台直接丢弃
+  if (/[\u4e00-\u9fa5]/.test(t)) {
+    return '地方频道';
+  }
+  return null;
+}
+
+function cleanChannelTitle(rawTitle) {
+  let s = String(rawTitle || '').trim();
+  // 去掉冗余分辨率/帧率后缀但保留核心识别名
+  s = s.replace(/\[[^\]]*\]/g, '').replace(/\((?:1080p|720p|576p|480p|50fps|25fps|HD|FHD|UHD|HEVC|IPv6|IPv4|备用|测试)\)/gi, '').trim();
+  // 规范化 CCTV 名称展示 (如 CCTV1 -> CCTV-1 综合)
+  const cctvNames = {
+    '1': 'CCTV-1 综合', '2': 'CCTV-2 财经', '3': 'CCTV-3 综艺', '4': 'CCTV-4 中文国际',
+    '5': 'CCTV-5 体育', '5+': 'CCTV-5+ 体育赛事', '6': 'CCTV-6 电影', '7': 'CCTV-7 国防军事',
+    '8': 'CCTV-8 电视剧', '9': 'CCTV-9 纪录', '10': 'CCTV-10 科教', '11': 'CCTV-11 戏曲',
+    '12': 'CCTV-12 社会与法', '13': 'CCTV-13 新闻', '14': 'CCTV-14 少儿', '15': 'CCTV-15 音乐',
+    '16': 'CCTV-16 奥林匹克', '17': 'CCTV-17 农业农村'
+  };
+  const m = s.match(/^CCTV[-_\s]*(\d+\+?)(?:\s|$|[-_])/i);
+  if (m && cctvNames[m[1].toUpperCase()]) {
+    return cctvNames[m[1].toUpperCase()];
+  }
+  return s || rawTitle;
+}
 
 function parseM3U(text, tag) {
   const lines = text.split(/\r?\n/);
@@ -1913,18 +1970,24 @@ function parseM3U(text, tag) {
     if (t.startsWith('#EXTINF')) {
       const commaIdx = t.indexOf(',');
       const attrs = t.slice(0, commaIdx);
-      const title = (commaIdx >= 0 ? t.slice(commaIdx + 1) : '').trim();
-      const group = (attrs.match(/group-title="([^"]*)"/) || [])[1] || '其他';
+      const rawTitle = (commaIdx >= 0 ? t.slice(commaIdx + 1) : '').trim();
+      const rawGroup = (attrs.match(/group-title="([^"]*)"/) || [])[1] || '';
+      const normGroup = normalizeLiveGroup(rawGroup, rawTitle);
+      if (!normGroup) {
+        cur = null;
+        continue;
+      }
+      const title = cleanChannelTitle(rawTitle);
       let logo = (attrs.match(/tvg-logo="([^"]*)"/) || [])[1] || '';
       if (logo && logo.includes('fanmingming.com')) {
         logo = logo.replace(/^https?:\/\/live\.fanmingming\.com\/tv\/svg\/?/i, 'https://tb.zbds.top/logo/').replace(/\.svg$/i, '.png');
       }
-      cur = { name: title || '未命名频道', group: group.trim() || '其他', logo, url: '', tag };
+      cur = { name: title || '未命名频道', group: normGroup, logo, url: '', tag };
     } else if (!t.startsWith('#')) {
       if (cur && !cur.url) {
         cur.url = t;
-        // 保留所有合法网络流(包含 IPv6、单播与普通 HTTP)，仅排除 127.0.0.1、localhost 等本地内部回环
-        if (!/^https?:\/\/(?:127\.|localhost)/i.test(t)) {
+        // 排除本地回环与已知短视频伪直播域名
+        if (!/^https?:\/\/(?:127\.|localhost)/i.test(t) && !/kwimgs\.com\/bs3\/video-hls/i.test(t)) {
           out.push(cur);
         }
         cur = null;
@@ -1998,7 +2061,7 @@ async function loadLive(env, ctx) {
   let list = (settings.liveSources && settings.liveSources.length ? settings.liveSources : DEFAULT_LIVE_SOURCES);
   if (!list || !list.length) list = [...DEFAULT_LIVE_SOURCES];
 
-  const cacheKey = new Request('https://cache.internal/XIAOLIN-TV/live/v3');
+  const cacheKey = new Request('https://cache.internal/XIAOLIN-TV/live/v6');
   try {
     const hit = await caches.default.match(cacheKey);
     if (hit) return await hit.json();
@@ -2007,22 +2070,13 @@ async function loadLive(env, ctx) {
   const seen = new Set();
   const channels = [];
 
-  // 先置入官方高可用 1080p HTTPS 直播源
-  for (const och of OFFICIAL_LIVE_CHANNELS) {
-    if (!seen.has(och.url)) {
-      seen.add(och.url);
-      channels.push({ ...och });
-    }
-  }
-
   for (const rawUrl of list.slice(0, 6)) {
     try {
-      // 针对域名因网络阻断的源(如 live.fanmingming.com)，智能映射至可靠加速节点，确保源与频道完整保留
       let fetchUrl = rawUrl;
       if (typeof fetchUrl === 'string' && fetchUrl.includes('live.fanmingming.com/tv/m3u/ipv6.m3u')) {
         fetchUrl = 'https://cdn.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/ipv6.m3u';
       }
-      const res = await fetch(fetchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000) });
+      const res = await fetch(fetchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000) });
       if (!res.ok) continue;
       const parsed = parseM3U(await res.text(), rawUrl);
       for (const ch of parsed) {
@@ -2033,12 +2087,41 @@ async function loadLive(env, ctx) {
     } catch (e) { /* 下一个源 */ }
     if (channels.length > 3000) break;
   }
-  const groups = [];
-  const gmap = new Map();
-  for (const ch of channels) {
-    if (!gmap.has(ch.group)) { const g = { name: ch.group, channels: [] }; gmap.set(ch.group, g); groups.push(g); }
-    gmap.get(ch.group).channels.push(ch);
+
+  // 补充官方高可用 1080p HTTPS 直播源
+  for (const och of OFFICIAL_LIVE_CHANNELS) {
+    if (!seen.has(och.url)) {
+      seen.add(och.url);
+      channels.push({ ...och });
+    }
   }
+
+  const GROUP_ORDER = ['央视频道', '卫视频道', '地方频道', '影视/特色', '港澳台/国际'];
+  const gmap = new Map();
+  for (const gName of GROUP_ORDER) {
+    gmap.set(gName, { name: gName, channels: [] });
+  }
+  for (const ch of channels) {
+    const gn = normalizeLiveGroup(ch.group, ch.name);
+    if (!gn) continue;
+    ch.group = gn;
+    ch.name = cleanChannelTitle(ch.name);
+    if (!gmap.has(gn)) gmap.set(gn, { name: gn, channels: [] });
+    gmap.get(gn).channels.push(ch);
+  }
+
+  // 央视频道按 CCTV-1 ~ CCTV-17 顺序排列
+  const cctvGroup = gmap.get('央视频道');
+  if (cctvGroup && cctvGroup.channels.length) {
+    const cctvRank = (name) => {
+      const m = String(name || '').match(/CCTV[-_\s]*(\d+)(\+)?/i);
+      if (!m) return 999;
+      return Number(m[1]) * 2 + (m[2] ? 1 : 0);
+    };
+    cctvGroup.channels.sort((a, b) => cctvRank(a.name) - cctvRank(b.name));
+  }
+
+  const groups = [...gmap.values()].filter((g) => g.channels.length > 0);
   const payload = { groups, total: channels.length, fetchedAt: Date.now() };
   try {
     const r = new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } });

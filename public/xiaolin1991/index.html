@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="midnight">
+<head>
+<meta charset="UTF-8">
+<base href="/">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>晓林影视 XIAOLIN-TV</title>
+<link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="./icons/icon-32.png" type="image/png">
+<!-- PWA / iOS 添加到主屏幕 -->
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="晓林影院">
+<meta name="theme-color" content="#f3f6fb">
+<!-- 关键内联防崩兜底样式：彻底杜绝机顶盒偶发网络抖动时出现图五的白屏巨型图标或巨型SVG圆圈 -->
+<style id="xlCriticalFallback">
+  html, body { margin: 0; padding: 0; }
+  img.brand-logo { width: 40px; height: 40px; object-fit: contain; vertical-align: middle; }
+  .topbar svg.ico, #backTop svg { width: 22px; height: 22px; max-width: 24px; max-height: 24px; }
+  #backTop { width: 42px; height: 42px; }
+  .hidden { display: none !important; }
+  body.tv { background: #060a14 !important; color: #f2f6ff !important; }
+  body.tv #announceBar, body.tv .announce, body.tv #backTop, body.tv #tvLegend { display: none !important; }
+</style>
+<link rel="stylesheet" href="./css/themes.css?v=20261017v15">
+<!-- 改动 js/css 后必须递增 v= 版本号, 否则手机浏览器/APK WebView 会一直用旧缓存 -->
+<link rel="stylesheet" href="./css/app.css?v=20261017v15">
+<link rel="stylesheet" href="./css/tv.css?v=20261017v15">
+<link rel="stylesheet" href="./css/modern.css?v=20261017v15">
+<!-- 非阻塞异步加载 HLS.js + 国内高速 CDN 自动容灾，绝不阻塞机顶盒/电视端首屏加载 -->
+<script src="https://s4.zstatic.net/ajax/libs/hls.js/1.5.15/hls.min.js" async defer onerror="(function(){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js';s.async=true;document.head.appendChild(s);})()"></script>
+</head>
+<body class="ui-modern" data-mtheme="light">
+<script>
+/* 首屏 0ms 瞬时挂载用户记忆的日间/夜间模式与网站版式，并彻底清理旧版遗留的 ntv:tvMode 电脑端污染 */
+(function(){
+  try {
+    localStorage.removeItem('ntv:tvMode');
+    sessionStorage.removeItem('ntv_tv_override');
+  } catch (e) {}
+  try {
+    var rawMode = localStorage.getItem('ntv:userColorMode') || localStorage.getItem('ntv:uiModernTheme');
+    var mode = rawMode ? JSON.parse(rawMode) : 'light';
+    if (mode !== 'dark') mode = 'light';
+    document.body.setAttribute('data-mtheme', mode);
+    var tc = document.querySelector('meta[name="theme-color"]');
+    if (tc) tc.setAttribute('content', mode === 'light' ? '#f3f6fb' : '#090d16');
+
+    var rawLayout = localStorage.getItem('ntv:uiLayout');
+    var layout = rawLayout ? JSON.parse(rawLayout) : 'modern';
+    document.body.classList.toggle('ui-modern', layout !== 'classic');
+  } catch (e) {
+    document.body.setAttribute('data-mtheme', 'light');
+    document.body.classList.add('ui-modern');
+  }
+})();
+</script>
+<div id="app">
+  <!-- 顶栏 -->
+  <header class="topbar" id="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/home" id="brandLink">
+        <img class="brand-logo" src="./icons/icon-192.png" alt="晓林影视">
+        <span class="brand-name" id="brandName">晓林影视</span>
+      </a>
+      <nav class="nav" id="mainNav"></nav>
+      <div class="topbar-right">
+        <div class="searchbox">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M10 2a8 8 0 105.3 14l4.4 4.4 1.4-1.4-4.4-4.4A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>
+          <input id="searchInput" type="search" placeholder="搜索 电影 / 剧集 / 综艺…" autocomplete="off">
+          <button class="search-btn" id="searchBtn" title="搜索" type="button">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.3"/><path d="M15.8 15.8l4.7 4.7"/></svg>
+          </button>
+        </div>
+        <button class="icon-btn" id="voiceBtn" title="语音搜索" aria-label="语音搜索">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M12 14a3 3 0 003-3V6a3 3 0 10-6 0v5a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 006 6.92V21h2v-3.08A7 7 0 0019 11h-2z"/></svg>
+        </button>
+        <button class="icon-btn search-m-btn" id="searchMBtn" title="搜索" aria-label="搜索">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M10 2a8 8 0 105.3 14l4.4 4.4 1.4-1.4-4.4-4.4A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>
+        </button>
+        <button class="icon-btn color-mode-btn" id="colorModeBtn" type="button" title="切换护眼日间 / 沉浸夜间模式（自动记忆）" aria-label="切换日间或夜间模式">
+          <span class="cm-ico" id="colorModeIco">☀️</span>
+          <span class="cm-txt" id="colorModeTxt">护眼日间</span>
+        </button>
+        <div id="userBox" class="user-box"></div>
+        <button class="icon-btn" id="themeBtn" title="配色主题">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M12 3a9 9 0 100 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01a1.5 1.5 0 011.13-2.49H16a5 5 0 005-5c0-4.42-4.03-8-9-8zm-5.5 9a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm3-4a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm5 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm3.5 4a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="theme-pop hidden" id="themePop"></div>
+    <div class="search-pop hidden" id="searchPop"></div>
+  </header>
+
+  <!-- 公告 -->
+  <div class="announce hidden" id="announceBar"><span id="announceText"></span><button id="announceClose">×</button></div>
+
+  <!-- 主内容 -->
+  <main id="view"></main>
+
+  <footer class="footer">
+    <p>本站为影视聚合导航，所有内容均来自互联网，与本站技术无关。</p>
+    <p>Copyright © 2004 - 2026 晓林技术支持——版权所有 ·</p>
+  </footer>
+</div>
+
+<nav class="bottom-tab-bar" id="bottomTabBar" aria-label="移动端底部导航"></nav>
+<div id="toastWrap"></div>
+<button id="backTop" type="button" title="回到顶部" aria-label="回到顶部">
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+    <path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M6 14l6-6 6 6"/>
+  </svg>
+</button>
+
+<script src="./js/api.js?v=20261017v15"></script>
+<script src="./js/player.js?v=20261017v15"></script>
+<script src="./js/app.js?v=20261017v15"></script>
+<script src="./js/tv.js?v=20261017v15"></script>
+</body>
+</html>
